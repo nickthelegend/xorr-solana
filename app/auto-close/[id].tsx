@@ -23,7 +23,6 @@ import {
   ButtonRow,
   Candlestick,
   CloseButton,
-  EmptyState,
   Fill,
   LoadingRows,
   NoteStrip,
@@ -37,6 +36,7 @@ import {
   percent,
   price as fmtPrice,
   radius,
+  signIn,
   size,
   space,
   toCandles,
@@ -44,7 +44,6 @@ import {
   wideProjection,
 } from '@/ui';
 import {
-  lastClose,
   slPnl,
   slPrice,
   slTickPct,
@@ -55,7 +54,9 @@ import {
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
-import { errorText } from '@/data/apiError';
+import { NotSignedIn, errorText, isRetryable } from '@/data/apiError';
+import { chartSeries } from '@/markets/series';
+import { useLiveRead } from '@/markets/useLiveRead';
 
 /** screens.md: the chart region never goes below this, and takes every spare point above it. */
 const CHART_MIN = 230;
@@ -76,14 +77,20 @@ export default function AutoClose() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const goBack = useGoBack();
 
-  // TP/SL are set against the position's OWN market, on live candles. The handoff's static
-  // BTC series meant a user editing a stop on an ETH position was reading a BTC chart.
   const position = useAsync(() => repos.portfolio.position(id!), [id]);
-  const symbol = position.data?.symbol ?? 'BTC';
-  const candles = useAsync(() => repos.markets.candles(symbol, '1H'), [symbol]);
-  // `[o,h,l,c]` on the wire, named fields in the chart set. Memoised off `candles.data`
-  // rather than off a `?? []` default, which is a fresh array on every render.
-  const bars = candles.data?.bars;
+  const p = position.data ?? undefined;
+  // TP/SL are set against the position's OWN market, on live candles. The handoff's static BTC series
+  // meant a user editing a stop on an ETH position was reading a BTC chart — and until the position
+  // had loaded, this still asked for BTC's. No position, no symbol, no chart.
+  const symbol = p?.symbol;
+  const candles = useLiveRead(
+    () => (symbol ? chartSeries(symbol, '1H') : Promise.resolve(null)),
+    [symbol],
+    (s) => s?.feed === 'warming',
+  );
+  // `[o,h,l,c]` on the wire, named fields in the chart set. Memoised off the answer rather than off a
+  // `?? []` default, which is a fresh array on every render.
+  const bars = candles.data?.symbol === symbol ? candles.data?.bars : undefined;
   const series = useMemo(() => toCandles(bars ?? []), [bars]);
 
   const tp = useStore((s) => s.tp);
@@ -111,11 +118,17 @@ export default function AutoClose() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
 
-  // Show what is already armed rather than the app's last local guess. An exit rule is a
-  // live strategy of kind `exit-rules` on this symbol.
+  /*
+   * Show what is already armed rather than the app's last local guess. An exit rule is an `exit-rules`
+   * strategy on this symbol that is running: `live`, or `watch` where nothing can trade.
+   *
+   * Only `live` counted, so a watched rule never showed here and Set armed a second one beside it —
+   * while Portfolio, which reads both states, drew the old one.
+   */
   const strategies = useAsync(() => repos.strategies.list(), []);
   const armed = (strategies.data ?? []).find(
-    (st) => st.kind === 'exit-rules' && st.symbol === symbol && st.state === 'live',
+    (st) =>
+      st.kind === 'exit-rules' && st.symbol === symbol && (st.state === 'live' || st.state === 'watch'),
   );
   const armedParams = (armed?.params ?? {}) as {
     takeProfitPct?: number;
@@ -162,17 +175,29 @@ export default function AutoClose() {
     (armedTp !== undefined && Math.abs(armedTp - tp) > 0.001) ||
     (armedSl !== undefined && Math.abs(armedSl - sl) > 0.001);
 
-  // Everything is anchored to the live mark, not to the handoff's mid of 66,000.
-  const mark = bars && bars.length ? lastClose(bars) : 0;
-  const tpP = tpPrice(tp, mark);
-  const slP = slPrice(sl, mark);
+  /*
+   * Take profit and stop loss are distances from what was paid, because that is what the saved rule measures.
+   *
+   * `planExitRules` sells when the mark is `takeProfitPct` above `entryPrice` or `stopLossPct` below it,
+   * and Portfolio draws the same rule from the entry. This screen drew its markers, its prices and its
+   * "Make / lose" from the live mark instead, and saved the entry — so on a position already up 4%, the
+   * take profit on screen sat 1% above today's price while the rule it saved would sell on the next run.
+   */
+  const entry = p && p.entry > 0 ? p.entry : undefined;
+  const tpP = entry === undefined ? undefined : tpPrice(tp, entry);
+  const slP = entry === undefined ? undefined : slPrice(sl, entry);
+  // What the holding cost, so "make" and "lose" are against what was paid too — not a fixed $2,500 notional.
+  const costBasis = p && entry !== undefined ? p.units * entry : 0;
+  // A trailing stop follows the high from the moment it is set, so its starting point IS the live price.
+  const mark = p && p.mark > 0 ? p.mark : series.length ? series[series.length - 1]!.close : undefined;
   // The WIDE projection — its bounds follow TP/SL so both markers stay in frame.
-  const proj = series.length ? wideProjection(series, tpP, slP) : null;
-  // Size the P&L off the real position, not a fixed $2,500 notional.
-  const notional = position.data?.notional ?? 0;
+  const proj =
+    series.length && tpP !== undefined && slP !== undefined ? wideProjection(series, tpP, slP) : null;
+  // A trailing stop with no price to start from would be saved without its trail. It is not offered.
+  const trailUnpriced = trail > 0 && mark === undefined;
 
   async function save() {
-    if (!id) return;
+    if (!id || !symbol || entry === undefined || trailUnpriced) return;
     setSaving(true);
     setSaveError(undefined);
     try {
@@ -185,7 +210,7 @@ export default function AutoClose() {
         // `planExitRules` sizes itself by looking at the holding, so it commits no daily
         // allowance — a stop that ate into the cap would be a stop the cap could silence.
         params: {
-          entryPrice: position.data?.entry ?? mark,
+          entryPrice: entry,
           takeProfitPct: tp,
           stopLossPct: Math.abs(sl),
           /*
@@ -195,7 +220,7 @@ export default function AutoClose() {
            * but a param that is present and meaningless is the kind of thing a later reader
            * trusts. Absent says what it means.
            */
-          ...(trail > 0 ? { trailPct: trail, peakPrice: mark } : {}),
+          ...(trail > 0 && mark !== undefined ? { trailPct: trail, peakPrice: mark } : {}),
         },
         cadence: 'daily',
         dailyAllocationUsd: 0,
@@ -218,7 +243,7 @@ export default function AutoClose() {
   );
 
   /*
-   * No position, no stop to arm.
+   * No position, no stop to arm — and a failed read is not "no position".
    *
    * The screen rendered its whole ticket for an id that resolves to nothing: `symbol` fell back
    * to `'BTC'` and `notional` to 0, so it drew a live BTC chart with working steppers and an
@@ -226,14 +251,39 @@ export default function AutoClose() {
    * user does not have, from a screen reached by a stale link, a closed position or a mistyped
    * URL. `/position/:id` already answers this correctly; this one is reached the same ways.
    *
-   * Waiting on the fetch is not the same as knowing there is nothing, so only a settled query
-   * with no row says so.
+   * Only the route's own "not found" says the position is gone. An outage or a signed-out visit said
+   * it too, to someone holding the position.
    */
-  if (!position.loading && !position.data) {
+  if (position.error) {
     return (
       <Screen light gutter="sheet">
         {header}
-        <EmptyState text="This position is no longer open, so there is no stop to set on it." />
+        <SheetFailure error={position.error} onRetry={position.reload} />
+      </Screen>
+    );
+  }
+  if (position.data === null) {
+    return (
+      <Screen light gutter="sheet">
+        {header}
+        <SheetNote text="This position is no longer open." />
+      </Screen>
+    );
+  }
+  if (!p) {
+    return (
+      <Screen light gutter="sheet">
+        {header}
+        <LoadingRows count={3} height={size.row} />
+      </Screen>
+    );
+  }
+  if (entry === undefined) {
+    // The rule measures from the entry, and `planExitRules` does nothing without one.
+    return (
+      <Screen light gutter="sheet">
+        {header}
+        <SheetNote text={`No cost is on record for this ${p.symbol}, so there is nothing to measure a stop from.`} />
       </Screen>
     );
   }
@@ -244,11 +294,14 @@ export default function AutoClose() {
 
       {/* THE LAYOUT LAW: flex:1 goes to the chart, never to a spacer. */}
       <Fill style={{ minHeight: CHART_MIN, marginTop: space.s18 }}>
-        {!series.length ? (
-          candles.loading || position.loading ? (
+        {!proj ? (
+          candles.error ? (
+            <SheetFailure error={candles.error} onRetry={candles.reload} />
+          ) : candles.loading ? (
             <LoadingRows count={3} height={size.row} />
           ) : (
-            <EmptyState text={`No live ${symbol} series, so there is nothing to set against.`} />
+            // The rule stands without a chart: it measures from the entry, not from these candles.
+            <SheetNote text={`No chart for ${p.symbol} right now.`} />
           )
         ) : (
           <View
@@ -262,7 +315,7 @@ export default function AutoClose() {
                 left: 0,
                 right: 0,
                 top: 0,
-                height: `${toPct(proj!, tpP)}%`,
+                height: `${toPct(proj, tpP!)}%`,
                 backgroundColor: colors.tpZone,
               }}
             />
@@ -273,31 +326,31 @@ export default function AutoClose() {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                height: `${100 - toPct(proj!, slP)}%`,
+                height: `${100 - toPct(proj, slP!)}%`,
                 backgroundColor: colors.slZone,
               }}
             />
             <Candlestick
               series={series}
-              projection={proj!}
+              projection={proj}
               height={chartH}
               light
-              lastPrice={{ value: mark, label: fmtPrice(mark) }}
+              lastPrice={{ value: series[series.length - 1]!.close, label: fmtPrice(series[series.length - 1]!.close) }}
               lastPriceSide="left"
             />
 
             <MarkerRow
-              topPct={toPct(proj!, tpP)}
+              topPct={toPct(proj, tpP!)}
               height={chartH}
               label="Take Profit"
-              price={fmtPrice(tpP)}
+              price={fmtPrice(tpP!)}
               color={colors.candleUp}
             />
             <MarkerRow
-              topPct={toPct(proj!, slP)}
+              topPct={toPct(proj, slP!)}
               height={chartH}
               label="Stop Loss"
-              price={fmtPrice(slP)}
+              price={fmtPrice(slP!)}
               color={colors.candleDown}
             />
           </View>
@@ -340,15 +393,15 @@ export default function AutoClose() {
         />
       </View>
 
-      {trail > 0 ? (
+      {trail > 0 && mark !== undefined ? (
         <NoteStrip kind="acted" style={{ marginTop: space.s16 }}>
-          {`Follows ${symbol} up and never down. It sells if the price falls ${percent(trail).replace('+', '')} from the highest point reached after this is set — ${fmtPrice(mark * (1 - trail / 100))} if the high stays where it is now.`}
+          {`Sells if ${p.symbol} falls ${percent(trail).replace('+', '')} from its high after this is set: ${fmtPrice(mark * (1 - trail / 100))} at today’s price.`}
         </NoteStrip>
       ) : null}
 
       {clamped ? (
         <NoteStrip kind="risk" style={{ marginTop: space.s16 }}>
-          {`An agent armed this position at ${armedTp !== undefined ? percent(armedTp) : 'no take profit'} / ${armedSl !== undefined ? percent(armedSl) : 'no stop'}, which is outside the range you can set by hand. Setting yours replaces it.`}
+          {`An agent set this at ${armedTp !== undefined ? percent(armedTp) : 'no take profit'} / ${armedSl !== undefined ? percent(armedSl) : 'no stop'}, outside the hand range. Yours replaces it.`}
         </NoteStrip>
       ) : null}
 
@@ -379,6 +432,7 @@ export default function AutoClose() {
             backgroundColor={colors.candleUp}
             color={colors.ink}
             loading={saving}
+            disabled={trailUnpriced}
             onPress={save}
           />
         }
@@ -392,15 +446,57 @@ export default function AutoClose() {
       >
         Make{' '}
         <Text variant="footnote" color={colors.candleUp}>
-          {money(tpPnl(tp, notional))}
+          {money(tpPnl(tp, costBasis))}
         </Text>{' '}
         at TP or lose{' '}
         <Text variant="footnote" color={colors.candleDown}>
-          {money(slPnl(sl, notional))}
+          {money(slPnl(sl, costBasis))}
         </Text>{' '}
         at SL
       </Text>
     </Screen>
+  );
+}
+
+/**
+ * A line in the sheet's own ink.
+ *
+ * `EmptyState` and `ErrorState` draw for the black screens, in white — so on this white sheet "This
+ * position is no longer open" was printed white on white, and nobody could read why nothing was there.
+ */
+function SheetNote({ text }: { text: string }) {
+  return (
+    <View style={{ paddingVertical: space.s30, alignItems: 'center' }}>
+      <Text variant="body" color={colors.sheet.muted} align="center">
+        {text}
+      </Text>
+    </View>
+  );
+}
+
+/** `ErrorState`'s rules — signed out asks for a sign-in, and only a retryable failure offers a retry — in sheet ink. */
+function SheetFailure({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  const signedOut = error instanceof NotSignedIn;
+  return (
+    <View style={{ paddingVertical: space.s30, gap: space.s14, alignItems: 'center' }}>
+      <Text variant="rowPrimary" color={colors.sheet.ink} align="center">
+        {signedOut ? 'Sign in to see this.' : 'That did not load.'}
+      </Text>
+      {signedOut ? null : (
+        <Text variant="secondary" color={colors.sheet.muted} align="center">
+          {errorText(error)}
+        </Text>
+      )}
+      {signedOut || isRetryable(error) ? (
+        <Button
+          label={signedOut ? 'Sign in' : 'Try again'}
+          backgroundColor={colors.cancelBg}
+          color={colors.cancelInk}
+          onPress={signedOut ? signIn : onRetry}
+          testID={signedOut ? 'sign-in' : 'error-retry'}
+        />
+      ) : null}
+    </View>
   );
 }
 

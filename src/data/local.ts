@@ -408,8 +408,20 @@ export const LocalRepositories: Repositories = {
       // this render "could not ask" from the error rather than printing a holding count.
       return api.get<Position[]>('/positions');
     },
+    /*
+     * `null` only for "not in this wallet's book", which the route answers with a 404. A failed read THROWS.
+     *
+     * This swallowed every failure into `null`, so an outage — or a signed-out visit — told someone
+     * holding the position that it was "no longer open", and the screen's error state could never show.
+     * Same repair as `wallet.current()` below.
+     */
     async position(id) {
-      return (await api.get<Position | null>(`/positions/${id}`).catch(() => undefined)) ?? null;
+      try {
+        return (await api.get<Position | null>(`/positions/${encodeURIComponent(id)}`)) ?? null;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
     },
     async sleeves(): Promise<Sleeve[]> {
       // The three sleeves are product config, not measured data — legitimately local.
