@@ -6,6 +6,10 @@
  * contract emitted, indexed by someone else's infrastructure. Two independent records of the same
  * facts is what makes either one worth trusting.
  *
+ * Only when the index is about this deployment, though, which `/graph/health` says and which is
+ * asked first. An index of another contract is somebody else's record: its spends were listed here
+ * as this wallet's, and its empty list read as this wallet having spent nothing.
+ *
  * Amounts are raw token units as strings, because they are `BigInt` in GraphQL and JSON has no such
  * thing. USDC is six decimals, so they are divided by that and labelled — anything else here would
  * be a guess about a token this screen does not resolve.
@@ -19,6 +23,7 @@ import {
   Fill,
   HeaderBar,
   LoadingRows,
+  NoteStrip,
   Screen,
   SheetCard,
   Text,
@@ -29,7 +34,7 @@ import {
 } from '@/ui';
 import { money, shortAddress } from '@/format';
 import { useAsync } from '@/data/useAsync';
-import { system, type GraphSpend } from '@/data/system';
+import { indexDay, system, type GraphSpend } from '@/data/system';
 
 /** The settlement token's decimals. Every `Spend` is denominated in it. */
 const USDC_DECIMALS = 6;
@@ -42,9 +47,11 @@ function usd(raw: string): string {
 export default function GraphSpends() {
   const goBack = useGoBack();
   const { data, loading, error, reload } = useAsync(() => system.graphActivity(), []);
+  const index = useAsync(() => system.graphHealth(), []);
 
   const spends = data?.spends ?? [];
   const daily = data?.daily ?? [];
+  const failed = error ?? index.error;
 
   return (
     <Screen gutter="none">
@@ -56,16 +63,27 @@ export default function GraphSpends() {
       </View>
 
       <Fill style={{ marginTop: space.s16 }}>
-        {error ? (
+        {failed ? (
           <View style={{ paddingHorizontal: space.gutter }}>
-            <ErrorState error={error} onRetry={reload} />
+            <ErrorState
+              error={failed}
+              onRetry={() => {
+                reload();
+                index.reload();
+              }}
+            />
           </View>
-        ) : loading && !data ? (
+        ) : (loading && !data) || (index.loading && !index.data) ? (
           <View style={{ paddingHorizontal: space.gutter }}>
             <LoadingRows count={6} height={size.row} />
           </View>
+        ) : index.data?.indexesThisDeployment === false ? (
+          /* One line in place of the rows: whatever the index holds is another contract's, not this wallet's here. */
+          <View style={{ paddingHorizontal: space.gutter }}>
+            <NoteStrip kind="risk">This index follows a different deployment.</NoteStrip>
+          </View>
         ) : spends.length === 0 ? (
-          <EmptyState text="The subgraph has indexed no spends for this wallet." />
+          <EmptyState text="No spends indexed yet." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -80,23 +98,27 @@ export default function GraphSpends() {
                 <Text variant="footnote" color={colors.ink55}>
                   BY DAY
                 </Text>
-                {daily.slice(0, 7).map((d) => (
-                  <View
-                    key={d.day}
-                    style={{
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      marginTop: space.s8,
-                    }}
-                  >
-                    <Text variant="secondarySm" color={colors.ink65}>
-                      {d.day}
-                    </Text>
-                    <Text variant="secondarySm">
-                      {usd(d.total)} · {d.tradeCount}
-                    </Text>
-                  </View>
-                ))}
+                {daily.slice(0, 7).map((d) => {
+                  const trades = Number(d.tradeCount);
+                  return (
+                    <View
+                      key={d.day}
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        marginTop: space.s8,
+                      }}
+                    >
+                      {/* A date, not the index's day number ("20345"). */}
+                      <Text variant="secondarySm" color={colors.ink65}>
+                        {indexDay(d.day)}
+                      </Text>
+                      <Text variant="secondarySm">
+                        {usd(d.total)} · {trades === 1 ? 'one trade' : `${d.tradeCount} trades`}
+                      </Text>
+                    </View>
+                  );
+                })}
               </SheetCard>
             ) : null}
 

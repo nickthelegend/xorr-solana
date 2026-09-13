@@ -77,9 +77,22 @@ export const LocalRepositories: Repositories = {
        * (silver, crude, the indices) still falls through to its indicative price and keeps the
        * label. The tokenized equities come from a real 1inch route instead, because that is the
        * venue that would actually fill them.
+       *
+       * A quote read that FAILED throws. It was `.catch(() => ({}))`, which turned an outage into
+       * every live instrument at a dash under "no price feed" — and Home, finding nothing up, said
+       * "No gainers today." about a market it never heard from. The sentence is written here
+       * because the transport's own is a status line and a path (`502 Bad Gateway for
+       * /market/quotes?symbols=…`). The equities' probe stays soft: its rows already say "No price"
+       * one at a time, and one venue being slow is not the whole market failing to load.
        */
       const [live, stocks] = await Promise.all([
-        fetchQuotes(allInstruments.map((i) => i.sym)).catch((): Record<string, Quote> => ({})),
+        fetchQuotes(allInstruments.map((i) => i.sym)).catch((e: unknown): Record<string, Quote> => {
+          throw new Error(
+            e instanceof StillWarming
+              ? 'Prices are still on their way. Try again in a moment.'
+              : 'The price feed did not answer.',
+          );
+        }),
         fetchStockQuotes().catch((): Record<string, StockQuote> => ({})),
       ]);
       return assetClasses.map((c) => ({
@@ -404,14 +417,16 @@ export const LocalRepositories: Repositories = {
     },
     async balanceUsd(): Promise<number | null> {
       /*
-       * `null` when the executor could not be reached, and it matters.
+       * A read that failed THROWS, and it matters twice.
        *
        * Returning 0 put "TOTAL VALUE $0.00" on the home screen of a funded wallet whenever the
        * server was down — a specific, confident, wrong number, which is the one thing this app is
-       * not allowed to show. A dash says "I do not know", which is the truth.
+       * not allowed to show. That became `null`, which fixed the number and lost the failure: every
+       * error was swallowed into it, so Assets' "Couldn’t load your balance." could never appear and
+       * no screen could offer a retry. The screen still renders a dash for a balance it does not
+       * have; now it can also say why.
        */
-      const b = await api.get<{ usd: number }>('/wallet/balance').catch(() => undefined);
-      return b ? b.usd : null;
+      return (await api.get<{ usd: number }>('/wallet/balance')).usd;
     },
     async realised() {
       // No fallback. An invented profit figure is the single worst number this app could show.
@@ -427,15 +442,14 @@ export const LocalRepositories: Repositories = {
       }>('/pnl/realised');
     },
     async balance() {
-      const b = await api
-        .get<{
-          usd: number;
-          cashUsd: number;
-          suppliedUsd?: number;
-          holdings?: { symbol: string; units: number; usd: number }[];
-        }>('/wallet/balance')
-        .catch(() => undefined);
-      if (!b) return null;
+      // No catch, for the reason on `balanceUsd`: a failed read reaches the screen as an error, so
+      // "$0.00 supplied · $0.00 idle" and "Nothing is held" are no longer what an outage looks like.
+      const b = await api.get<{
+        usd: number;
+        cashUsd: number;
+        suppliedUsd?: number;
+        holdings?: { symbol: string; units: number; usd: number }[];
+      }>('/wallet/balance');
       return {
         total: b.usd,
         cash: b.cashUsd,
@@ -508,18 +522,22 @@ export const LocalRepositories: Repositories = {
 
   yield: {
     async staking() {
-      // Reads the live USDC supply rate on Aave v3 (Base). No live rate means no rate — quoting
-      // the design's 12.6% would be advertising a yield nobody verified.
-      const remote = await api
-        .get<{
-          symbol: string;
-          estimatedApy: number;
-          feed: 'live';
-          note: string;
-          availableHere?: boolean;
-        }>('/yield/supply')
-        .catch(() => undefined);
-      return remote ?? null;
+      /*
+       * Reads the live USDC supply rate on Aave v3 (Base). No live rate means no rate — quoting
+       * the design's 12.6% would be advertising a yield nobody verified.
+       *
+       * And a rate that could not be READ is an error, not an absence. This swallowed every failure
+       * into `null`, so /rates answered a timeout with "No lending pool here" — a claim about the
+       * chain made from a request that never came back. The executor answers a slow pool with a 503
+       * and a sentence, and that sentence is what the screen now shows, with a retry.
+       */
+      return api.get<{
+        symbol: string;
+        estimatedApy: number;
+        feed: 'live';
+        note: string;
+        availableHere?: boolean;
+      }>('/yield/supply');
     },
   },
 

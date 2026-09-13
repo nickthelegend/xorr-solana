@@ -33,6 +33,7 @@ import {
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { repos } from '@/data';
+import { exportRecords } from '@/data/system';
 import { deliverFile } from '@/export/deliver';
 import { errorText } from '@/data/apiError';
 
@@ -53,17 +54,24 @@ export default function Export() {
     try {
       const body = await get();
       /*
-       * The count, from the file itself. Neither a download nor a share sheet reports what it
-       * received, and "exported" with nothing behind it is the confirmation that hides an empty
-       * file.
+       * The count, from the file itself — its records, not its lines. Neither a download nor a
+       * share sheet reports what it received, and "exported" with nothing behind it is the
+       * confirmation that hides an empty file. Lines were counted: the pretty-printed JSON came out
+       * as a row per field, and the CSVs' footer and totals row were each counted as a record, so an
+       * empty trail said "2 rows".
        */
-      const rows = Math.max(0, body.trim().split('\n').length - 1);
+      const format = filename.endsWith('.json') ? 'json' : 'csv';
+      const rows = exportRecords(body, format);
+      if (rows === undefined) {
+        setProblem('That file did not come back whole.');
+        return;
+      }
       if (rows === 0) {
         setProblem('Nothing to export yet.');
         return;
       }
-      const out = await deliverFile(filename, body, filename.endsWith('.json') ? 'application/json' : 'text/csv');
-      if (out.ok) setDone(`${rows} rows · ${filename}`);
+      const out = await deliverFile(filename, body, format === 'json' ? 'application/json' : 'text/csv');
+      if (out.ok) setDone(`${rows} ${rows === 1 ? 'row' : 'rows'} · ${filename}`);
       else setProblem(out.reason);
     } catch (e) {
       setProblem(errorText(e));
@@ -127,8 +135,9 @@ export default function Export() {
             </Text>
           ) : null}
 
+          {/* The same words /pnl and /disposals use: the file marks the sale and books its gain as zero. */}
           <Text variant="footnote" color={colors.ink55}>
-            A sale with no recorded cost is marked, not guessed.
+            A sale with no recorded cost is marked, and counts as no gain or loss.
           </Text>
         </Fill>
       )}

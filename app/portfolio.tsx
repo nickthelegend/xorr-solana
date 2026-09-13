@@ -5,9 +5,8 @@
  * every open position as a card — the recent price with its entry, target and stop, the trades that
  * built it and why — then profit, cash and earning.
  *
- * The graph is arithmetic on real data, not a stored history: each open position's units times that
- * coin's four-hour closes over the last week, summed. It shows how what is held NOW moved — it does not
- * replay buys and sells, and its caption says exactly that.
+ * The graph is the wallet's own history — what it was worth at each snapshot the executor read from the
+ * chain over the last week (PLAN.md 2.10) — and its caption says how far back that line actually reaches.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -50,10 +49,23 @@ import type { Strategy } from '@/data/types';
 import { driftSentence, holdingDrift } from '@/state/derived';
 
 const GRAPH_H = 150;
-/** A week of four-hour closes for the graph; two days of hourly closes on each card. */
-const GRAPH_TF = '4H' as const;
+/** Two days of hourly closes on each card. */
 const CARD_TF = '1H' as const;
 const CARD_POINTS = 48;
+/** How far back the history must reach before its caption may say "Past week" rather than when it starts. */
+const WEEK_MS = 6.5 * 24 * 60 * 60 * 1000;
+
+/**
+ * What the graph's line covers, in as few words as it takes to be true.
+ *
+ * The history holds what exists, and a wallet a day old has a day of it. "Past week" over a day's line is the
+ * overclaim the old caption made, so a line that starts later says when it starts.
+ */
+function historyCaption(firstAt: number, now = Date.now()): string {
+  return now - firstAt >= WEEK_MS
+    ? 'Past week'
+    : `Since ${new Date(firstAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+}
 /** Below a cent, a holding is left over from a sale rather than held. */
 const DUST_USD = 0.01;
 
@@ -141,31 +153,17 @@ export default function Portfolio() {
   // Dust a sale left behind is not a position: it would read as an open trade worth $0.00.
   const book = useMemo(() => (positions.data ?? []).filter((p) => p.notional >= DUST_USD), [positions.data]);
   const symbolsKey = book.map((p) => p.symbol).join(',');
-  const weekly = useClosesBySymbol(symbolsKey, GRAPH_TF);
   const daily = useClosesBySymbol(symbolsKey, CARD_TF);
 
   /*
-   * The week, summed across the positions whose history arrived. Undefined until every coin has
-   * answered one way or the other. A coin whose history could not be read is left out of the sum AND
-   * out of the caption, rather than silently counted as flat.
+   * The week, as the wallet was actually worth it: the snapshots the executor reads from the chain every fifteen
+   * minutes and at every fill, close and withdrawal (PLAN.md 2.10). This used to be today's units times each coin's
+   * past closes, captioned only "Past week" — a coin bought on Thursday drawn as held all week, and the cash and
+   * savings in the total above left out of the line beneath it.
    */
-  const graph = useMemo<{ points: number[]; symbols: string[] } | undefined>(() => {
-    if (positions.data === undefined) return undefined;
-    if (book.length === 0) return { points: [], symbols: [] };
-    if (book.some((p) => weekly[p.symbol] === undefined)) return undefined;
-    const lines = book
-      .map((p) => ({ symbol: p.symbol, units: p.units, closes: weekly[p.symbol] ?? [] }))
-      .filter((l) => l.closes.length > 1);
-    if (lines.length === 0) return { points: [], symbols: [] };
-    const n = Math.min(...lines.map((l) => l.closes.length));
-    return {
-      points: Array.from({ length: n }, (_, i) =>
-        lines.reduce((sum, l) => sum + l.units * l.closes[l.closes.length - n + i]!, 0),
-      ),
-      symbols: lines.map((l) => l.symbol),
-    };
-  }, [positions.data, book, weekly]);
-  const points = graph?.points ?? [];
+  const history = useAsync(() => system.portfolioHistory('1W'), []);
+  const points = useMemo(() => (history.data?.points ?? []).map((p) => p.totalUsd), [history.data]);
+  const firstAt = history.data?.points[0]?.at;
   const graphDelta = points.length > 1 ? points[points.length - 1]! - points[0]! : 0;
   const graphPct = points.length > 1 && points[0]! > 0 ? (graphDelta / points[0]!) * 100 : 0;
 
@@ -177,9 +175,14 @@ export default function Portfolio() {
     return by;
   }, [runs.data]);
 
-  /* The bot's own words for its latest trade in a symbol, from the audit trail. */
+  /*
+   * The bot's own words for its latest trade in a symbol, from the audit trail — matched as a whole word, because
+   * `includes` let ETH claim "Bought 0.1234 WETH".
+   */
   const whyFor = (symbol: string): string | undefined => {
-    const event = (activity.data ?? []).find((e) => e.kind === 'trade' && e.action.includes(symbol));
+    const event = (activity.data ?? []).find(
+      (e) => e.kind === 'trade' && e.action.split(/[^A-Za-z0-9]+/).includes(symbol),
+    );
     return event ? [event.action, event.detail].filter(Boolean).join('. ') : undefined;
   };
 
@@ -241,12 +244,17 @@ export default function Portfolio() {
         </Rise>
 
         <Rise index={1} style={{ marginTop: space.s18, paddingHorizontal: space.gutter }}>
-          {graph === undefined ? (
+          {history.loading && !history.data ? (
             <Placeholder height={GRAPH_H} style={{ borderRadius: radius.tile }} />
-          ) : graph.points.length > 1 ? (
+          ) : history.error ? (
+            // Said rather than left as a gap: a graph that is simply missing reads as a wallet with no past.
+            <Text variant="footnote" color={colors.ink55}>
+              Couldn’t load the past week.
+            </Text>
+          ) : points.length > 1 && firstAt !== undefined ? (
             <>
               <AreaChart
-                data={graph.points}
+                data={points}
                 height={GRAPH_H}
                 color={graphDelta < 0 ? colors.down : colors.up}
                 grid
@@ -256,7 +264,7 @@ export default function Portfolio() {
                 style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: space.s8 }}
               >
                 <Text variant="footnote" color={colors.ink55}>
-                  Past week
+                  {historyCaption(firstAt)}
                 </Text>
                 <Price variant="footnote" tone={pnlTone(graphDelta)}>
                   {`${signedMoney(graphDelta)} · ${percent(graphPct)}`}
@@ -346,8 +354,11 @@ export default function Portfolio() {
             value={
               positions.data ? (
                 <Price tone={pnlTone(unrealised)}>{signedMoney(unrealised)}</Price>
-              ) : (
+              ) : positions.loading ? (
                 <Placeholder width={80} height={18} />
+              ) : (
+                // A read that failed is a dash, as Closed is: a placeholder that never resolves reads as still coming.
+                <Price>—</Price>
               )
             }
           />

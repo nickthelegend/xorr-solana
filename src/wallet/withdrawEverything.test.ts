@@ -12,7 +12,7 @@ import { encodeFunctionData, erc20Abi, keccak256, maxUint256, parseAbi, toHex, t
 import { privateKeyToAccount } from 'viem/accounts';
 import { ApiError } from '@/data/apiError';
 import type { CloseOutcome, PrepareOutcome, RecordOutcome } from '@/data/withdrawals';
-import { AAVE_V3_POOL, withdrawEverything, type Step, type WithdrawEverythingDeps } from './withdrawEverything';
+import { AAVE_V3_POOL, sellBlocked, withdrawEverything, type Step, type WithdrawEverythingDeps } from './withdrawEverything';
 
 const account = (seed: string) => privateKeyToAccount(keccak256(toHex(seed))).address;
 const OWNER = account('xorr/withdraw-everything/owner');
@@ -116,7 +116,7 @@ describe('withdraw everything', () => {
       `sign ${USDC}`,
       `record ${hash(102)}`,
     ]);
-    expect(out.steps[1]!.lines).toEqual([{ tone: 'done', text: 'Withdrew 125.5 USDC from Aave', txHash: hash(101) }]);
+    expect(out.steps[1]!.lines).toEqual([{ tone: 'done', text: 'Withdrew 125.5 USDC from savings', txHash: hash(101) }]);
     expect(out.steps[2]!.lines).toEqual([{ tone: 'done', text: 'Sent 1420.5 USDC to Cold storage', txHash: hash(102) }]);
   });
 
@@ -252,9 +252,31 @@ describe('withdraw everything', () => {
       const out = await withdrawEverything(deps, quietly);
 
       expect(statuses(out.steps)).toEqual(['sell:done', 'aave:failed', 'send:waiting']);
-      expect(out.steps[1]!.detail).toContain('The Aave withdrawal did not go through');
+      expect(out.steps[1]!.detail).toContain('The savings withdrawal did not go through');
       expect(deps.prepareAll).not.toHaveBeenCalled();
     }
+  });
+
+  it('says savings on the running card, as the plan does, and never the venue the executor named', async () => {
+    const { deps } = harness(() => ({
+      aavePosition: vi.fn(async () => ({
+        suppliedUsd: 0,
+        available: false,
+        reason: `Aave v3 is not deployed at ${AAVE_V3_POOL} on this network.`,
+      })),
+    }));
+    const out = await withdrawEverything(deps, quietly);
+
+    expect(out.steps.map((s) => s.title)).toEqual(['Sell every position', 'Take your USDC out of savings', 'Send your USDC']);
+    expect(out.steps[1]!.detail).toBe('Nothing to take out: savings aren’t available here.');
+    expect(JSON.stringify(out.steps)).not.toMatch(/Aave/);
+  });
+
+  it('reads a preview with no dust fields — a wallet the executor has no row for — without falling over', async () => {
+    const { deps } = harness(() => ({ sellPreview: vi.fn(async () => ({ legs: [], totalUsd: 0 })) }));
+    const out = await withdrawEverything(deps, quietly);
+
+    expect(out.steps[0]).toMatchObject({ status: 'done', detail: 'Nothing to sell.' });
   });
 
   it('stops on a read that failed, with the executor’s sentence rather than a status code', async () => {
@@ -271,5 +293,40 @@ describe('withdraw everything', () => {
     const out = await withdrawEverything(deps, quietly);
     expect(statuses(out.steps)).toEqual(['sell:failed', 'aave:waiting', 'send:waiting']);
     expect(out.steps[0]!.detail).toBe('Could not read your positions from the chain just now.');
+  });
+});
+
+/*
+ * `closePosition` reverts on exactly what `spend` reverts on — the wrong caller, a revoked policy, an expired one
+ * (contracts/src/XorrDelegation.sol). Selling is said to be impossible before the button, in each of those states,
+ * and in no other.
+ */
+describe('selling needs the bot’s permission', () => {
+  const NOW = 1_790_000_000_000;
+  const live = { revoked: false, expiresAt: NOW + 3 * 86_400_000, delegateIsCurrent: true };
+
+  it('claims nothing while the permission has not been read', () => {
+    expect(sellBlocked(undefined, NOW)).toBeUndefined();
+  });
+
+  it('lets a live permission sell — including one from an executor too old to say which key it names', () => {
+    expect(sellBlocked(live, NOW)).toBeUndefined();
+    expect(sellBlocked({ revoked: false, expiresAt: NOW + 1 }, NOW)).toBeUndefined();
+  });
+
+  it('says why, for every state the contract refuses a sale in', () => {
+    expect(sellBlocked(null, NOW)).toBe('Selling needs the bot’s permission, and there is none.');
+    expect(sellBlocked({ ...live, revoked: true }, NOW)).toBe('Selling needs the bot’s permission, and it is stopped.');
+    // `block.timestamp >= expiresAt` reverts, so the deadline itself is already too late.
+    expect(sellBlocked({ ...live, expiresAt: NOW }, NOW)).toBe('Selling needs the bot’s permission, and it has ended.');
+    expect(sellBlocked({ ...live, delegateIsCurrent: false }, NOW)).toBe(
+      'Selling needs the bot’s permission, and it is disconnected.',
+    );
+  });
+
+  it('names a stop before an expiry, because the stop is what someone did', () => {
+    expect(sellBlocked({ ...live, revoked: true, expiresAt: NOW - 1 }, NOW)).toBe(
+      'Selling needs the bot’s permission, and it is stopped.',
+    );
   });
 });

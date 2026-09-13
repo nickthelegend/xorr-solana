@@ -96,7 +96,7 @@ export default function Allocation() {
             <Placeholder height={70} />
           </View>
         ) : !balance.data ? (
-          /* `balance()` answers null when the chain could not be read: that is not an empty wallet. */
+          /* A guard only: `balance()` throws when the chain could not be read, and neither that nor null is an empty wallet. */
           <EmptyState text="The balance could not be read." actionLabel="Try again" onAction={balance.reload} />
         ) : rows.length === 0 || total === 0 ? (
           <EmptyState text="Nothing held yet." />

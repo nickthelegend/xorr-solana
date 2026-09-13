@@ -30,12 +30,33 @@ import {
   space,
 } from '@/ui';
 import { useAsync } from '@/data/useAsync';
+import { errorText } from '@/data/apiError';
 import { system } from '@/data/system';
 
 export default function Catchup() {
   const goBack = useGoBack();
   const { data, loading, error, reload } = useAsync(() => system.catchup(), []);
-  const [acknowledged, setAcknowledged] = React.useState(false);
+  const [seen, setSeen] = React.useState<'no' | 'saving' | 'yes'>('no');
+  const [seenError, setSeenError] = React.useState<string>();
+
+  /*
+   * "Marked as seen" once the executor has marked it, and not before. This flipped the moment it was pressed,
+   * whatever the POST came back with, so a failure showed as done — and was an unhandled rejection besides.
+   */
+  async function markSeen() {
+    setSeen('saving');
+    setSeenError(undefined);
+    try {
+      if ((await system.markCaughtUp()).ok) {
+        setSeen('yes');
+        return;
+      }
+      setSeenError('Not marked. Try again.');
+    } catch (e) {
+      setSeenError(errorText(e));
+    }
+    setSeen('no');
+  }
 
   const entries = data?.entries ?? [];
   const counts = Object.entries(data?.counts ?? {});
@@ -106,14 +127,17 @@ export default function Catchup() {
               Acknowledging is explicit and one-way. Marking things seen as a side effect of
               opening the screen means a glance costs you the record of what you had not read.
             */}
+            {seenError ? (
+              <Text variant="secondarySm" color={colors.down}>
+                {seenError}
+              </Text>
+            ) : null}
             <Button
-              label={acknowledged ? 'Marked as seen' : 'Mark all as seen'}
+              label={seen === 'yes' ? 'Marked as seen' : 'Mark all as seen'}
               variant="ghost"
-              disabled={acknowledged}
-              onPress={() => {
-                setAcknowledged(true);
-                void system.markCaughtUp();
-              }}
+              disabled={seen !== 'no'}
+              loading={seen === 'saving'}
+              onPress={markSeen}
             />
           </ScrollView>
         )}

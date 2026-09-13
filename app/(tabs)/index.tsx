@@ -27,6 +27,7 @@ import {
   Price,
   Row,
   Screen,
+  SignInPrompt,
   Sparkline,
   Text,
   colors,
@@ -42,6 +43,7 @@ import { Rise } from '@/ui/Rise';
 import { RollingNumber } from '@/ui/RollingNumber';
 import { STAGGER } from '@/ui/motion';
 import { repos } from '@/data';
+import { NotSignedIn, isRetryable } from '@/data/apiError';
 import { system, type Limits } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
@@ -96,6 +98,29 @@ function shortAddress(address: string): string {
 
 function isSheetTab(value: string | undefined): value is SheetTab {
   return TABS.some((t) => t.key === value);
+}
+
+/**
+ * A tab whose read failed, said as a failure — with a way to ask again where asking again could answer differently.
+ *
+ * An outage used to pass for a quiet day here: a price read that never came back said "No gainers today.", and a
+ * roster that could not load had nothing behind "Couldn’t load agents." but a dead end. The retry follows the rule
+ * `ErrorState` follows, so a refusal that will answer the same way is not offered as something to keep pressing; its
+ * `testID` keys the press guard, since pressing it unmounts it.
+ */
+function TabFailed({ what, error, onRetry }: { what: string; error: Error; onRetry: () => void }) {
+  // Signed out, nothing failed — nobody had been asked about.
+  if (error instanceof NotSignedIn) return <SignInPrompt />;
+  return (
+    <View style={{ marginTop: space.s16, gap: space.s10 }}>
+      <Text variant="body" color={colors.ink55}>
+        {`Couldn’t load ${what}.`}
+      </Text>
+      {isRetryable(error) ? (
+        <Button label="Try again" variant="ghost" onPress={onRetry} testID={`home-${what}-retry`} />
+      ) : null}
+    </View>
+  );
 }
 
 export default function Home() {
@@ -321,11 +346,20 @@ export default function Home() {
                 );
               })}
             </ScrollView>
-            {/* Whether the agents can act right now, and the way to Safety — a dot, not a card. */}
+            {/*
+              Whether the agents can act right now, and the way to Safety — a dot, not a card. A limits read that failed
+              is a dash: "Not trading" said about a permission nobody read is the claim Safety was rebuilt to stop making.
+            */}
             <Press
               onPress={() => router.push('/safety')}
               accessibilityRole="button"
-              accessibilityLabel={live ? 'Agents can trade. Open Safety.' : 'Agents cannot trade right now. Open Safety.'}
+              accessibilityLabel={
+                live
+                  ? 'Agents can trade. Open Safety.'
+                  : limits.data
+                    ? 'Agents cannot trade right now. Open Safety.'
+                    : 'Couldn’t read whether agents can trade. Open Safety.'
+              }
               style={{
                 marginLeft: 'auto',
                 flexDirection: 'row',
@@ -347,7 +381,7 @@ export default function Home() {
                 <Placeholder width={44} height={12} />
               ) : (
                 <Text variant="secondarySm" color={colors.ink55}>
-                  {live ? 'Live' : killed ? 'Stopped' : 'Not trading'}
+                  {!limits.data ? '—' : live ? 'Live' : killed ? 'Stopped' : 'Not trading'}
                 </Text>
               )}
             </Press>
@@ -364,9 +398,11 @@ export default function Home() {
                     </View>
                   ))}
                 </View>
+              ) : agents.error ? (
+                <TabFailed what="agents" error={agents.error} onRetry={agents.reload} />
               ) : roster.length === 0 ? (
                 <Text variant="body" color={colors.ink55} style={{ marginTop: space.s16 }}>
-                  {agents.error ? 'Couldn’t load agents.' : 'No agents yet.'}
+                  No agents yet.
                 </Text>
               ) : (
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: space.s18, marginTop: space.s18 }}>
@@ -400,9 +436,11 @@ export default function Home() {
             ) : tab === 'gainers' ? (
               classes.loading && !classes.data ? (
                 <LoadingRows count={4} height={size.rowLg} spark />
+              ) : classes.error ? (
+                <TabFailed what="prices" error={classes.error} onRetry={classes.reload} />
               ) : gainers.length === 0 ? (
                 <Text variant="body" color={colors.ink55} style={{ marginTop: space.s16 }}>
-                  {classes.error ? 'Couldn’t load prices.' : 'No gainers today.'}
+                  No gainers today.
                 </Text>
               ) : (
                 gainers.map((g, i) => {
@@ -437,9 +475,7 @@ export default function Home() {
             ) : tab === 'stocks' ? (
               !stocks.data ? (
                 stocks.error ? (
-                  <Text variant="body" color={colors.ink55} style={{ marginTop: space.s16 }}>
-                    Couldn’t load stocks.
-                  </Text>
+                  <TabFailed what="stocks" error={stocks.error} onRetry={stocks.reload} />
                 ) : (
                   <LoadingRows count={4} height={size.rowLg} />
                 )
@@ -472,12 +508,15 @@ export default function Home() {
               )
             ) : !futures.data ? (
               futures.error ? (
-                <Text variant="body" color={colors.ink55} style={{ marginTop: space.s16 }}>
-                  Couldn’t load futures.
-                </Text>
+                <TabFailed what="futures" error={futures.error} onRetry={futures.reload} />
               ) : (
                 <LoadingRows count={4} height={size.rowLg} />
               )
+            ) : perpRows.length === 0 ? (
+              /* The venue answered with no live contracts: a sentence, not an empty sheet over an "All futures" of nothing. */
+              <Text variant="body" color={colors.ink55} style={{ marginTop: space.s16 }}>
+                No futures right now.
+              </Text>
             ) : (
               <>
                 {perpRows.map((m, i) => (

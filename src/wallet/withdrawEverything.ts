@@ -34,6 +34,7 @@ import {
 } from 'viem';
 import { money, quantity, shortAddress } from '@/format';
 import { errorText } from '@/data/apiError';
+import { expiryState } from '@/state/derived';
 import { humanWalletError } from './walletError';
 import type {
   AavePosition,
@@ -61,15 +62,41 @@ export type StepStatus = 'waiting' | 'running' | 'done' | 'failed';
 export type StepLine = { tone: 'done' | 'left' | 'failed'; text: string; txHash?: string };
 export type Step = { key: StepKey; title: string; status: StepStatus; detail?: string; lines: StepLine[] };
 
+/* The running card's titles are the plan's, word for word: the plan said "savings" while this said "Aave". */
 const TITLES: Readonly<Record<StepKey, string>> = {
   sell: 'Sell every position',
-  aave: 'Take your USDC out of Aave',
+  aave: 'Take your USDC out of savings',
   send: 'Send your USDC',
 };
 const ORDER: readonly StepKey[] = ['sell', 'aave', 'send'];
 
 export function initialSteps(): Step[] {
   return ORDER.map((key) => ({ key, title: TITLES[key], status: 'waiting', lines: [] }));
+}
+
+/**
+ * Why the bot cannot sell right now — or undefined when it can, or when the permission has not been read.
+ *
+ * A sale goes through `closePosition`, which checks what `spend` checks (`contracts/src/XorrDelegation.sol`):
+ * the caller is the delegate the owner named, the policy is not revoked, and it has not expired. "Stop all
+ * agents" revokes it, so after a stop every sale reverts — and "withdraw everything" found that out one
+ * transaction into the run, and "sell everything" one leg at a time. It is said before the button instead.
+ *
+ * From the permission as the chain answers it, never the stored `killed` flag, which drifts from the chain
+ * whenever anything happens outside this session — the reason Safety reads `revoked` whenever there is a
+ * permission to read. Undefined claims nothing: a read that has not landed is not a stopped permission.
+ */
+export function sellBlocked(
+  permission: { revoked: boolean; expiresAt?: number; delegateIsCurrent?: boolean } | null | undefined,
+  now: number = Date.now(),
+): string | undefined {
+  if (permission === undefined) return undefined;
+  if (permission === null) return 'Selling needs the bot’s permission, and there is none.';
+  if (permission.revoked) return 'Selling needs the bot’s permission, and it is stopped.';
+  if (expiryState(permission.expiresAt, now) === 'expired') return 'Selling needs the bot’s permission, and it has ended.';
+  // A grant to a key the executor no longer signs with: `closePosition` refuses it as `NotDelegate`.
+  if (permission.delegateIsCurrent === false) return 'Selling needs the bot’s permission, and it is disconnected.';
+  return undefined;
 }
 
 export type WithdrawEverythingDeps = {
@@ -96,19 +123,23 @@ function tryDecode<T>(decode: () => T): T | undefined {
   }
 }
 
-/** Why an Aave exit must not be signed, or undefined when it is exactly the exit asked for. */
+/**
+ * Why an Aave exit must not be signed, or undefined when it is exactly the exit asked for.
+ *
+ * Worded as savings, the plan's word: these sentences are shown on the running card (PLAN.md O3).
+ */
 export function aaveExitProblem(call: AaveWithdrawCall, owner: Address): string | undefined {
   if (!isAddress(call.to) || !isAddressEqual(call.to, AAVE_V3_POOL)) {
-    return `The Aave withdrawal was addressed to ${call.to}, not the Aave pool, so it was not signed.`;
+    return `The savings withdrawal was addressed to ${call.to}, not the savings pool, so it was not signed.`;
   }
   const args = tryDecode(() => decodeFunctionData({ abi: POOL_ABI, data: call.data }).args);
-  if (!args) return 'The Aave withdrawal did not decode as a withdrawal, so it was not signed.';
+  if (!args) return 'The savings withdrawal did not decode as a withdrawal, so it was not signed.';
   const [, amount, to] = args;
   if (!isAddressEqual(to, owner)) {
-    return `The Aave withdrawal would have paid ${to}, not your wallet, so it was not signed.`;
+    return `The savings withdrawal would have paid ${to}, not your wallet, so it was not signed.`;
   }
   if (amount !== maxUint256) {
-    return 'The Aave withdrawal was for part of your position, not all of it, so it was not signed.';
+    return 'The savings withdrawal was for part of your savings, not all of it, so it was not signed.';
   }
   return undefined;
 }
@@ -153,9 +184,12 @@ function unconfirmed(recorded: RecordOutcome, what: string): string | undefined 
 
 async function sell(deps: WithdrawEverythingDeps, note: Note): Promise<Outcome> {
   const preview = await deps.sellPreview();
-  const dust = preview.skipped.length
-    ? ` ${preview.skipped.join(', ')} ${preview.skipped.length === 1 ? 'stays' : 'stay'}: worth under ${money(preview.dustBelowUsd)}, less than the gas to sell.`
-    : '';
+  // Both absent for a wallet the executor has no row for — which has nothing to leave behind.
+  const skipped = preview.skipped ?? [];
+  const dust =
+    skipped.length > 0 && preview.dustBelowUsd !== undefined
+      ? ` ${skipped.join(', ')} ${skipped.length === 1 ? 'stays' : 'stay'}: worth under ${money(preview.dustBelowUsd)}, less than the gas to sell.`
+      : '';
   if (preview.legs.length === 0) return { ok: true, detail: `Nothing to sell.${dust}` };
 
   let sold = 0;
@@ -181,9 +215,10 @@ async function sell(deps: WithdrawEverythingDeps, note: Note): Promise<Outcome> 
 async function exitAave(deps: WithdrawEverythingDeps, note: Note): Promise<Outcome> {
   const position = await deps.aavePosition();
   if (!position.available) {
-    return { ok: true, detail: `Nothing to take out. ${position.reason ?? 'There is no Aave pool on this chain.'}` };
+    // Not the executor's `reason`, which names the pool and its address: the card says savings.
+    return { ok: true, detail: 'Nothing to take out: savings aren’t available here.' };
   }
-  if (!(position.suppliedUsd > 0)) return { ok: true, detail: 'Nothing supplied to Aave.' };
+  if (!(position.suppliedUsd > 0)) return { ok: true, detail: 'Nothing in savings.' };
 
   const call = await deps.aaveWithdrawCall();
   const problem = aaveExitProblem(call, deps.owner);
@@ -191,11 +226,11 @@ async function exitAave(deps: WithdrawEverythingDeps, note: Note): Promise<Outco
 
   const hash = await signed(deps, call.to as Address, call.data);
   const recorded = await deps.record(hash);
-  const failed = unconfirmed(recorded, 'The Aave withdrawal');
+  const failed = unconfirmed(recorded, 'The savings withdrawal');
   if (failed || recorded.status !== 'confirmed') return { ok: false, detail: failed ?? '' };
 
   const amount = recorded.aave ? `${recorded.aave.amount} USDC` : money(position.suppliedUsd);
-  note({ tone: 'done', text: `Withdrew ${amount} from Aave`, txHash: hash });
+  note({ tone: 'done', text: `Withdrew ${amount} from savings`, txHash: hash });
   return { ok: true, detail: 'Back in your wallet.' };
 }
 

@@ -24,17 +24,17 @@ import {
   Text,
   colors,
   money,
-  percent,
   radius,
   size,
   space,
   SignInPrompt,
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
-import { api } from '@/data/api';
+import { percent } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
-import { useAaveWithdraw, type YieldPosition } from '@/defi/useAaveWithdraw';
+import { withdrawals } from '@/data/withdrawals';
+import { useAaveWithdraw } from '@/defi/useAaveWithdraw';
 
 /** Quick fractions of the position, plus everything. */
 const PORTIONS = [0.25, 0.5, 1] as const;
@@ -47,18 +47,17 @@ export default function Yield() {
   const [nonce, setNonce] = useState(0);
   const { withdraw, busy, error } = useAaveWithdraw();
 
-  const pos = useAsync(() => api.get<YieldPosition>('/yield/position'), [nonce]);
+  // `AavePosition`, the one type for this endpoint — the second one, here, promised an `apy` the executor does not always send.
+  const pos = useAsync(() => withdrawals.aavePosition(), [nonce]);
   const signedOut = useSignedOut();
   const p = pos.data;
   const supplied = p?.suppliedUsd ?? 0;
   const amount = supplied * portion;
 
   const submit = useCallback(async () => {
-    // A full withdrawal asks for "all of it" rather than a number: aUSDC accrues every
+    // A full withdrawal asks for "all of it" — `null` — rather than a number: aUSDC accrues every
     // second, so any figure read a moment ago already leaves dust behind.
-    const hash = await withdraw(portion === 1 ? (null as unknown as number) : amount).catch(
-      () => undefined,
-    );
+    const hash = await withdraw(portion === 1 ? null : amount).catch(() => undefined);
     if (hash) {
       setTxHash(hash);
       setNonce((n) => n + 1);
@@ -103,15 +102,19 @@ export default function Yield() {
             </SheetCard>
           ) : p && !p.available ? (
             <SheetCard borderRadius={radius.note} padding={space.s16}>
-              <Text variant="rowPrimary">No lending pool here.</Text>
-              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
-                {p.reason ?? 'Not available on this network.'}
-              </Text>
-              {/* "Nothing supplied" and "nowhere to supply" are different, and the
-                  difference matters — the second one is not something the user did. */}
-              <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
-                Your balance is unaffected.
-              </Text>
+              {/*
+                Which absence it is decides the sentence. The executor's `reason` is not printed: it names the
+                pool and its address, or is the identifier `no_wallet` — and "No lending pool here" said to a
+                wallet the executor has no row for is a claim about the chain made from a missing account.
+              */}
+              <Text variant="rowPrimary">{p.reason === 'no_wallet' ? 'No wallet yet.' : 'No lending pool here.'}</Text>
+              {p.reason === 'no_wallet' ? null : (
+                /* "Nothing supplied" and "nowhere to supply" are different, and the
+                   difference matters — the second one is not something the user did. */
+                <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
+                  Your balance is unaffected.
+                </Text>
+              )}
             </SheetCard>
           ) : p ? (
             <>
@@ -120,9 +123,12 @@ export default function Yield() {
                 <Price variant="heroAmount" style={{ marginTop: space.s6 }}>
                   {money(supplied)}
                 </Price>
-                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                  {percent(p.apy * 100, 2).replace('+', '')} a year, paid into the balance.
-                </Text>
+                {/* No rate line without a rate: an absent `apy` times a hundred printed "NaN% a year". */}
+                {p.apy !== undefined && Number.isFinite(p.apy) ? (
+                  <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
+                    {percent(p.apy * 100, { digits: 2, explicitSign: false })} a year, paid into the balance.
+                  </Text>
+                ) : null}
               </SheetCard>
 
               {supplied <= 0 ? (

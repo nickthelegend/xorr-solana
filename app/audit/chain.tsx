@@ -99,12 +99,12 @@ export default function AuditChain() {
               <Text variant="secondary" color={colors.ink65}>
                 {/*
                   Why there is no "repair" button, said out loud. It is the most obvious missing
-                  affordance on this screen and its absence is the point.
+                  affordance on this screen and its absence is the point: recomputing the hashes would
+                  make the trail verify again while proving nothing, which is exactly what an edited
+                  trail would want, and a fork stays forked because the trail is append-only. One line
+                  on the screen (PLAN.md O3); the reasons live here.
                 */}
-                A broken chain cannot be repaired, only reported. Recomputing the hashes would make
-                the trail verify again while proving nothing — which is exactly what an edited trail
-                would want to do. A fork stays forked for the same reason: the trail is append-only,
-                so there is no write that could straighten it.
+                A broken chain can be reported, never repaired.
               </Text>
             </SheetCard>
 
@@ -115,13 +115,12 @@ export default function AuditChain() {
               Base contract at a named block, readable without our cooperation.
             */}
             <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
+              {/* No network named here (PLAN.md O3): which chain holds the anchor is the anchor screen's to say. */}
               <Text variant="secondary" color={colors.ink65}>
-                Everything above is our own code re-checking our own rows. The head of this chain is
-                also published to Base, so the same claim can be read from somewhere we do not
-                control.
+                That check is ours. The latest hash is also on chain, where anyone can read it.
               </Text>
               <Button
-                label="What Base holds"
+                label="See it on chain"
                 variant="ghost"
                 onPress={() => router.push('/audit/anchor')}
                 style={{ marginTop: space.s12 }}

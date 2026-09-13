@@ -5,9 +5,12 @@
  * a different number and the only one that is real — an unrealised gain is a price, and a realised
  * one is money that moved.
  *
- * `basisIncomplete` is surfaced per row rather than hidden. Some of what was sold has no recorded
- * cost, which makes the figure understate the outcome, and a total that quietly includes those
- * rows would be a number nobody could reconcile.
+ * `basisIncomplete` is surfaced per row rather than hidden. A sale with no recorded cost is booked
+ * as no gain or loss — `server/src/positions/index.ts` leaves its realised figure at zero — so the
+ * total leaves that sale's real outcome out, whichever way it went, and a total that did not say so
+ * would be a number nobody could reconcile. This said "understates", which holds only when the
+ * unknown cost was below the price; `/disposals` said "upper bound", which holds only when it was
+ * above. All three screens now say what the executor does.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
@@ -70,8 +73,8 @@ export default function Pnl() {
                     disclaimer that reassures nobody and helps nobody.
                   */}
                   {incomplete === 1
-                    ? 'One symbol had a sale with no recorded cost, so this understates the outcome.'
-                    : `${incomplete} symbols had sales with no recorded cost, so this understates the outcome.`}
+                    ? 'One symbol had a sale with no recorded cost, counted as no gain or loss.'
+                    : `${incomplete} symbols had sales with no recorded cost, counted as no gain or loss.`}
                 </Text>
               ) : null}
             </View>

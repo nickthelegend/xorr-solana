@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 import {
   BackButton,
   Button,
+  EmptyState,
   ErrorState,
   Fill,
   LoadingRows,
@@ -72,6 +73,9 @@ export default function Briefing() {
           <LoadingRows count={3} height={110} />
         ) : error ? (
           <ErrorState error={error} onRetry={reload} />
+        ) : (data ?? []).length === 0 ? (
+          /* The feed answered with nothing. A blank area under the header read as still loading. */
+          <EmptyState text="No headlines right now." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}

@@ -5,9 +5,14 @@
  * ever showed it as a consequence — a strategy that came back `daily_cap` with no way to see how
  * close it was. A limit you cannot watch approaching is a limit you only meet by surprise.
  *
- * The bar is a proportion, not a decoration: it fills by `spent / cap`, so the gap between the fill
- * and the end is the money still available today. Nothing here is animated except that width, which
- * is the one thing on screen that is genuinely a quantity changing.
+ * The bar is a proportion, not a decoration: it fills by the spend that governs, so the gap between
+ * the fill and the end is the money still available today. Nothing here is animated except that
+ * width, which is the one thing on screen that is genuinely a quantity changing.
+ *
+ * What is left, the bar and the spend under it come from one basis. The cap is enforced twice — by
+ * the contract, and against the executor's own tally — and `/limits` sends the stricter remainder
+ * beside the contract's spend. Printed side by side those read "$908.05 spent" and "$1,855.95" left
+ * under a $2,810 cap: $46 that neither number accounted for. See `limitsView`.
  */
 import React from 'react';
 import { View } from 'react-native';
@@ -26,7 +31,7 @@ import {
 } from '@/ui';
 import { money } from '@/format';
 import { useAsync } from '@/data/useAsync';
-import { system } from '@/data/system';
+import { limitsView, system } from '@/data/system';
 import { expiryState } from '@/state/derived';
 
 /** The spend bar. Tall enough to read as a quantity, short enough not to read as a control. */
@@ -36,15 +41,14 @@ export default function Limits() {
   const goBack = useGoBack();
   const { data, loading, error, reload } = useAsync(() => system.limits(), []);
 
-  /*
-   * Guarded, because a cap of zero is a real state — a revoked or never-granted permission — and
-   * `spent / 0` is Infinity, which renders as a full bar and says the opposite of the truth.
-   */
-  const fraction =
-    data && data.dailyCapUsd > 0 ? Math.min(1, data.spentTodayUsd / data.dailyCapUsd) : 0;
-
   /** Not revoked and still unable to spend: the permission reached the end date the user set. */
   const expired = expiryState(data?.expiresAt) === 'expired';
+
+  /*
+   * One basis for the figure, the bar and the words under it: the remainder the next trade meets. A cap of zero — a
+   * revoked or never-granted permission — draws an empty bar rather than `spent / 0`, which is Infinity and drew full.
+   */
+  const view = data ? limitsView(data, expired) : undefined;
 
   return (
     <Screen>
@@ -58,7 +62,7 @@ export default function Limits() {
             <Placeholder height={140} />
             <Placeholder height={86} />
           </View>
-        ) : !data ? null : (
+        ) : !data || !view ? null : (
           <>
             <SheetCard bordered borderRadius={radius.panel} padding={space.s18}>
               <Text variant="footnote" color={colors.ink55}>
@@ -84,7 +88,7 @@ export default function Limits() {
                     ? 'Permission is off'
                     : expired
                       ? 'Permission has ended'
-                      : money(Math.max(0, data.remainingUsd))}
+                      : money(view.left)}
               </Text>
 
               {/*
@@ -107,10 +111,10 @@ export default function Limits() {
               >
                 <View
                   style={{
-                    width: `${fraction * 100}%`,
+                    width: `${view.fraction * 100}%`,
                     height: '100%',
                     borderRadius: BAR_H / 2,
-                    backgroundColor: fraction >= 1 ? colors.down : colors.ink,
+                    backgroundColor: view.fraction >= 1 ? colors.down : colors.ink,
                   }}
                 />
               </View>
@@ -122,13 +126,19 @@ export default function Limits() {
                   marginTop: space.s10,
                 }}
               >
+                {/* Where the two tallies differ there is no spend figure that adds up, so none is printed. */}
                 <Text variant="secondarySm" color={colors.ink55}>
-                  {money(data.spentTodayUsd)} spent
+                  {view.agree ? `${money(view.spent)} spent` : ''}
                 </Text>
                 <Text variant="secondarySm" color={colors.ink55}>
                   {money(data.dailyCapUsd)} cap
                 </Text>
               </View>
+              {view.agree ? null : (
+                <Text variant="secondarySm" color={colors.warn} style={{ marginTop: space.s8 }}>
+                  Our count and the contract’s differ. The stricter one applies.
+                </Text>
+              )}
             </SheetCard>
 
             <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>

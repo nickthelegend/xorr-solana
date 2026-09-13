@@ -3,8 +3,12 @@
  *
  * A push can be missed, dismissed, or muted. The inbox is where the thing the push was
  * about still lives, and every row deep-links to the same place the notification would have.
+ *
+ * Only those rows. It listed the whole audit trail — strategies created, runs with nothing to do,
+ * watched runs that "would have" bought — and sent whatever it could not place to Alerts.
+ * `interruptionFor` keeps the rows a push went out with, by the executor's own wording.
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -27,18 +31,9 @@ import { activityDot } from '@/state/derived';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { useRefreshControl } from '@/ui/useRefreshControl';
-import { routeFor, type AlertKind } from '@/notifications/routes';
+import { interruptionFor, routeFor } from '@/notifications/routes';
 
 const DOT = 8;
-
-/** Which alert an audit row corresponds to, so a tap lands where the push would have. */
-function kindFor(action: string, kind: string): AlertKind {
-  if (/proposal/i.test(action)) return 'proposal-awaiting';
-  if (/skipped|blocked|could not/i.test(action)) return 'strategy-blocked';
-  if (/bought|sold|filled/i.test(action)) return 'dca-executed';
-  if (kind === 'risk') return 'daily-cap';
-  return 'price';
-}
 
 export default function Inbox() {
   const router = useRouter();
@@ -47,6 +42,16 @@ export default function Inbox() {
   const refresh = useRefreshControl(reload);
   const signedOut = useSignedOut();
 
+  /* Each row with the push it went out with; a row that sent none is a record, and Activity has it. */
+  const rows = useMemo(
+    () =>
+      (data ?? []).flatMap((event) => {
+        const kind = interruptionFor(event);
+        return kind ? [{ event, route: routeFor(kind) }] : [];
+      }),
+    [data],
+  );
+
   return (
     <Screen>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8 }}>
@@ -54,7 +59,7 @@ export default function Inbox() {
         <Text variant="screenTitle">Inbox</Text>
       </View>
       <Text variant="secondary" style={{ marginTop: space.s10 }}>
-        Everything the bot flagged for you.
+        What would have interrupted you.
       </Text>
 
       <Fill style={{ marginTop: space.s14 }}>
@@ -65,7 +70,7 @@ export default function Inbox() {
         ) : error && !data ? (
           /* An inbox that could not be read is not an empty one. It used to say "Nothing to catch up on". */
           <ErrorState error={error} onRetry={reload} />
-        ) : (data ?? []).length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
             text="Nothing needs you."
             actionLabel="What the bot can do"
@@ -73,23 +78,23 @@ export default function Inbox() {
           />
         ) : (
           <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>
-            {(data ?? []).map((r) => (
+            {rows.map(({ event, route }) => (
               <Row
-                key={r.id}
+                key={event.id}
                 left={
                   <View
                     style={{
                       width: DOT,
                       height: DOT,
                       borderRadius: radius.full,
-                      backgroundColor: noteDotColor[activityDot(r.kind)],
+                      backgroundColor: noteDotColor[activityDot(event.kind)],
                     }}
                   />
                 }
-                title={r.action}
-                secondary={`${r.detail} · ${r.t}`}
+                title={event.action}
+                secondary={`${event.detail} · ${event.t}`}
                 height={68}
-                onPress={() => router.push(routeFor(kindFor(r.action, r.kind)) as never)}
+                onPress={() => router.push(route as never)}
               />
             ))}
           </ScrollView>

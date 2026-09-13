@@ -39,7 +39,15 @@ export default function GraphHealth() {
 
   const headDetail = health.data?.dependencies.find((d) => d.name === 'rpc')?.detail ?? '';
   const head = Number(/block (\d+)/.exec(headDetail)?.[1] ?? NaN);
-  const behind = graph.data && Number.isFinite(head) ? head - graph.data.block : null;
+  /*
+   * Like with like. The head is a block on this build's chain; the index's block is one on whatever network the index
+   * follows. On the fork build that is Sepolia, millions of blocks from Base, and the difference was printed as a lag.
+   * Blocks are compared only for an index of this deployment's own contract — which cannot be on a fork or a local
+   * node, since nothing indexes those.
+   */
+  const comparable =
+    graph.data?.indexesThisDeployment === true && health.data !== undefined && !/fork|local/i.test(health.data.chain);
+  const behind = graph.data && comparable && Number.isFinite(head) ? head - graph.data.block : null;
 
   return (
     <Screen>
@@ -70,13 +78,16 @@ export default function GraphHealth() {
                 Two different facts, kept apart. A subgraph can be error-free and badly behind, and
                 that is the failure that actually happens.
               */}
-              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
-                {behind === null
-                  ? 'Cannot compare to the chain head right now.'
-                  : behind <= 1
-                    ? 'Level with the chain head.'
-                    : `${behind.toLocaleString('en-US')} blocks behind the head.`}
-              </Text>
+              {/* No lag at all for another deployment's index: the line below says whose it is instead. */}
+              {graph.data.indexesThisDeployment === false ? null : (
+                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
+                  {behind === null
+                    ? 'Cannot compare to the chain head right now.'
+                    : behind <= 1
+                      ? 'Level with the chain head.'
+                      : `${behind.toLocaleString('en-US')} blocks behind the head.`}
+                </Text>
+              )}
               {/*
                 Whether any of the above is about THIS deployment.
                 
@@ -91,7 +102,10 @@ export default function GraphHealth() {
               */}
               {graph.data.indexesThisDeployment === false ? (
                 <Text variant="secondarySm" color={colors.warn} style={{ marginTop: space.s10 }}>
-                  {`This index covers ${shortAddress(graph.data.indexedDelegation)}, and this build trades through ${shortAddress(graph.data.activeDelegation)}. Everything above is true of the index and none of it describes this deployment — the contract is the authority here, not the index.`}
+                  {/* Both addresses only when both were sent: an unset one would print as a lone minus sign. */}
+                  {graph.data.indexedDelegation && graph.data.activeDelegation
+                    ? `This index follows ${shortAddress(graph.data.indexedDelegation)}, not this deployment’s ${shortAddress(graph.data.activeDelegation)}.`
+                    : 'This index follows a different deployment.'}
                 </Text>
               ) : null}
             </SheetCard>

@@ -39,17 +39,21 @@ import {
   SignInPrompt,
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
+import { repos } from '@/data';
 import { api } from '@/data/api';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
+import { useStore } from '@/state/store';
+import { sellBlocked } from '@/wallet/withdrawEverything';
 
 type Leg = { symbol: string; units: number; usd: number };
+/* The last three are absent for a wallet the executor has no row for, which has only `legs` and `totalUsd`. */
 type Preview = {
   legs: Leg[];
   totalUsd: number;
-  dustBelowUsd: number;
-  skipped: string[];
-  slippagePct: number;
+  dustBelowUsd?: number;
+  skipped?: string[];
+  slippagePct?: number;
 };
 type ResultLeg = Leg & { status: 'sold' | 'failed' | 'skipped'; detail: string; explorer?: string };
 type Result = { legs: ResultLeg[]; sold: number; failed: number };
@@ -62,6 +66,14 @@ export default function Flatten() {
 
   const preview = useAsync(() => api.get<Preview>('/panic/preview'), []);
   const signedOut = useSignedOut();
+  /*
+   * Whether the bot can sell at all. Every leg is a `closePosition`, which reverts on a revoked or expired permission
+   * (XorrDelegation.sol), so after "Stop all agents" this button could only fail. The chain is asked here; the store's
+   * copy, from whatever this session last read, stands in until it answers, and nothing read yet is no claim.
+   */
+  const permission = useAsync(() => repos.wallet.delegation(), []);
+  const storedPermission = useStore((s) => s.delegation);
+  const blocked = sellBlocked(permission.data !== undefined ? permission.data : (storedPermission ?? undefined));
 
   const flatten = useCallback(async () => {
     setBusy(true);
@@ -126,9 +138,11 @@ export default function Flatten() {
           ) : nothingToDo ? (
             <SheetCard borderRadius={radius.note} padding={space.s16}>
               <Text variant="rowPrimary">Nothing to sell.</Text>
-              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
-                No positions above {money(p.dustBelowUsd)}. It is already cash.
-              </Text>
+              {p.dustBelowUsd !== undefined ? (
+                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
+                  No positions above {money(p.dustBelowUsd)}. It is already cash.
+                </Text>
+              ) : null}
             </SheetCard>
           ) : p ? (
             <>
@@ -182,10 +196,12 @@ export default function Flatten() {
                 leftover $0.40 of something looks like the flatten failed.
               */}
               <View style={{ marginTop: space.s14, gap: space.s8 }}>
-                <Text variant="secondarySm" color={colors.ink55}>
-                  Market orders, up to {p.slippagePct}% slippage, so the exit fills.
-                </Text>
-                {p.skipped.length > 0 ? (
+                {p.slippagePct !== undefined ? (
+                  <Text variant="secondarySm" color={colors.ink55}>
+                    Market orders, up to {p.slippagePct}% slippage, so the exit fills.
+                  </Text>
+                ) : null}
+                {p.skipped && p.skipped.length > 0 && p.dustBelowUsd !== undefined ? (
                   <Text variant="secondarySm" color={colors.ink55}>
                     Leaving {p.skipped.join(', ')}: under {money(p.dustBelowUsd)}, not worth the gas.
                   </Text>
@@ -205,15 +221,23 @@ export default function Flatten() {
       {result ? (
         <Button label="Done" height={size.buttonLg} onPress={() => goBack()} />
       ) : (
-        <Button
-          label={p && p.legs.length > 0 ? `Sell ${money(p.totalUsd)} into USDC` : 'Sell everything'}
-          variant="destructive"
-          height={size.buttonLg}
-          // Not on a failed preview: a sale nobody could show you first is the dare this screen exists to refuse.
-          disabled={nothingToDo || preview.loading || Boolean(preview.error)}
-          loading={busy}
-          onPress={flatten}
-        />
+        <>
+          {/* Said before the button that it switches off, not after four sales that each revert. */}
+          {blocked && !nothingToDo ? (
+            <Text variant="secondarySm" color={colors.warn} style={{ marginBottom: space.s10 }}>
+              {blocked}
+            </Text>
+          ) : null}
+          <Button
+            label={p && p.legs.length > 0 ? `Sell ${money(p.totalUsd)} into USDC` : 'Sell everything'}
+            variant="destructive"
+            height={size.buttonLg}
+            // Not on a failed preview: a sale nobody could show you first is the dare this screen exists to refuse.
+            disabled={nothingToDo || preview.loading || Boolean(preview.error) || Boolean(blocked)}
+            loading={busy}
+            onPress={flatten}
+          />
+        </>
       )}
       <Text
         variant="footnote"

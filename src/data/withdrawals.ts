@@ -78,12 +78,12 @@ export type RecordOutcome =
   | { status: 'unknown'; detail: string }
   | Refusal;
 
-/** What selling everything would sell (`/panic/preview`). */
+/** What selling everything would sell (`/panic/preview`). A wallet the executor has no row for gets only the first two. */
 export type SellPreview = {
   legs: { symbol: string; units: number; usd: number }[];
   totalUsd: number;
-  dustBelowUsd: number;
-  skipped: string[];
+  dustBelowUsd?: number;
+  skipped?: string[];
 };
 
 /** One whole position sold through the permission (`/positions/close`). A `no_wallet` refusal carries no detail. */
@@ -92,8 +92,24 @@ export type CloseOutcome =
   | { status: 'blocked'; reason: string; detail?: string }
   | { status: 'failed'; symbol?: string; error: string };
 
-/** What this wallet has in Aave (`/yield/position`). `reason` says why `available` is false. */
-export type AavePosition = { suppliedUsd: number; available: boolean; reason?: string; pool?: string; aToken?: string };
+/**
+ * What this wallet has in savings (`/yield/position`) — the one type for this endpoint.
+ *
+ * There were two, and they disagreed: `useAaveWithdraw` declared `apy` always present, so Yield multiplied
+ * it by a hundred and a response without it read "NaN% a year". The executor sends `apy` only once it has
+ * read the reserve — never for a wallet it has no row for — and says in `reason` why `available` is false.
+ */
+export type AavePosition = {
+  suppliedUsd: number;
+  available: boolean;
+  /** A fraction, not points: 0.0388 is 3.88%. */
+  apy?: number;
+  /** A sentence, or `no_wallet` when the executor has no wallet row for this session. */
+  reason?: string;
+  pool?: string;
+  aToken?: string;
+  asset?: string;
+};
 
 /** The exit from Aave the owner signs (`/yield/withdraw-calldata`). */
 export type AaveWithdrawCall = { to: string; data: `0x${string}`; isMax: boolean };

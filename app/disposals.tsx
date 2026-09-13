@@ -5,9 +5,10 @@
  * which answers "which sale was that" — the question an accountant asks first and the one the app
  * could only answer by emailing a CSV.
  *
- * `basisKnown` is per row, not folded into a footnote. A sale whose cost was never recorded makes
- * the gain look larger than it was, and *which* sale that is matters more than the fact that some
- * of them are. A summary line saying "some figures may be incomplete" helps nobody.
+ * `basisKnown` is per row, not folded into a footnote. A sale whose cost was never recorded has no
+ * gain anyone can state — the executor books it as zero, and the truth could be either side of that
+ * — and *which* sale that is matters more than the fact that some of them are. A summary line saying
+ * "some figures may be incomplete" helps nobody.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
@@ -82,9 +83,14 @@ function DisposalRow({ disposal }: { disposal: Disposal }) {
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <Text variant="rowPrimary">{disposal.symbol}</Text>
-        <Price variant="rowPrimary" tone={pnlTone(disposal.realised)}>
-          {signedMoney(disposal.realised)}
-        </Price>
+        {/* A dash for a gain nobody measured: "+$0.00" was the executor's zero, printed as if it were a result. */}
+        {disposal.basisKnown ? (
+          <Price variant="rowPrimary" tone={pnlTone(disposal.realised)}>
+            {signedMoney(disposal.realised)}
+          </Price>
+        ) : (
+          <Price variant="rowPrimary">—</Price>
+        )}
       </View>
 
       <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s4 }}>
@@ -100,10 +106,11 @@ function DisposalRow({ disposal }: { disposal: Disposal }) {
       {disposal.basisKnown ? null : (
         <Text variant="secondarySm" color={colors.warn} style={{ marginTop: space.s10 }}>
           {/*
-            Per row, because which sale is missing its cost is the actionable half. The gain above
-            is therefore the upper bound, not the figure.
+            Per row, because which sale is missing its cost is the actionable half. Not "an upper
+            bound": with the cost unknown the sale could have been a loss, and the totals on /pnl and
+            in the file count it as neither — which is what this says, and all it says.
           */}
-          Some of what was sold has no recorded cost, so the gain above is an upper bound.
+          No recorded cost, so this counts as no gain or loss.
         </Text>
       )}
     </SheetCard>

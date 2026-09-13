@@ -40,12 +40,14 @@ import {
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { shortAddress } from '@/format';
+import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import { withdrawals } from '@/data/withdrawals';
+import { useStore } from '@/state/store';
 import { useAllowlist, usableFromText, usableIn } from '@/wallet/allowlist';
 import { useWithdrawEverything } from '@/wallet/useWithdrawEverything';
-import type { Step } from '@/wallet/withdrawEverything';
+import { sellBlocked, type Step } from '@/wallet/withdrawEverything';
 
 const STATUS: Readonly<Record<Step['status'], { label: string; tone: TagTone }>> = {
   waiting: { label: 'Not started', tone: 'neutral' },
@@ -69,8 +71,19 @@ export default function WithdrawEverything() {
   const destination = allowlist.usable.find((a) => a.address === chosen);
   const started = running || finished !== undefined;
 
+  /*
+   * Step 1 sells through `closePosition`, which reverts on a revoked or expired permission (XorrDelegation.sol). After
+   * "Stop all agents" the run stopped one transaction in, with the reason in red on a card nobody had been warned about.
+   * The chain is asked here; the store's copy stands in until it answers, and nothing read yet is no claim. Only a run
+   * with something to sell needs the permission — and a preview not read yet might have something.
+   */
+  const permission = useAsync(() => repos.wallet.delegation(), []);
+  const storedPermission = useStore((s) => s.delegation);
+  const blocked = sellBlocked(permission.data !== undefined ? permission.data : (storedPermission ?? undefined));
+  const cannotSell = blocked !== undefined && (preview.data ? preview.data.legs.length > 0 : true);
+
   async function press() {
-    if (!destination || running) return;
+    if (!destination || running || cannotSell) return;
     if (!confirming) {
       setConfirming(true);
       return;
@@ -102,7 +115,8 @@ export default function WithdrawEverything() {
     : aave.loading && !aave.data
       ? 'Loading…'
       : !aave.data?.available
-        ? (aave.data?.reason ?? 'Nothing to take out here.')
+        ? // Not the executor's `reason`: it names the pool and its address, or is the identifier `no_wallet`.
+          'Nothing to take out here.'
         : aave.data.suppliedUsd > 0
           ? `${money(aave.data.suppliedUsd)} earning. You sign this step.`
           : 'Nothing supplied.';
@@ -195,7 +209,7 @@ export default function WithdrawEverything() {
               </SheetCard>
 
               <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
-                {preview.data && preview.data.skipped.length > 0
+                {preview.data?.skipped && preview.data.skipped.length > 0 && preview.data.dustBelowUsd !== undefined
                   ? `${preview.data.skipped.join(', ')} ${preview.data.skipped.length === 1 ? 'stays' : 'stay'}: under ${money(preview.data.dustBelowUsd)}. `
                   : ''}
                 ETH stays, for network fees.
@@ -229,6 +243,12 @@ export default function WithdrawEverything() {
               style={{ marginBottom: space.s10 }}
             />
           ) : null}
+          {/* The one line that explains why the button below is off, said before anyone presses it. */}
+          {!started && cannotSell ? (
+            <Text variant="secondarySm" color={colors.warn} style={{ marginBottom: space.s10 }}>
+              {blocked}
+            </Text>
+          ) : null}
           <Button
             label={
               running
@@ -241,7 +261,7 @@ export default function WithdrawEverything() {
             }
             variant="destructive"
             height={size.buttonLg}
-            disabled={!destination}
+            disabled={!destination || (!started && cannotSell)}
             loading={running}
             onPress={press}
           />

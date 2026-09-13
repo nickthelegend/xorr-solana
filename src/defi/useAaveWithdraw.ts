@@ -16,17 +16,10 @@ import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { api } from '@/data/api';
 import { humanWalletError } from '@/wallet/walletError';
 
-export type YieldPosition = {
-  /** What the user currently has supplied, in dollars. Rebasing, so this grows on its own. */
-  suppliedUsd: number;
-  apy: number;
-  pool: Address;
-  aToken: Address;
-  asset: Address;
-  /** True where Aave is actually deployed on the chain the app settles on. */
-  available: boolean;
-  reason?: string;
-};
+/*
+ * What is supplied is read as `AavePosition` from `@/data/withdrawals`, the one type for `/yield/position`.
+ * This file declared a second, with `apy` always present, and the two disagreed about the same response.
+ */
 
 export function useAaveWithdraw() {
   const { sendTransaction } = useGrantDelegation();
@@ -34,7 +27,8 @@ export function useAaveWithdraw() {
   const [error, setError] = useState<string>();
 
   const withdraw = useCallback(
-    async (usd: number): Promise<Hex> => {
+    /** `null` is all of it — see below. */
+    async (usd: number | null): Promise<Hex> => {
       setBusy(true);
       setError(undefined);
       try {

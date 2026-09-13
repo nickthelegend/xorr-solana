@@ -71,11 +71,17 @@ export default function Assets() {
   const wallet = useStore((s) => s.wallet);
   const balance = useAsync(() => repos.portfolio.balanceUsd(), []);
   const sleeves = useAsync(() => repos.portfolio.sleeves(), []);
-  // The chain's word on this wallet (PLAN.md 3.10). Refreshed with the balance, because a trade changes both at once.
+  // The chain's word on this wallet (PLAN.md 3.10).
   const tokens = useAsync(() => walletTokens(), []);
-  const refresh = useRefreshControl(() => Promise.all([balance.reload(), sleeves.reload(), tokens.reload()]));
   const positions = useAsync(() => repos.portfolio.positions(), []);
   const realised = useAsync(() => repos.portfolio.realised(), []);
+  /*
+   * Every read on the screen, because a trade changes all of them at once. Holdings and Realised were left out, so a
+   * pull after a sale refreshed the balance and went on listing the position it had just sold.
+   */
+  const refresh = useRefreshControl(() =>
+    Promise.all([balance.reload(), sleeves.reload(), tokens.reload(), positions.reload(), realised.reload()]),
+  );
 
   /*
    * The mix the user APPROVED, not the fixture defaults.
@@ -122,9 +128,11 @@ export default function Assets() {
             unreachable — a confident number for a question we never got to ask. An em dash
             says the same thing the code actually knows.
 
-            And only that. `undefined` is "not back yet", which is a different state from `null`'s
+            And only that. Loading is "not back yet", which is a different state from an error's
             "could not be read", and collapsing them showed the could-not-read dash for the twenty
-            seconds this executor takes to answer. Sixth site with this conflation. */}
+            seconds this executor takes to answer. Sixth site with this conflation. The failure is
+            said under the dash now that the read reports one: it used to be swallowed into `null`,
+            so the line below could never appear. */}
         <Price variant="heroBalance" style={{ marginTop: space.s8 }}>
           {balance.data !== null && balance.data !== undefined
             ? money(balance.data)
@@ -270,8 +278,18 @@ export default function Assets() {
           changes every minute. This is the other number — what selling has actually realised
           — and it used to exist nowhere: a position that closed took its profit out of the
           app with it, because the holdings query correctly filters to units > 0.
+
+          A read that failed says so where the card goes. Leaving the card out read as nothing
+          having been sold, a claim about the wallet the screen had not got to make.
         */}
-        {realised.data && realised.data.bySymbol.length > 0 ? (
+        {realised.error ? (
+          <SheetCard borderRadius={radius.panel} padding={space.s16} style={{ marginTop: space.s26 }}>
+            <Eyebrow small>Realised</Eyebrow>
+            <Text variant="secondary" style={{ marginTop: space.s8 }}>
+              Couldn’t load realised profit.
+            </Text>
+          </SheetCard>
+        ) : realised.data && realised.data.bySymbol.length > 0 ? (
           <SheetCard
             borderRadius={radius.panel}
             padding={space.s16}
@@ -298,9 +316,9 @@ export default function Assets() {
               >
                 <Text variant="body" color={colors.ink55}>
                   {r.symbol} · {quantity(r.unitsSold)} sold
-                  {/* Said inline, because a number that quietly understates is worse than
-                      one that admits it. */}
-                  {r.basisIncomplete ? ' · basis incomplete' : ''}
+                  {/* Said inline: a sale with no recorded cost counts as no gain or loss, so
+                      this figure leaves it out, and a figure should say what it leaves out. */}
+                  {r.basisIncomplete ? ' · cost incomplete' : ''}
                 </Text>
                 <Price variant="body" tone={pnlTone(r.realised)}>
                   {signedMoney(r.realised)}

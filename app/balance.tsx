@@ -9,8 +9,8 @@
  * The bar is proportional and drawn from the same numbers as the rows beneath it, so it cannot
  * disagree with them.
  *
- * Distilled 2026-09-14 (PLAN.md O3). Signed out it asks for a sign-in: `balance()` answers null for a signed-out read
- * as for a failed one, and "could not be read" was a claim about a request nobody made.
+ * Distilled 2026-09-14 (PLAN.md O3). Signed out it asks for a sign-in: "could not be read" was a claim about a request
+ * nobody made. A read that did fail is an error with its reason — `balance()` throws now, where it answered null.
  */
 import React from 'react';
 import { View } from 'react-native';

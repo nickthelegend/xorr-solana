@@ -52,7 +52,7 @@ import { swapSpendable } from '@/state/derived';
 import { transferCall } from '@/wallet/transfer';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { formatEther, type Address } from 'viem';
-import { MINUS, shortAddress } from '@/format';
+import { shortAddress } from '@/format';
 import { networkChip } from '@/chain';
 
 const FIELD_H = 52;
@@ -102,10 +102,12 @@ export default function Send() {
     if (usable.length === 0) return 'No address is unlocked yet.';
     if (!entry) return 'Choose a destination.';
     if (!amount) return undefined;
+    // A token list that could not be read says so once, where the pills go; one that did has pills to choose from.
+    if (listed.data && !listed.data.some((t) => t.symbol === symbol && t.symbol !== 'ETH')) return 'Choose a token.';
     if (!(typed > 0)) return 'Enter an amount above zero.';
     if (overBalance) return 'More than you hold.';
     return undefined;
-  }, [listLoading, listError, addresses.length, usable.length, entry, amount, typed, overBalance]);
+  }, [listLoading, listError, addresses.length, usable.length, entry, amount, listed.data, symbol, typed, overBalance]);
 
   /*
    * What the send costs you in gas (PLAN.md 3.13), asked of your own wallet, which pays it — nothing here goes
@@ -209,18 +211,36 @@ export default function Send() {
         <View style={{ marginTop: space.s22 }}>
           <Eyebrow small>Token</Eyebrow>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.s8, marginTop: space.s10 }}>
-            {sendable.map((t) => (
-              <Pill
-                key={t.symbol}
-                label={t.symbol}
-                selected={t.symbol === symbol}
-                onPress={() => {
-                  setSymbol(t.symbol);
-                  // An amount of one token is not an amount of another.
-                  setAmount('');
-                }}
-              />
-            ))}
+            {/*
+              No pills is not a list of nothing. A token list that failed left this row empty and Send dimmed with no
+              word as to why, so the three states the row can be in are each said.
+            */}
+            {listed.error ? (
+              <Text variant="secondary" color={colors.down}>
+                Couldn’t load tokens.
+              </Text>
+            ) : listed.loading && !listed.data ? (
+              <Text variant="secondary" color={colors.ink55}>
+                Loading…
+              </Text>
+            ) : sendable.length === 0 ? (
+              <Text variant="secondary" color={colors.ink55}>
+                Nothing to send here.
+              </Text>
+            ) : (
+              sendable.map((t) => (
+                <Pill
+                  key={t.symbol}
+                  label={t.symbol}
+                  selected={t.symbol === symbol}
+                  onPress={() => {
+                    setSymbol(t.symbol);
+                    // An amount of one token is not an amount of another.
+                    setAmount('');
+                  }}
+                />
+              ))
+            )}
           </View>
         </View>
 
@@ -273,8 +293,9 @@ export default function Send() {
             <Text variant="footnote" color={colors.ink55}>
               Network fee
             </Text>
+            {/* A dash for a fee nobody could estimate. U+2212 is a minus, and a fee is never negative. */}
             <Price variant="footnote">
-              {feeUsd !== undefined ? `≈ ${money(feeUsd)}` : fee.loading ? '· · ·' : MINUS}
+              {feeUsd !== undefined ? `≈ ${money(feeUsd)}` : fee.loading ? '· · ·' : '—'}
             </Price>
           </View>
         </View>

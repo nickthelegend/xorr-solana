@@ -70,7 +70,9 @@ export type ChainVerification = {
 
 export type Limits = {
   dailyCapUsd: number;
+  /** The contract's own tally of today's spend. */
   spentTodayUsd: number;
+  /** The stricter of two remainders: the contract's, and the cap less the executor's own tally. */
   remainingUsd: number;
   revoked: boolean;
   /**
@@ -81,6 +83,47 @@ export type Limits = {
   /** Optional: an executor that predates the field cannot answer, and absent is not expired. */
   expiresAt?: number;
 };
+
+/** What `/limits` can draw without two figures that cannot both be right. See `limitsView`. */
+export type LimitsView = {
+  /** What is left today, by whichever tally is stricter. */
+  left: number;
+  /** The spend that leaves `left`: the bar's basis, so the bar and the figure cannot disagree. */
+  spent: number;
+  /** `spent / cap`, 0 to 1. */
+  fraction: number;
+  /** Whether the contract's tally and the executor's agree, to the cent. */
+  agree: boolean;
+};
+
+/** A cent either way is rounding between two sources, not a disagreement. */
+const CENT = 0.01;
+
+/**
+ * The limit, drawn from one basis.
+ *
+ * `/limits` sends `remainingUsd` as the stricter of the contract's remainder and the cap less the
+ * executor's own tally, and `spentTodayUsd` from the contract alone (`server/src/routes/index.ts`). The
+ * screen printed both, so the moment the tallies drifted it said "$908.05 spent" and "$1,855.95" left
+ * under a $2,810 cap — $46 that belonged to neither. The figure that governs the next trade is the
+ * stricter one, so `left` is that, the bar is the spend it implies, and `agree` says whether the two
+ * sources would have told the same story. Where they would not, the screen says so rather than print a
+ * spend that does not add up.
+ *
+ * Only a live permission is compared. A revoked, expired or never-granted one has nothing left for a
+ * reason of its own, and what the contract says was spent is the only figure worth drawing. `ended` is
+ * the caller's, so expiry is decided by the one helper every screen decides it with.
+ */
+export function limitsView(limits: Limits, ended: boolean): LimitsView {
+  const cap = Math.max(0, limits.dailyCapUsd);
+  if (limits.granted === false || limits.revoked || ended || cap === 0) {
+    const spent = Math.max(0, limits.spentTodayUsd);
+    return { left: 0, spent, fraction: cap > 0 ? Math.min(1, spent / cap) : 0, agree: true };
+  }
+  const left = Math.min(cap, Math.max(0, limits.remainingUsd));
+  const spent = cap - left;
+  return { left, spent, fraction: spent / cap, agree: Math.abs(limits.spentTodayUsd + left - cap) < CENT };
+}
 
 export type DelegationParams = {
   contract: string;
@@ -121,9 +164,29 @@ export type GraphSpend = {
   timestamp: string;
 };
 
+/** `day` is the index's key for a UTC day — `timestamp / 86400` — not a date. See `indexDay`. */
 export type GraphDailySpend = { day: string; total: string; tradeCount: string };
 
 export type GraphActivity = { spends: GraphSpend[]; daily: GraphDailySpend[] };
+
+const DAY_MS = 86_400_000;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/**
+ * An index day, as a date someone can read.
+ *
+ * The subgraph keys its daily rollup by `timestamp / 86400` (`subgraph/src/mapping.ts`), the contract's
+ * own UTC cap window, and two screens printed the key as it came: "20345" is not a day. Built from the
+ * UTC fields rather than a locale formatter for the same reason the key is UTC — in a local zone, a day
+ * that began at midnight UTC is the day before for everyone west of Greenwich — and so the label does not
+ * depend on which date library an engine ships. A key that is not a number is a dash, not a guess.
+ */
+export function indexDay(day: string): string {
+  const n = Number(day);
+  if (day.trim() === '' || !Number.isInteger(n)) return '—';
+  const d = new Date(n * DAY_MS);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}
 
 /** Which venue the router would pick for a size, and what it compared. */
 export type GraphDecision = Record<string, unknown>;
@@ -233,8 +296,81 @@ export type StrategyRunRow = {
   finishedAt: string | null;
 };
 
-/** One push kind, its explanation, and whether it is on. Labels come from the server. */
-/** One sale, with its cost basis. `basisKnown: false` means the gain is understated. */
+/**
+ * How many records an export holds, counted the way the executor builds the file.
+ *
+ * `/export` counted lines less one, which is wrong for all three files (`server/src/audit/log.ts`,
+ * `/pnl/disposals.csv`): the trail's JSON is pretty-printed, so every field was a row; the trail's CSV
+ * ends in a `# chain_verified=…` line and the disposals CSV in a totals row, each counted as a record, so
+ * an empty trail came back "2 rows"; and a CSV cell quotes any line break it holds, which a line count
+ * splits in two. A data record starts with a value — a sequence number, a date — so the header, the
+ * footer and the totals row are the ones that do not count. `undefined` when the file does not read as
+ * what it says it is, which is not the same as empty.
+ */
+export function exportRecords(body: string, format: 'csv' | 'json'): number | undefined {
+  if (format === 'json') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return undefined;
+    }
+    if (Array.isArray(parsed)) return parsed.length;
+    // The trail answers `{ walletId, verified, rows }`.
+    const rows = parsed !== null && typeof parsed === 'object' ? (parsed as { rows?: unknown }).rows : undefined;
+    return Array.isArray(rows) ? rows.length : undefined;
+  }
+  return csvRecords(body)
+    .slice(1)
+    .filter((cells) => {
+      const first = cells[0] ?? '';
+      return first !== '' && !first.startsWith('#');
+    }).length;
+}
+
+/** RFC 4180, as far as the executor writes it: commas, quoted cells, doubled quotes, line breaks inside quotes. */
+function csvRecords(body: string): string[][] {
+  const records: string[][] = [];
+  let cells: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (quoted) {
+      if (ch !== '"') cell += ch;
+      else if (body[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else quoted = false;
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ',') {
+      cells.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && body[i + 1] === '\n') i++;
+      cells.push(cell);
+      records.push(cells);
+      cells = [];
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell !== '' || cells.length > 0) {
+    cells.push(cell);
+    records.push(cells);
+  }
+  return records;
+}
+
+/**
+ * One sale, with its cost basis.
+ *
+ * `basisKnown: false` means no cost was recorded for it, and the executor books that sale's gain as
+ * zero (`server/src/positions/index.ts`): the true figure is proceeds less a cost nobody knows, so it
+ * could be a gain or a loss. That zero is not a measurement, and a screen shows it as unknown.
+ */
 export type Disposal = {
   id: string;
   symbol: string;
@@ -386,6 +522,7 @@ export type StockRow = {
   feed: 'live' | 'unavailable';
 };
 
+/** One push kind, its explanation, and whether it is on. Labels come from the server. */
 export type NotificationPref = {
   kind: string;
   label: string;

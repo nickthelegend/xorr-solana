@@ -12,7 +12,7 @@
  * into Trades so every row is reachable from a tab.
  */
 import React, { useState } from 'react';
-import { Linking, ScrollView, Share, View } from 'react-native';
+import { Linking, ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   BackButton,
@@ -40,13 +40,22 @@ import {
   filterActivity,
 } from '@/state/derived';
 import { repos } from '@/data';
+import { exportRecords } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
+import { deliverFile } from '@/export/deliver';
 import { useRefreshControl } from '@/ui/useRefreshControl';
 import { useStore } from '@/state/store';
 import { useGoBack } from '@/nav/useGoBack';
 import { errorText } from '@/data/apiError';
 
 const DOT = 8;
+
+/** What an empty filter says while the trail itself has rows, by the index of `ACTIVITY_FILTERS`. */
+const NONE_UNDER: Readonly<Record<number, string>> = {
+  1: 'No trades yet.',
+  2: 'Nothing flagged as risk.',
+  3: 'Nothing blocked.',
+};
 
 /**
  * "Check it on chain" — when there is a chain to check it on.
@@ -91,42 +100,40 @@ export default function Activity() {
   const refresh = useRefreshControl(reload);
   const [exporting, setExporting] = useState(false);
   const [exportingTax, setExportingTax] = useState(false);
-  const [exportError, setExportError] = useState<string>();
+  /** A failure, or an empty file said as one. Kept apart so "Nothing to export yet." is not reported as a failed export. */
+  const [exportNote, setExportNote] = useState<{ text: string; failed: boolean }>();
 
   const rows = filterActivity(data ?? [], actFilter);
 
   /**
-   * The disposals file: every sale, its cost basis, and the gain or loss.
+   * One file out of the app, delivered the way `/export` delivers it: a download in a browser, a share sheet on a phone.
    *
-   * Separate from the audit trail because they answer different questions for different
-   * readers. Average cost is stated inside the file rather than assumed — a jurisdiction
-   * that requires FIFO needs to be told this is not it.
+   * This called `Share.share`, which Chrome rejects outright — the exact failure `/export` was fixed for, one screen
+   * over. The two now share `deliverFile`, and the same refusal to hand over a file with no records in it.
+   *
+   * The disposals file is separate from the audit trail because they answer different questions for different
+   * readers. Average cost is stated inside the file rather than assumed — a jurisdiction that requires FIFO needs to be
+   * told this is not it.
    */
-  async function exportDisposals() {
-    setExportingTax(true);
-    setExportError(undefined);
+  async function exportFile(which: 'trail' | 'disposals') {
+    const setBusy = which === 'trail' ? setExporting : setExportingTax;
+    setBusy(true);
+    setExportNote(undefined);
     try {
-      const csv = await repos.activity.exportDisposals();
-      await Share.share({ message: csv, title: 'xorr disposals' });
-    } catch (e) {
-      setExportError(errorText(e));
-    } finally {
-      setExportingTax(false);
-    }
-  }
-
-  async function exportTrail() {
-    setExporting(true);
-    setExportError(undefined);
-    try {
-      const csv = await repos.activity.exportTrail('csv');
-      await Share.share({ message: csv, title: 'xorr audit trail' });
+      const csv = which === 'trail' ? await repos.activity.exportTrail('csv') : await repos.activity.exportDisposals();
+      if (exportRecords(csv, 'csv') === 0) {
+        setExportNote({ text: 'Nothing to export yet.', failed: false });
+        return;
+      }
+      const out = await deliverFile(which === 'trail' ? 'xorr-audit.csv' : 'xorr-disposals.csv', csv);
+      // A dismissed share sheet is a change of mind, which `deliverFile` words as "Cancelled." — not a failure to report.
+      if (!out.ok && out.reason !== 'Cancelled.') setExportNote({ text: `Export failed: ${out.reason}`, failed: true });
     } catch (e) {
       // On the screen, not in a console nobody reads. An export that silently fails is
       // worse than none: the user walks away believing they have the record.
-      setExportError(errorText(e));
+      setExportNote({ text: `Export failed: ${errorText(e)}`, failed: true });
     } finally {
-      setExporting(false);
+      setBusy(false);
     }
   }
 
@@ -158,11 +165,16 @@ export default function Activity() {
         ) : error ? (
           <ErrorState error={error} onRetry={reload} />
         ) : rows.length === 0 ? (
-          <EmptyState
-            text="Nothing yet."
-            actionLabel="Set up a recurring buy"
-            onAction={() => router.push('/strategy/dca')}
-          />
+          (data ?? []).length > 0 ? (
+            /* The trail has rows, just none of this kind: "Nothing yet." and a push to start buying would deny the rest. */
+            <EmptyState text={NONE_UNDER[actFilter] ?? 'Nothing here.'} />
+          ) : (
+            <EmptyState
+              text="Nothing yet."
+              actionLabel="Set up a recurring buy"
+              onAction={() => router.push('/strategy/dca')}
+            />
+          )
         ) : (
           <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>
             {rows.map((r) => {
@@ -208,14 +220,14 @@ export default function Activity() {
         )}
       </Fill>
 
-      {exportError ? (
+      {exportNote ? (
         <Text
           variant="secondarySm"
-          color={colors.down}
+          color={exportNote.failed ? colors.down : colors.warn}
           align="center"
           style={{ marginTop: space.s10 }}
         >
-          {`Export failed: ${exportError}`}
+          {exportNote.text}
         </Text>
       ) : null}
 
@@ -233,14 +245,14 @@ export default function Activity() {
           label="Export audit trail"
           variant="ghost"
           loading={exporting}
-          onPress={exportTrail}
+          onPress={() => exportFile('trail')}
           style={{ flex: 1 }}
         />
         <Button
           label="Disposals (CSV)"
           variant="ghost"
           loading={exportingTax}
-          onPress={exportDisposals}
+          onPress={() => exportFile('disposals')}
           style={{ flex: 1 }}
         />
       </View>

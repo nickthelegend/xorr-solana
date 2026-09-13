@@ -1,13 +1,15 @@
 /**
  * What idle cash earns, and where the number comes from.
  *
- * The yield screen offers the action. This is the rate itself: read as `currentLiquidityRate` from
+ * The yield screen offers the way out. This is the rate itself: read as `currentLiquidityRate` from
  * the Aave v3 pool on Base, which is a floating number that changes with utilisation and is not a
  * promise. The distinction matters because a rate presented as a product feature reads as a
  * guarantee, and this one is neither ours to set nor stable.
  *
- * `feed` is rendered. A simulated rate and a live one must never look the same, and on a chain
- * where the pool is not deployed the honest answer is that there is no rate here.
+ * `feed` is rendered. A simulated rate and a live one must never look the same. The rate is read
+ * from Base mainnet on every build, so it is real everywhere and can be earned only where the pool
+ * is deployed, which `availableHere` says. Where it is not, the card says so, and nothing below
+ * offers to earn it.
  *
  * Distilled 2026-09-14 (PLAN.md O3): no venue or network on the card — Sources names them. Signed out, the rate is
  * public and shown; "yours" is not, and a "$0.00 supplied · $0.00 idle" for a wallet nobody named is left out.
@@ -36,13 +38,14 @@ import { repos } from '@/data';
 export default function Rates() {
   const goBack = useGoBack();
   const router = useRouter();
+  // A read that fails reaches the ErrorState: `staking()` used to swallow it into "No lending pool here".
   const rate = useAsync(() => repos.yield.staking(), []);
   const balance = useAsync(() => repos.portfolio.balance(), []);
   const signedOut = useSignedOut();
 
   const apy = rate.data?.estimatedApy ?? null;
-  const cash = balance.data?.cash ?? 0;
-  const supplied = balance.data?.supplied ?? 0;
+  /* Absent is not false: an executor older than the field cannot say, and a pool it cannot vouch against is not denied. */
+  const earnableHere = rate.data?.availableHere !== false;
 
   return (
     <Screen>
@@ -55,7 +58,7 @@ export default function Rates() {
           <Placeholder height={150} />
         ) : !rate.data || apy === null ? (
           <Text variant="body" color={colors.ink55}>
-            No lending pool here, so there is no rate.
+            No rate right now.
           </Text>
         ) : (
           <>
@@ -78,27 +81,55 @@ export default function Rates() {
                   Simulated here. Not what a supply would earn.
                 </Text>
               ) : null}
+              {earnableHere ? null : (
+                <Text variant="secondarySm" color={colors.warn} style={{ marginTop: space.s8 }}>
+                  You can’t earn this here.
+                </Text>
+              )}
             </SheetCard>
 
-            {signedOut || !balance.data ? null : (
+            {/*
+              Yours only where it is someone's and can earn: signed out it describes nobody, and where the pool is not
+              deployed "idle cash would earn" is arithmetic on a rate nothing here can get. A balance that could not be
+              read says so, rather than dropping the card as though there were nothing to show.
+            */}
+            {signedOut || !earnableHere ? null : balance.error ? (
+              <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
+                <Text variant="footnote" color={colors.ink55}>
+                  YOURS
+                </Text>
+                <Text variant="secondary" style={{ marginTop: space.s6 }}>
+                  Couldn’t load your balance.
+                </Text>
+              </SheetCard>
+            ) : !balance.data ? null : (
               <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
                 <Text variant="footnote" color={colors.ink55}>
                   YOURS
                 </Text>
                 <Text variant="rowPrimary" style={{ marginTop: space.s6 }}>
-                  {money(supplied)} supplied · {money(cash)} idle
+                  {money(balance.data.supplied)} supplied · {money(balance.data.cash)} idle
                 </Text>
                 <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
                   {/*
                     What the rate would be worth on the idle balance — clearly framed as arithmetic on
                     a floating rate, not a projection of earnings.
                   */}
-                  Idle cash would earn about {money(cash * apy)} a year, if today&apos;s rate held.
+                  Idle cash would earn about {money(balance.data.cash * apy)} a year, if today&apos;s rate held.
                 </Text>
               </SheetCard>
             )}
 
-            <Button label="Supply or withdraw" variant="ghost" onPress={() => router.push('/yield')} />
+            {/*
+              Each button names what its screen does. "Supply or withdraw" opened a screen that only withdraws. Supplying
+              here is a sweep of idle cash, set up on its own screen, and neither exists where the pool does not.
+            */}
+            {earnableHere ? (
+              <>
+                <Button label="Earn on idle cash" variant="ghost" onPress={() => router.push('/strategy/yield')} />
+                <Button label="Withdraw" variant="ghost" onPress={() => router.push('/yield')} />
+              </>
+            ) : null}
           </>
         )}
       </Fill>

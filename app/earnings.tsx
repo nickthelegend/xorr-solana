@@ -10,6 +10,11 @@
  * predicted date rendered in the same weight as the observed ones is a date someone trades on, and
  * the difference between "they filed on this day" and "they usually file about now" is the whole
  * distinction this screen has to preserve.
+ *
+ * Every read names its symbol, and an answer is shown only under the pill that asked for it:
+ * `useAsync` keeps the last answer while the next is on its way, so switching pills put one
+ * company's filings under another's name until the new ones landed. Distilled (PLAN.md O3): no
+ * source name and no filer number on the screen — Sources names where the dates come from.
  */
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -31,8 +36,9 @@ import {
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
 
-/** The tokenized equities, which are the only symbols EDGAR can answer for. */
+/** The tokenized equities, which are the only symbols the filing record can answer for. */
 const EQUITIES = ['NVDAc', 'AAPLc', 'TSLAc', 'METAc', 'MSFTc', 'AMZNc', 'GOOGLc', 'MSTRc'] as const;
+type Equity = (typeof EQUITIES)[number];
 
 const day = (ms: number) => new Date(ms).toLocaleDateString('en-US', {
   year: 'numeric',
@@ -42,15 +48,18 @@ const day = (ms: number) => new Date(ms).toLocaleDateString('en-US', {
 
 export default function Earnings() {
   const goBack = useGoBack();
-  const [symbol, setSymbol] = useState<string>(EQUITIES[0]);
-  const { data, loading, error, reload } = useAsync(() => system.earnings(symbol), [symbol]);
+  // Always one of the eight: `/market/earnings` answers any other symbol, or none, with a 404.
+  const [symbol, setSymbol] = useState<Equity>(EQUITIES[0]);
+  const { data, error, reload } = useAsync(() => system.earnings(symbol), [symbol]);
+  /* The lit pill's calendar and no other — the executor names the symbol it answered for. */
+  const calendar = data && data.symbol.toLowerCase() === symbol.toLowerCase() ? data : undefined;
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Earnings</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Filing dates from EDGAR, and what the cadence implies about the next one.
+          Past filings, and when the next is likely.
         </Text>
       </View>
 
@@ -63,9 +72,9 @@ export default function Earnings() {
       <Fill style={{ marginTop: space.s12, paddingHorizontal: space.gutter }}>
         {error ? (
           <ErrorState error={error} onRetry={reload} />
-        ) : loading && !data ? (
+        ) : !calendar ? (
           <Placeholder height={160} />
-        ) : !data ? null : (
+        ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: space.s30, gap: space.s10 }}
@@ -80,19 +89,19 @@ export default function Earnings() {
               */}
               <Text
                 variant="screenTitle"
-                color={data.nextAt ? colors.warn : colors.ink40}
+                color={calendar.nextAt ? colors.warn : colors.ink40}
                 style={{ marginTop: space.s6 }}
               >
-                {data.nextAt ? day(data.nextAt) : 'Not projectable'}
+                {calendar.nextAt ? day(calendar.nextAt) : 'No projection'}
               </Text>
               <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s10 }}>
-                {data.nextAt
-                  ? `A projection from this company's own filing cadence, give or take ${data.errorDays} days. Nobody has filed this.`
-                  : 'The gaps between filings are not a cadence this recognises, so no date is offered rather than a guessed one.'}
+                {calendar.nextAt
+                  ? `Projected from past filings, give or take ${calendar.errorDays} days.`
+                  : 'The filings keep no steady rhythm, so no date is guessed.'}
               </Text>
-              {data.medianGapDays ? (
+              {calendar.medianGapDays ? (
                 <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                  Median gap {data.medianGapDays} days · CIK {data.cik}
+                  Usually {calendar.medianGapDays} days apart.
                 </Text>
               ) : null}
             </SheetCard>
@@ -101,12 +110,12 @@ export default function Earnings() {
               <Text variant="footnote" color={colors.ink55}>
                 FILED
               </Text>
-              {data.reported.length === 0 ? (
+              {calendar.reported.length === 0 ? (
                 <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                  EDGAR returned no filings.
+                  No filings found.
                 </Text>
               ) : (
-                data.reported.slice(0, 10).map((at, i) => (
+                calendar.reported.slice(0, 10).map((at, i) => (
                   <View
                     key={at}
                     style={{
@@ -119,9 +128,9 @@ export default function Earnings() {
                       {day(at)}
                     </Text>
                     {/* The gap that came after this filing — the evidence for the projection. */}
-                    {data.gapDays[i] === undefined ? null : (
+                    {calendar.gapDays[i] === undefined ? null : (
                       <Text variant="secondarySm" color={colors.ink55}>
-                        {data.gapDays[i]} days
+                        {calendar.gapDays[i]} days
                       </Text>
                     )}
                   </View>
