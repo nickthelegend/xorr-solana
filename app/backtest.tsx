@@ -11,6 +11,11 @@
  *
  * It creates nothing. This is a calculation over past prices, and the strategy screens are where
  * something gets made.
+ *
+ * It offers what a recurring buy can buy (`RECURRING_BUY_SYMBOLS`), not every tradable symbol: USDC is
+ * what a buy is paid in and the tokenized equities have no history to replay, so a run of either could
+ * only fail. And a result stands beside the inputs it was run on and no others — changing the market,
+ * the window or the size used to leave the previous answer under pills that no longer described it.
  */
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -34,51 +39,53 @@ import {
   space,
 } from '@/ui';
 import { money, percent } from '@/format';
-import { TRADABLE } from '@/data/tradable';
-import { system, type StrategyBacktest } from '@/data/system';
+import { useAsync } from '@/data/useAsync';
+import { system } from '@/data/system';
+import { RECURRING_BUY_SYMBOLS, type RecurringBuySymbol } from '@/strategies/ladder';
 
 const LOOKBACKS = ['30d', '90d', '6m', '1y'] as const;
 const SIZES = [25, 50, 100, 250] as const;
 const CHART_H = 130;
 
+type Lookback = (typeof LOOKBACKS)[number];
+/** What a run was asked for. A result is only ever shown while the pills still say this. */
+type Inputs = { symbol: RecurringBuySymbol; lookback: Lookback; usd: number };
+
 export default function Backtest() {
   const goBack = useGoBack();
-  const [symbol, setSymbol] = useState<string>('WETH');
-  const [lookback, setLookback] = useState<(typeof LOOKBACKS)[number]>('90d');
+  const [symbol, setSymbol] = useState<RecurringBuySymbol>('WETH');
+  const [lookback, setLookback] = useState<Lookback>('90d');
   const [usd, setUsd] = useState<number>(SIZES[1]);
 
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<StrategyBacktest | null>(null);
-  const [error, setError] = useState<Error | null>(null);
-
-  const run = async () => {
-    setBusy(true);
-    setError(null);
-    setResult(null);
-    try {
-      setResult(
-        await system.backtestStrategy({
-          kind: 'dca',
-          symbol,
-          lookback,
-          // Weekly, which is what the DCA creator defaults to — a backtest of a cadence nobody
-          // would choose answers a question nobody asked.
-          params: { usd, everyNDays: 7 },
-        }),
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e : new Error(String(e)));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const [asked, setAsked] = useState<Inputs | null>(null);
+  const result = useAsync(
+    async () =>
+      asked
+        ? system.backtestStrategy({
+            kind: 'dca',
+            symbol: asked.symbol,
+            lookback: asked.lookback,
+            // Weekly, which is what the DCA creator defaults to — a backtest of a cadence nobody
+            // would choose answers a question nobody asked.
+            params: { usd: asked.usd, everyNDays: 7 },
+          })
+        : null,
+    [asked],
+  );
+  const current =
+    asked !== null && asked.symbol === symbol && asked.lookback === lookback && asked.usd === usd;
+  const busy = current && result.loading;
+  // The same inputs again is a retry; anything else is a new question.
+  const run = () => (current ? result.reload() : setAsked({ symbol, lookback, usd }));
+  const data = current && !result.loading ? result.data : null;
+  const tone = pnlTone(data?.ret ?? 0);
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Backtest</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          A weekly buy, over real past prices. Nothing is created.
+          A weekly buy over real past prices. Nothing is bought.
         </Text>
       </View>
 
@@ -88,7 +95,7 @@ export default function Backtest() {
           contentContainerStyle={{ paddingBottom: space.s30 }}
         >
           <PillRow style={{ marginTop: space.s8 }} contentPadding={space.gutter}>
-            {TRADABLE.map((t) => (
+            {RECURRING_BUY_SYMBOLS.map((t) => (
               <Pill key={t} label={t} selected={t === symbol} onPress={() => setSymbol(t)} />
             ))}
           </PillRow>
@@ -108,22 +115,17 @@ export default function Backtest() {
           <View style={{ paddingHorizontal: space.gutter, marginTop: space.s16, gap: space.s12 }}>
             <Button label={busy ? 'Running…' : 'Run it'} disabled={busy} onPress={run} />
 
-            {error ? (
-              <ErrorState error={error} onRetry={run} />
-            ) : busy ? (
+            {!current ? null : result.loading ? (
               <Placeholder height={CHART_H} />
-            ) : !result ? (
-              <Text variant="secondarySm" color={colors.ink55}>
-                Pick a market, a window and a size. The result is computed from daily closes the
-                executor already holds, not from a model.
-              </Text>
-            ) : (
+            ) : result.error ? (
+              <ErrorState error={result.error} onRetry={result.reload} />
+            ) : data ? (
               <>
-                {result.equity.length > 1 ? (
+                {data.equity.length > 1 ? (
                   <AreaChart
-                    data={result.equity}
+                    data={data.equity}
                     height={CHART_H}
-                    color={result.ret >= 0 ? colors.up : colors.down}
+                    color={tone === 'up' ? colors.up : tone === 'down' ? colors.down : colors.ink55}
                     endDot
                   />
                 ) : null}
@@ -132,12 +134,12 @@ export default function Backtest() {
                   <Text variant="footnote" color={colors.ink55}>
                     RETURN
                   </Text>
-                  <Price variant="screenTitle" tone={pnlTone(result.ret)} style={{ marginTop: space.s6 }}>
-                    {percent(result.ret)}
+                  <Price variant="screenTitle" tone={tone} style={{ marginTop: space.s6 }}>
+                    {percent(data.ret)}
                   </Price>
                   <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s10 }}>
-                    Worst drawdown {percent(result.maxDd, { explicitSign: false })} · {result.trades}{' '}
-                    buys
+                    Worst drawdown {percent(data.maxDd, { explicitSign: false })} · {data.trades}{' '}
+                    {data.trades === 1 ? 'buy' : 'buys'}
                   </Text>
                 </SheetCard>
 
@@ -148,14 +150,14 @@ export default function Backtest() {
                     caveat has turned a calculation into a claim.
                   */}
                   <Text variant="footnote" color={colors.ink55}>
-                    {result.source}
+                    {data.source}
                   </Text>
                   <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                    {result.disclaimer}
+                    {data.disclaimer}
                   </Text>
                 </SheetCard>
               </>
-            )}
+            ) : null}
           </View>
         </ScrollView>
       </Fill>

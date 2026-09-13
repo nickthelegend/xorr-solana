@@ -1,7 +1,7 @@
 /**
  * Strategies — its own page (2026-09-12). PLAN.md 10.1 / §3.5.
  *
- * Reached from an agent's "Add strategy", a backtest and strategy alerts — not from the bar. It used
+ * Reached from every agent's page ("See all") and from a strategy alert — not from the bar. It used
  * to live in the tab shell, which drew the bottom bar under it with nothing lit and no way back but
  * the bar; it now pushes like an agent page, with a back arrow and no bar.
  *
@@ -20,6 +20,7 @@ import {
   ErrorState,
   Fill,
   LoadingRows,
+  Placeholder,
   Press,
   Price,
   Row,
@@ -79,15 +80,24 @@ export default function Strategies() {
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text variant="screenTitle">Strategies</Text>
-        <Text variant="footnote" color={colors.ink55}>
-          {/* "0 running" is a claim. Without an answer from the executor we do not have one
-              to make — the body below already shows why. */}
-          {data === undefined ? '—' : `${live.length} running`}
-        </Text>
+        {/*
+          "0 running" is a claim. Without an answer from the executor we do not have one to make —
+          the body below already shows why.
+
+          Nor is a dash while it is still asking: a "—" where the count goes read as a value. Loading is
+          a placeholder, and a read that failed leaves the space empty for the error below to explain.
+        */}
+        {data ? (
+          <Text variant="footnote" color={colors.ink55}>
+            {`${live.length} running`}
+          </Text>
+        ) : loading ? (
+          <Placeholder height={12} width={64} />
+        ) : null}
       </View>
 
       <Text variant="secondary" style={{ marginTop: space.s10 }}>
-        What the bot is allowed to do on its own, and what it is doing right now.
+        What runs for you, and what you can add.
       </Text>
 
       <Segmented options={TABS} value={tab} onChange={setTab} style={{ marginTop: space.s18 }} />
@@ -103,8 +113,7 @@ export default function Strategies() {
               <View style={{ gap: space.s16, paddingTop: space.s10 }}>
                 <EmptyState text="Nothing running yet." />
                 <Text variant="secondarySm" align="center">
-                  A recurring buy is the simplest thing to hand over. You set the amount and
-                  the day; the bot does nothing else.
+                  A recurring buy is the simplest place to start.
                 </Text>
                 <Button label="Set up a recurring buy" onPress={() => router.push('/strategy/dca')} />
               </View>
@@ -141,11 +150,9 @@ export default function Strategies() {
                       </Text>
                     )}
                   </View>
+                  {/* One line a card. Why each rung sits where it does lives beside it in the ladder. */}
                   <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s10 }}>
                     {entry.what}
-                  </Text>
-                  <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                    {entry.judgement}
                   </Text>
                   {entry.available ? (
                     <Button
@@ -194,15 +201,27 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
         await repos.strategies.setState(s.id, s.state === 'paused' ? 'live' : 'paused');
       } else {
         const r = await repos.strategies.runNow(s.id);
-        // Say what happened. "Nothing to do" is a real and common outcome for a rebalance
-        // that has not drifted, and it must not read as a failure.
+        /*
+         * Say what happened. "Nothing to do" is a real and common outcome for a rebalance that has
+         * not drifted, and it must not read as a failure.
+         *
+         * Nor may two other outcomes read as it. Tiers 6 and 7 ask before an entry, so a skip can be
+         * a run waiting on a yes. And a fill the executor did not measure says "Filled." rather than
+         * "Filled 0.0000 at $0.00".
+         */
+        const skipped =
+          r.reason === 'already_ran_this_period'
+            ? 'Already ran this period.'
+            : r.reason === 'awaiting_approval'
+              ? 'Waiting for your approval.'
+              : 'Checked — nothing to do.';
         setNote(
           r.status === 'filled'
-            ? `Filled ${quantity(r.units ?? 0)} at ${money(r.price ?? 0)}`
+            ? r.units != null && r.price != null
+              ? `Filled ${quantity(r.units)} at ${money(r.price)}`
+              : 'Filled.'
             : r.status === 'skipped'
-              ? r.reason === 'already_ran_this_period'
-                ? 'Already ran this period.'
-                : 'Checked — nothing to do.'
+              ? skipped
               : (r.reason ?? r.status),
         );
       }

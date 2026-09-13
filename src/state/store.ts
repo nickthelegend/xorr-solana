@@ -30,16 +30,16 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 /** Kill float drift on 0.5-step values: 1.0 - 0.5 - 0.5 must be exactly 0, not 1.1e-16. */
 const round1 = (v: number) => Math.round(v * 10) / 10;
 
-// ── Agent config (server-persisted per agent; PLAN §6.7 makes these the delegation policy) ──
+// ── Agent config (on this device until signed; PLAN §6.7 makes the cap and duration the policy) ──
+//
+// `auto` and `risk` lived here too, behind a "Trade Autonomously" switch and a "Risk Level" pill that
+// nothing signed, sent or read. Both went with their controls — see app/bot/[id]/settings.tsx. A device
+// that persisted them carries two inert keys until the store next writes.
 type AgentConfigSlice = {
-  auto: boolean;
   runFor: number;
-  risk: number;
   cap: number;
   stocksPaused: boolean;
-  setAuto: (v: boolean) => void;
   cycleRunFor: () => void;
-  cycleRisk: () => void;
   bumpCap: (dir: 1 | -1) => void;
   toggleStocksPaused: () => void;
 };
@@ -152,14 +152,10 @@ export const useStore = create<Store>()(
   persist(
     (set, get) => ({
       // ── agent config — state.md defaults ──
-      auto: true,
       runFor: 1,
-      risk: 0,
       cap: 1600,
       stocksPaused: false,
-      setAuto: (v) => set({ auto: v }),
       cycleRunFor: () => set((s) => ({ runFor: (s.runFor + 1) % 4 })),
-      cycleRisk: () => set((s) => ({ risk: (s.risk + 1) % 3 })),
       bumpCap: (dir) => set((s) => ({ cap: clamp(s.cap + dir * CAP_STEP, CAP_MIN, CAP_MAX) })),
       toggleStocksPaused: () => set((s) => ({ stocksPaused: !s.stocksPaused })),
 
@@ -261,9 +257,7 @@ export const useStore = create<Store>()(
        * mirrored here so the shell can render without unlocking anything.
        */
       partialize: (s) => ({
-        auto: s.auto,
         runFor: s.runFor,
-        risk: s.risk,
         cap: s.cap,
         mkt: s.mkt,
         tab5: s.tab5,

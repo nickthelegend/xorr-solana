@@ -4,8 +4,12 @@
  * Full-bleed surface card, radius 34, close top-right. 104pt orb, name, subtitle.
  * Three benefit blocks (22pt outline glyph — circle, rounded square, rotated square) gap 26.
  * White "Get Started". Footnote "All agents can make mistakes. Markets are risky."
+ *
+ * "Get Started" hires the agent, then opens the limits. It only opened the limits, so the one button
+ * on an agent's introduction never made the agent yours — and it could be pressed before the roster
+ * had answered, when there was no agent to start.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -18,6 +22,7 @@ import {
   EmptyState,
   ErrorState,
   Fill,
+  Placeholder,
   Screen,
   Text,
   colors,
@@ -27,25 +32,35 @@ import {
 } from '@/ui';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
+import { errorText } from '@/data/apiError';
 
 const GLYPH = 22;
 const STROKE = 1.8;
 
+/*
+ * What the product does, one line each.
+ *
+ * The middle block was "Never miss big moves · Tracks big price moves and key news, then triggers your
+ * preset actions." Nothing a user can set up acts on news — the strategies that can be created act on
+ * a schedule, a price or a position — so it described a feature that does not exist. What every run
+ * does get is a record, refusals included. "Edit" left the last block for the same reason: strategies
+ * can be paused and resumed here, not edited.
+ */
 const BENEFITS = [
   {
     glyph: 'circle',
     title: 'Runs for you 24/7',
-    body: 'Keeps watching your markets and running your rules, even when you are offline.',
+    body: 'Your rules keep running while you are offline.',
   },
   {
     glyph: 'square',
-    title: 'Never miss big moves',
-    body: 'Tracks big price moves and key news, then triggers your preset actions.',
+    title: 'Every run on the record',
+    body: 'Fills and refusals alike.',
   },
   {
     glyph: 'diamond',
     title: 'You are always in control',
-    body: 'Set limits, edit or pause strategies anytime. The agent never trades outside your rules.',
+    body: 'Pause anytime. It never trades outside your limits.',
   },
 ] as const;
 
@@ -54,7 +69,10 @@ export default function AgentIntro() {
   const router = useRouter();
   const goBack = useGoBack();
   const { data, loading, error, reload } = useAsync(() => repos.bot.listAgents(), []);
-  const agent = (data ?? []).find((a) => a.id === id);
+  // Either id: the roster links with `a.id`, which becomes a row uuid once the agent is hired.
+  const agent = (data ?? []).find((a) => a.id === id || a.personaId === id);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string>();
 
   // A roster that could not be read is not a roster without this agent, so it is not "no such agent" either.
   if (!loading && error && !data) {
@@ -89,13 +107,33 @@ export default function AgentIntro() {
         </View>
         <Fill>
           <EmptyState
-            text={`There is no agent "${id ?? ''}" on the roster. It may have been renamed, or the link may be out of date.`}
+            text={`No agent "${id ?? ''}" on the roster.`}
             actionLabel="See the roster"
             onAction={() => router.replace('/bot/roster')}
           />
         </Fill>
       </Screen>
     );
+  }
+
+  async function start() {
+    if (!agent) return;
+    setStarting(true);
+    setStartError(undefined);
+    try {
+      /*
+       * Hired, then the limits.
+       *
+       * Hiring is idempotent on the server, but every call writes "Hired …" to the audit trail, so an
+       * agent that is already yours is not hired a second time.
+       */
+      const hired = agent.hired ? agent : await repos.bot.hire(agent.personaId ?? agent.id);
+      router.replace(`/bot/${hired.id}/settings`);
+    } catch (e) {
+      // The server's sentence, above the button that asked. Nothing was hired, so nothing moves on.
+      setStartError(errorText(e));
+      setStarting(false);
+    }
   }
 
   return (
@@ -107,22 +145,31 @@ export default function AgentIntro() {
       </View>
 
       <View style={{ alignItems: 'center', marginTop: space.s10, gap: space.s14 }}>
-        <AgentOrb
-          gradient={agentGradient(agent?.name ?? 'Earnings Desk')}
-          identity={agent?.name}
-          size={size.orb104}
-          face
-          specular
-          bloom
-        />
+        {/*
+          Nobody's colours while the roster is still answering. The orb fell back to Earnings Desk's
+          gradient here, which is the borrowed identity the note above describes, drawn before any
+          name had arrived.
+        */}
+        {agent ? (
+          <AgentOrb
+            gradient={agentGradient(agent.name)}
+            identity={agent.name}
+            size={size.orb104}
+            face
+            specular
+            bloom
+          />
+        ) : (
+          <Placeholder width={size.orb104} height={size.orb104} style={{ borderRadius: radius.full }} />
+        )}
         <Text variant="onboardingTitle" align="center">
-          {agent?.name ?? (loading ? 'Loading…' : 'No such agent')}
+          {agent?.name ?? 'Loading…'}
         </Text>
         <Text variant="body" color={colors.ink55} align="center">
           {/* Not a different agent's description. These fell back to "Stocks Trader /
               Autonomous stock trading agent" whenever the id did not resolve, so a bad
               link introduced an agent that does not exist. */}
-          {agent?.role ?? (loading ? '' : 'This agent is not on the roster.')}
+          {agent?.role ?? ''}
         </Text>
       </View>
 
@@ -140,7 +187,17 @@ export default function AgentIntro() {
         ))}
       </Fill>
 
-      <Button label="Get Started" onPress={() => router.replace(`/bot/${id}/settings`)} />
+      {startError ? (
+        <Text
+          variant="secondarySm"
+          color={colors.down}
+          align="center"
+          style={{ marginBottom: space.s12 }}
+        >
+          {startError}
+        </Text>
+      ) : null}
+      <Button label="Get Started" onPress={start} loading={starting} disabled={!agent} />
       <Text
         variant="footnote"
         color={colors.ink55}

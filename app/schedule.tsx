@@ -29,6 +29,7 @@ import {
 import { useAsync } from '@/data/useAsync';
 import { useNow } from '@/state/useNow';
 import { repos } from '@/data';
+import { kindLabel } from '@/strategies/ladder';
 
 /** Relative time, in the coarsest unit that still says something useful. */
 function when(at: number, now: number): { label: string; overdue: boolean } {
@@ -69,7 +70,7 @@ export default function Schedule() {
         ) : loading && !data ? (
           <LoadingRows count={5} height={size.rowLg} />
         ) : rows.length === 0 ? (
-          <EmptyState text="Nothing is scheduled. No live strategy has a next run." />
+          <EmptyState text="Nothing is scheduled." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -83,7 +84,8 @@ export default function Schedule() {
                   height={size.rowLg}
                   onPress={() => router.push(`/strategy/${s.id}`)}
                   title={s.label}
-                  secondary={`${s.symbol} · ${s.kind}`}
+                  // The kind as the library names it — "Recurring buy", not `dca`.
+                  secondary={`${s.symbol} · ${kindLabel(s.kind)}`}
                   value={
                     <Text variant="rowPrimary" color={t.overdue ? colors.warn : colors.ink}>
                       {/*

@@ -1,23 +1,32 @@
 /**
  * Screen 4 — Trade settings. screens.md Group C.
  *
- * Card: 34pt violet orb, "Limits", explainer. Four 56pt rows —
+ * Card: 34pt violet orb, "Limits". Two 56pt rows —
  *   Run For (pill, cycles 1/3/7/30 Days)
- *   Trade Autonomously (switch PLUS a state caption — design.md §5 requires it)
- *   Risk Level (pill, Low/Medium/High)
  *   Daily Spend Cap (stepper $200–$5,000 by $200)
  * Under the cap: a 6pt green→amber→red rail with a white marker at (cap−200)/4800,
  * endpoints "$200 · conservative" / "$5,000 · max".
  *
- * PLAN.md 6.7: after the pivot these four controls are NOT preferences — they are the
- * delegation policy. The CTA signs a transaction, it does not save a setting.
+ * PLAN.md 6.7: after the pivot these controls are NOT preferences — they are the delegation
+ * policy. The CTA signs a transaction, it does not save a setting.
+ *
+ * The design had two more rows, and both are gone because nothing stood behind them:
+ *
+ *   Trade Autonomously — a switch captioned "Every trade waits for your approval" when off. It lived in
+ *   local storage and `commit()` never read it, and nothing else could have: the permission has no such
+ *   field, and `PATCH /agents/:id` takes a tone and two dollar limits. Asking first belongs to the
+ *   strategy kind — tiers 6 and 7 always ask (`APPROVAL_FIRST_KINDS` in server/src/executor/run.ts) —
+ *   not to a switch.
+ *
+ *   Risk Level — Low / Medium / High, also local and never signed. The nearest real thing is an agent's
+ *   own dollar limits, and those bind only strategies attached to that agent. Nothing in the app
+ *   attaches one, so a level written there would still have changed no trade.
  */
 import React, { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Icon } from '@/design/Icon';
 import { agentGradients } from '@/design/gradients';
 import {
   AssetMark,
@@ -27,11 +36,10 @@ import {
   Row,
   Screen,
   SheetCard,
+  SignInButton,
   Stepper,
-  Switch,
   Text,
   colors,
-  divider as dividerStyle,
   duration,
   money,
   radius,
@@ -41,17 +49,8 @@ import {
   useReducedMotion,
 } from '@/ui';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
-import {
-  CAP_MAX,
-  CAP_MIN,
-  RISK_LEVELS,
-  RUN_FOR,
-  autoNote,
-  capLabel,
-  capMarkerPct,
-  runForMs,
-  runLabel,
-} from '@/state/derived';
+import { useSignedOut } from '@/auth/useSignedOut';
+import { CAP_MAX, CAP_MIN, RUN_FOR, capLabel, capMarkerPct, runForMs } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { errorText } from '@/data/apiError';
@@ -63,18 +62,15 @@ const MARKER_H = 10;
 export default function TradeSettings() {
   const goBack = useGoBack();
   const reduced = useReducedMotion();
+  const signedOut = useSignedOut();
   const [localError, setLocalError] = useState<string>();
-  // These four controls ARE the delegation policy, so saving them is a signature, not a
+  // These controls ARE the delegation policy, so saving them is a signature, not a
   // save — and it is the user's wallet that signs it, never the executor.
   const { grant: signGrant, busy, error: txError } = useGrantDelegation();
   const error = localError ?? txError;
 
-  const auto = useStore((s) => s.auto);
-  const setAuto = useStore((s) => s.setAuto);
   const runFor = useStore((s) => s.runFor);
   const cycleRunFor = useStore((s) => s.cycleRunFor);
-  const risk = useStore((s) => s.risk);
-  const cycleRisk = useStore((s) => s.cycleRisk);
   const cap = useStore((s) => s.cap);
   const bumpCap = useStore((s) => s.bumpCap);
   const setDelegation = useStore((s) => s.setDelegation);
@@ -110,56 +106,27 @@ export default function TradeSettings() {
           on-chain permission per wallet, and every agent runs inside it. Someone who set a $200
           cap here believing it applied to Earnings Desk alone would have set it for all four.
         */}
-        You can change these anytime. This is one on-chain permission for the whole wallet, so
-        every agent you run stays inside these limits — not just this one.
+        One permission for the whole wallet, not just this agent.
       </Text>
 
       {/*
-        Scrolls. This one measures FITS at 375×667 today and is one row from not doing.
-
-        A limits screen is exactly the surface that grows — another control, another explanation —
-        and the failure mode is a user unable to reach the cap they came to change.
+        Scrolls. A limits screen is exactly the surface that grows — another control, another
+        explanation — and the failure mode is a user unable to reach the cap they came to change.
       */}
       <Fill style={{ marginTop: space.s20 }}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
         <SheetCard borderRadius={radius.panel} padding={space.s16}>
+          {/* No chevron. This header is not pressable, and a chevron promises somewhere to go. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s12 }}>
             <AssetMark gradient={agentGradients.Strategist} size={size.mark} />
             <Text variant="cardTitle" style={{ flex: 1 }}>
               Limits
             </Text>
-            <Icon name="chevron" size={13} color={colors.ink55} />
           </View>
 
           <Row
             title="Run For"
             right={<Pill label={RUN_FOR[runFor]!} selected onPress={cycleRunFor} />}
-            height={size.row}
-          />
-
-          <View
-            style={[
-              {
-                minHeight: size.row,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: space.s12,
-                paddingVertical: space.s8,
-              },
-              dividerStyle,
-            ]}
-          >
-            <View style={{ flex: 1, gap: space.s2 }}>
-              <Text variant="rowPrimary">Trade Autonomously</Text>
-              {/* The caption design.md makes mandatory on a switch that authorises spending. */}
-              <Text variant="secondarySm">{autoNote(auto)}</Text>
-            </View>
-            <Switch on={auto} onChange={setAuto} accessibilityLabel="Trade autonomously" />
-          </View>
-
-          <Row
-            title="Risk Level"
-            right={<Pill label={RISK_LEVELS[risk]!} selected onPress={cycleRisk} />}
             height={size.row}
           />
 
@@ -226,15 +193,19 @@ export default function TradeSettings() {
         </ScrollView>
       </Fill>
 
-      <Button label={runLabel(auto)} loading={busy} onPress={commit} />
+      {/* Signed out, the one step that is possible sits where the signature would. */}
+      {signedOut ? (
+        <SignInButton label="Sign in to set limits" />
+      ) : (
+        <Button label="Sign these limits" loading={busy} onPress={commit} />
+      )}
       <Text
         variant="footnote"
         color={colors.ink55}
         align="center"
         style={{ marginTop: space.s12 }}
       >
-        These limits are signed on-chain. The bot cannot exceed them, and you can revoke in
-        one tap.
+        Signed by you. Revoke anytime in Safety.
       </Text>
     </Screen>
   );

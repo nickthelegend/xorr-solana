@@ -1,13 +1,14 @@
 /**
  * The limits each agent is holding itself to.
  *
- * `riskLimits` is persisted per agent and shaped by the agent — a momentum agent caps its position
- * size, a drawdown guard has a threshold it acts at. The settings screen edits one agent's at a
- * time; nothing showed all four together, which is the only way to notice that one of them is
- * carrying a limit far looser than the rest.
+ * `riskLimits` is persisted per agent — a most-per-trade and a most-per-day, validated by
+ * `PATCH /agents/:id` and enforced by the executor on every run of a strategy that agent runs. Nothing
+ * else shows all four together, which is the only way to notice that one of them is carrying a limit
+ * far looser than the rest.
  *
- * Rendered key by key rather than through a layout written for one agent's fields, because the
- * shape differs per agent and a fixed layout would silently drop whatever it did not expect.
+ * Rendered through `recordEntries` rather than a layout written for those two fields. Rows stored
+ * before the server validated them can carry any shape, a fixed layout would silently drop whatever it
+ * did not expect, and `String(value)` printed anything nested as `[object Object]`.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
@@ -30,9 +31,15 @@ import {
 import { agentGradient } from '@/design/gradients';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
+import { recordEntries } from '@/state/derived';
 
 export default function Risk() {
   const goBack = useGoBack();
+  /*
+   * `listAgents` throws when /agents cannot answer. It fell back to four fixture personas with no
+   * limits, so an outage reached the empty state below as a claim that no agent carries any — about
+   * limits nobody had read. It reaches the ErrorState now, and signed out, a sign-in.
+   */
   const { data, loading, error, reload } = useAsync(() => repos.bot.listAgents(), []);
 
   const agents = data ?? [];
@@ -43,7 +50,7 @@ export default function Risk() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Risk limits</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          What each agent holds itself to, on top of the cap the contract enforces.
+          Each agent&apos;s own limits, on top of your daily cap.
         </Text>
       </View>
 
@@ -53,9 +60,7 @@ export default function Risk() {
         ) : loading && !data ? (
           <LoadingRows count={4} height={size.rowLg} />
         ) : withLimits.length === 0 ? (
-          <EmptyState
-            text="No agent carries its own limits. The daily cap and the venue allowlist are the only things constraining them, and those are enforced on-chain."
-          />
+          <EmptyState text="No agent has its own limits. Your daily cap still applies." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -71,30 +76,36 @@ export default function Risk() {
                 </View>
 
                 {/*
-                  Key by key. The shape is per-agent, and a layout written for one would drop the
-                  fields it did not expect without saying so.
+                  Row by row. The shape is per agent, and anything nested is flattened into its own
+                  rows rather than dropped without saying so.
                 */}
-                {Object.entries(a.riskLimits ?? {}).map(([k, v]) => (
+                {recordEntries(a.riskLimits).map((e) => (
                   <View
-                    key={k}
+                    key={e.key}
                     style={{
                       flexDirection: 'row',
                       justifyContent: 'space-between',
+                      gap: space.s12,
                       marginTop: space.s10,
                     }}
                   >
                     <Text variant="secondarySm" color={colors.ink65}>
-                      {k}
+                      {e.label}
                     </Text>
-                    <Text variant="secondarySm">{String(v)}</Text>
+                    <Text variant="secondarySm" style={{ flexShrink: 1, textAlign: 'right' }}>
+                      {e.value}
+                    </Text>
                   </View>
                 ))}
               </SheetCard>
             ))}
 
             <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s6 }}>
-              These are the agent&apos;s own rules and it can be wrong about them. The daily cap and
-              the venue allowlist are enforced by the contract, which cannot.
+              {/*
+                The true line. This said the agent "can be wrong about" its own rules; the executor
+                enforces them on every run, and the contract enforces the cap on top.
+              */}
+              The executor enforces these. The contract enforces the cap.
             </Text>
           </ScrollView>
         )}

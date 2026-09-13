@@ -39,6 +39,7 @@ import { api } from '@/data/api';
 import { nextRuns } from '@/strategies/schedule';
 import type { Cadence } from '@/data/types';
 import { errorText } from '@/data/apiError';
+import { percent } from '@/format';
 
 type GridBacktest = {
   inRangePct: number;
@@ -55,6 +56,19 @@ const SYMBOLS = [
   { value: 'CBBTC', label: 'CBBTC' },
 ] as const;
 type Symbol = (typeof SYMBOLS)[number]['value'];
+
+/** What a backtest ran on. Its result is shown only while the screen still says the same. */
+type GridInputs = { symbol: Symbol; lower: number; upper: number; steps: number; usdPerStep: number };
+
+function sameGrid(a: GridInputs, b: GridInputs): boolean {
+  return (
+    a.symbol === b.symbol &&
+    a.lower === b.lower &&
+    a.upper === b.upper &&
+    a.steps === b.steps &&
+    a.usdPerStep === b.usdPerStep
+  );
+}
 
 const STEP_OPTIONS = [2, 4, 6, 8] as const;
 const STEPS = STEP_OPTIONS.map((n) => ({ value: n as number, label: String(n) }));
@@ -92,18 +106,31 @@ export default function GridSetup() {
    * It costs a call to a rate-limited history API, and re-running it on every keystroke while
    * someone types a range would spend that quota on ranges they are still in the middle of
    * deciding — and could take the live prices down with it.
+   *
+   * And a result belongs to the range it ran on. The request was keyed on a counter, so after one
+   * test, editing the range left the old answer on screen under the new numbers — and hid "Test it",
+   * because a result was showing. The inputs a test ran with are kept now, and its result shows only
+   * while the inputs on screen still match them.
    */
-  const [testNonce, setTestNonce] = useState(0);
+  const inputs: GridInputs = { symbol, lower: lo, upper: hi, steps, usdPerStep };
+  const [tested, setTested] = useState<GridInputs | null>(null);
   const back = useAsync(async () => {
-    if (testNonce === 0) return null;
+    if (!tested) return null;
     return api.post<GridBacktest>('/strategies/backtest', {
       kind: 'grid',
-      symbol,
+      symbol: tested.symbol,
       lookback: '90d',
-      params: { lower: lo, upper: hi, steps, usdPerStep },
+      params: {
+        lower: tested.lower,
+        upper: tested.upper,
+        steps: tested.steps,
+        usdPerStep: tested.usdPerStep,
+      },
     });
-  }, [testNonce]);
-  const runBacktest = () => setTestNonce((n) => n + 1);
+  }, [tested]);
+  const testedNow = tested !== null && sameGrid(tested, inputs);
+  // The same range again is a retry; a changed one is a new question.
+  const runBacktest = () => (testedNow ? back.reload() : setTested(inputs));
 
 
   /*
@@ -277,7 +304,8 @@ export default function GridSetup() {
               >
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Eyebrow small color={colors.sheet.muted}>Over the last 90 days</Eyebrow>
-                  {!back.data && !back.loading ? (
+                  {/* Offered for a range not yet tested, and after a failure — never over a result that stands. */}
+                  {!signedOut && !(testedNow && (back.loading || back.data != null)) ? (
                     <Press
                       onPress={runBacktest}
                       accessibilityRole="button"
@@ -290,11 +318,24 @@ export default function GridSetup() {
                     </Press>
                   ) : null}
                 </View>
-                {back.loading ? (
+                {signedOut ? (
+                  <Text variant="secondarySm" color={colors.sheet.muted}>
+                    Sign in to test this range.
+                  </Text>
+                ) : !testedNow ? (
+                  <Text variant="secondarySm" color={colors.sheet.muted}>
+                    Replay this range over real prices.
+                  </Text>
+                ) : back.loading ? (
                   <Text variant="body" color={colors.sheet.muted}>Replaying real prices…</Text>
                 ) : back.error ? (
+                  /*
+                    The executor's sentence. Every failure read "No price history for WETH" — a rate
+                    limit, a timeout and a refused range alike — which sent people looking for a
+                    missing feed.
+                  */
                   <Text variant="secondarySm" color={colors.candleDown}>
-                    No price history for {symbol}, so there is nothing to test against.
+                    {errorText(back.error)}
                   </Text>
                 ) : back.data ? (
                   <>
@@ -302,39 +343,41 @@ export default function GridSetup() {
                       In range {back.data.inRangePct}% of the time
                     </Text>
                     <Text variant="secondarySm" color={colors.sheet.muted}>
-                      {back.data.buys} buys and {back.data.sells} sells, {back.data.ret >= 0 ? 'up' : 'down'}{' '}
-                      {Math.abs(back.data.ret)}% on what it put to work.
+                      {back.data.buys} buys and {back.data.sells} sells,{' '}
+                      {back.data.ret >= 0 ? 'up' : 'down'}{' '}
+                      {percent(Math.abs(back.data.ret), { explicitSign: false })} on what it put to work.
                     </Text>
                     {back.data.leftCost > 0 ? (
                       <Text variant="secondarySm" color={colors.candleDown}>
-                        It would have ended still holding {money(back.data.leftValue)} of {symbol}
-                        {' '}that cost {money(back.data.leftCost)} — that is what a broken range
-                        looks like.
+                        {/* What a broken range looks like, in its own numbers. */}
+                        It would have ended holding {money(back.data.leftValue)} of {symbol} that
+                        cost {money(back.data.leftCost)}.
                       </Text>
                     ) : null}
                     <Text variant="footnote" color={colors.sheet.dim}>{back.data.disclaimer}</Text>
                   </>
-                ) : (
-                  <Text variant="secondarySm" color={colors.sheet.muted}>
-                    Replay this exact range over real daily closes before you commit to it.
-                  </Text>
-                )}
+                ) : null}
               </View>
             ) : null}
 
-            {/* The two things that decide whether this is a good idea. Neither is a footnote. */}
+            {/*
+              The two things that decide whether this is a good idea. Neither is a footnote, and each
+              is one line that stays true to the planner (`planGrid`, server/src/executor/kinds/index.ts):
+
+                - a rung it holds is not bought again, but a rung it has sold can be — so "it never buys
+                  the same rung twice", which this said, stopped being true after the first sale;
+                - outside the range it does nothing, and every lot bought on the way down is still held.
+            */}
             <View style={{ marginTop: space.s16, gap: 8 }}>
               <Text variant="secondarySm" color={colors.sheet.muted}>
-                At most {money(maxCommitted)} at work — one rung each, and it never buys the same
-                rung twice.
+                At most {money(maxCommitted)} at work, one buy per rung at a time.
               </Text>
               <Text variant="secondarySm" color={colors.sheet.muted}>
-                If {symbol} leaves the range it stops rather than chasing. You keep whatever it
-                bought on the way down, which is the risk you are taking.
+                If {symbol} leaves the range it stops, and you keep what it bought.
               </Text>
               {rungs.length > 0 && !inRange && mark !== undefined ? (
                 <Text variant="secondarySm" color={colors.candleDown}>
-                  {money(mark)} is outside this range, so nothing would happen until it comes back.
+                  {money(mark)} is outside this range, so it would wait.
                 </Text>
               ) : null}
             </View>
@@ -384,7 +427,8 @@ export default function GridSetup() {
         align="center"
         style={{ marginTop: space.s12 }}
       >
-        The first run takes a reading. Trades start on the first crossing after that.
+        {/* It trades on crossings, and its first run has nothing to have crossed from (`planGrid`). */}
+        Its first run only takes a reading.
       </Text>
     </Screen>
   );

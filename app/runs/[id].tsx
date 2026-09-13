@@ -25,6 +25,7 @@ import {
 import { money, price, quantity } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { system, type StrategyRunRow } from '@/data/system';
+import { kindLabel } from '@/strategies/ladder';
 
 function toneFor(status: StrategyRunRow['status']): string {
   if (status === 'filled') return colors.up;
@@ -58,7 +59,7 @@ export default function RunDetail() {
           <Placeholder height={170} />
         ) : !run ? (
           <Text variant="body" color={colors.ink55}>
-            That run is not in the last two hundred. Older runs are still in the audit trail.
+            Not among your latest 200 runs.
           </Text>
         ) : (
           <ScrollView
@@ -73,7 +74,8 @@ export default function RunDetail() {
                 {run.status.charAt(0).toUpperCase() + run.status.slice(1)}
               </Text>
               <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                {run.symbol} · {run.kind} · {new Date(run.at).toLocaleString('en-US')}
+                {/* The kind as the library names it — "Recurring buy", not `dca`. */}
+                {run.symbol} · {kindLabel(run.kind)} · {new Date(run.at).toLocaleString('en-US')}
               </Text>
             </SheetCard>
 

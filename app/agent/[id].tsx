@@ -9,6 +9,11 @@
  * strategy kind each agent's mandate covers — breakouts for Momentum Scout, earnings events for
  * Earnings Desk, idle cash for Yield Keeper, exits for Drawdown Guard — and lists this wallet's
  * strategies of that kind. The mapping is the mandate, written down; it attributes no run to anyone.
+ *
+ * "Add strategy" goes where the ladder says that kind is set up, and appears only when something in
+ * the app can set it up. It sent Momentum Scout and Earnings Desk to /strategies, where neither kind
+ * can be created, so those two say they have nothing to add. The full list is still one tap away, from
+ * the card's own header: this page is how people reach it.
  */
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -20,6 +25,7 @@ import {
   Button,
   ErrorState,
   Placeholder,
+  Press,
   Price,
   Row,
   Screen,
@@ -36,7 +42,9 @@ import { Rise } from '@/ui/Rise';
 import { agentGradient } from '@/design/gradients';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
-import { STRATEGY_LADDER } from '@/strategies/ladder';
+import { errorText } from '@/data/apiError';
+import { winRate } from '@/state/derived';
+import { setupFor } from '@/strategies/ladder';
 import type { StrategyKind } from '@/data/types';
 
 /** The strategy kind each agent's mandate covers. See the header comment. */
@@ -62,7 +70,10 @@ export default function AgentDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [hiring, setHiring] = useState(false);
+  const [hireError, setHireError] = useState<string>();
 
+  // `listAgents` throws when /agents cannot answer, so a failed read reaches the ErrorState below
+  // rather than passing for an agent with a record of zeros. Signed out, that asks for a sign-in.
   const agents = useAsync(() => repos.bot.listAgents(), []);
   const strategies = useAsync(() => repos.strategies.list(), []);
 
@@ -71,14 +82,23 @@ export default function AgentDetail() {
   // Plain: the React Compiler memoizes this itself, and could not preserve a hand-written memo keyed
   // on a joined string.
   const mine = (strategies.data ?? []).filter((s) => kinds.includes(s.kind) && s.state !== 'ended');
-  const addRoute = STRATEGY_LADDER.find((e) => kinds.includes(e.kind))?.route ?? '/strategies';
+  const setup = setupFor(kinds);
 
   const hire = async () => {
     if (!agent) return;
     setHiring(true);
+    setHireError(undefined);
     try {
       await repos.bot.hire(agent.personaId ?? agent.id);
-      await agents.reload();
+      agents.reload();
+    } catch (e) {
+      /*
+       * The server's sentence, under the button that asked.
+       *
+       * There was no catch: a refused hire stopped the spinner and changed nothing else, which reads
+       * as a hire that went through — until the chip still says NOT HIRED.
+       */
+      setHireError(errorText(e));
     } finally {
       setHiring(false);
     }
@@ -140,8 +160,13 @@ export default function AgentDetail() {
           </Rise>
 
           {!agent.hired ? (
-            <Rise index={1}>
+            <Rise index={1} style={{ gap: space.s8 }}>
               <Button label={`Hire ${agent.name}`} onPress={hire} loading={hiring} />
+              {hireError ? (
+                <Text variant="secondarySm" color={colors.down} align="center">
+                  {hireError}
+                </Text>
+              ) : null}
             </Rise>
           ) : null}
 
@@ -156,12 +181,25 @@ export default function AgentDetail() {
 
           <Rise index={2} style={{ flexDirection: 'row', gap: space.s10 }}>
             <Stat label="30 days" value={money(agent.pnl30d)} tone={pnlTone(agent.pnl30d)} />
-            <Stat label="Win rate" value={`${agent.win}%`} />
+            {/* A share of trades: with none there is no rate, and "0%" read as every trade lost. */}
+            <Stat label="Win rate" value={winRate(agent)} />
             <Stat label="Trades" value={String(agent.trades)} />
           </Rise>
 
           <Rise index={3} style={{ borderRadius: radius.panel, backgroundColor: colors.surfaceAlt, padding: space.s16 }}>
-            <Text variant="cardTitle">Strategies</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text variant="cardTitle">Strategies</Text>
+              <Press
+                onPress={() => router.push('/strategies')}
+                accessibilityRole="button"
+                accessibilityLabel="See all strategies"
+                hitHeight={size.hit}
+              >
+                <Text variant="control" color={colors.ink55}>
+                  See all
+                </Text>
+              </Press>
+            </View>
             {strategies.loading && !strategies.data ? (
               <View style={{ marginTop: space.s12, gap: space.s10 }}>
                 <Placeholder height={48} />
@@ -188,9 +226,15 @@ export default function AgentDetail() {
                 />
               ))
             )}
-            <View style={{ marginTop: space.s14 }}>
-              <Button label="Add strategy" variant="ghost" onPress={() => router.push(addRoute as never)} />
-            </View>
+            {setup ? (
+              <View style={{ marginTop: space.s14 }}>
+                <Button label="Add strategy" variant="ghost" onPress={() => router.push(setup.route as never)} />
+              </View>
+            ) : (
+              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }}>
+                No strategy to add for {agent.name} yet.
+              </Text>
+            )}
           </Rise>
         </ScrollView>
       )}

@@ -32,6 +32,7 @@ import { useSignedOut } from '@/auth/useSignedOut';
 import { keypadPress } from '@/state/derived';
 import { repos } from '@/data';
 import { nextRuns } from '@/strategies/schedule';
+import { RECURRING_BUY_SYMBOLS, type RecurringBuySymbol } from '@/strategies/ladder';
 import type { Cadence } from '@/data/types';
 import { errorText } from '@/data/apiError';
 
@@ -47,19 +48,12 @@ const CADENCES = [
  * through 1inch and settle through XorrDelegation — offering a symbol it cannot route would
  * let a user schedule a strategy that can never execute.
  *
- * USDC used to be in this list and is exactly the case the paragraph above forbids. It is what a
- * buy is PAID IN, so "Buy $50 of USDC, weekly" is a swap from USDC to USDC: 1inch rejects it
- * outright — `src and dst should be different`, HTTP 400 — so the strategy would have been
- * created, scheduled, and failed on every run for as long as it was left on. Idle USDC has its
- * own tier, "Move idle cash to yield", which supplies it to Aave instead of swapping it for
- * itself.
+ * The list is `RECURRING_BUY_SYMBOLS`, kept with the ladder and shared with the backtest, which had
+ * drifted into offering USDC — the case this screen removed. Why USDC is impossible is written there.
  */
-const SYMBOLS = [
-  { value: 'WETH', label: 'WETH' },
-  { value: 'CBBTC', label: 'CBBTC' },
-] as const;
+const SYMBOLS = RECURRING_BUY_SYMBOLS.map((s) => ({ value: s, label: s }));
 
-type Symbol = (typeof SYMBOLS)[number]['value'];
+type Symbol = RecurringBuySymbol;
 
 /** The cadence in the sentence the CTA and the label both speak. */
 function phrase(c: Cadence): string {

@@ -10,23 +10,12 @@ import { agentFixtures } from '../data/fixtures/agents';
 import { activityFixtures } from '../data/fixtures/activity';
 
 describe('agent controls — screen 4', () => {
-  it('autoNote changes with the switch (design.md §5 requires the caption to change)', () => {
-    expect(d.autoNote(true)).toBe('Executes inside your limits without asking');
-    expect(d.autoNote(false)).toBe('Every trade waits for your approval');
-    expect(d.autoNote(true)).not.toBe(d.autoNote(false));
-  });
-
   it('capLabel and the marker position', () => {
     expect(d.capLabel(1600)).toBe('$1,600/day');
     // state.md: capMarker = (cap - 200) / 4800 * 100
     expect(d.capMarkerPct(1600)).toBeCloseTo(29.1667, 3);
     expect(d.capMarkerPct(200)).toBe(0);
     expect(d.capMarkerPct(5000)).toBe(100);
-  });
-
-  it('runLabel', () => {
-    expect(d.runLabel(true)).toBe('Run Agent');
-    expect(d.runLabel(false)).toBe('Save Settings');
   });
 
   it('Run For maps to a real delegation lifetime', () => {
@@ -220,6 +209,14 @@ describe('backtest — screen 17', () => {
     expect(d.btDrawdown(-14.6)).not.toContain('-');
   });
 
+  it('a replay that never fell has no drawdown to sign', () => {
+    // "−0.0%" put a minus sign on a zero.
+    expect(d.btDrawdown(0)).toBe('0.0%');
+    // Rounded first: a dip too small to show is shown as none, not as a signed zero.
+    expect(d.btDrawdown(-0.04)).toBe('0.0%');
+    expect(d.btDrawdown(-0.06)).toBe(`${MINUS}0.1%`);
+  });
+
   it('the summary formats every field', () => {
     expect(d.backtestSummary(5000, 11.8, -5.4)).toEqual({
       end: '$5,590.00',
@@ -240,6 +237,29 @@ describe('leaderboard — screen 16', () => {
     ]);
     expect(d.sortLeaderboard(agentFixtures, 'win')[0]!.name).toBe('Yield Keeper');
     expect(d.sortLeaderboard(agentFixtures, 'trades')[0]!.name).toBe('Momentum Scout');
+  });
+
+  /*
+   * The third sort was labelled "Volume" and ordered by trade count. The server sends no volume, so
+   * the label names the number it sorts by.
+   */
+  it('names each sort for the number it sorts by', () => {
+    expect(d.LEADERBOARD_LABELS).toHaveLength(d.LEADERBOARD_KEYS.length);
+    expect(d.LEADERBOARD_LABELS[d.LEADERBOARD_KEYS.indexOf('trades')]).toBe('Trades');
+    expect(d.LEADERBOARD_LABELS).not.toContain('Volume');
+  });
+
+  it('shows no win rate for an agent with no trades, rather than a 0% that reads as every trade lost', () => {
+    expect(d.winRate({ win: 0, trades: 0 })).toBe('—');
+    expect(d.winRate({ win: 61, trades: 37 })).toBe('61%');
+    // A real zero, over real trades, is still a zero.
+    expect(d.winRate({ win: 0, trades: 4 })).toBe('0%');
+  });
+
+  it('signs a gain or a loss, and not a zero', () => {
+    expect(d.signedPnl(0)).toBe('$0.00');
+    expect(d.signedPnl(842)).toBe('+$842.00');
+    expect(d.signedPnl(-96)).toBe(`${MINUS}$96.00`);
   });
 
   it('bars normalise to the largest absolute P&L (1204)', () => {
@@ -466,6 +486,67 @@ describe('activity — screen 15', () => {
     expect(d.activityAmountIsCredit('+$44.90')).toBe(true);
     expect(d.activityAmountIsCredit(`${MINUS}$370.02`)).toBe(false);
     expect(d.activityAmountIsCredit('')).toBe(false);
+  });
+});
+
+describe('a stored record, as rows — /risk and /strategy/[id]', () => {
+  it('flattens what is nested instead of printing [object Object]', () => {
+    // The onboarding rebalance, as `app/(onboarding)/proposal.tsx` stores it.
+    const rows = d.recordEntries({
+      targets: { WETH: 27.5, CBBTC: 27.5 },
+      cashPct: 45,
+      weights: [55, 30, 15],
+      sleeves: ['Blue-chip crypto', 'Tokenized equities', 'Stable yield'],
+    });
+    expect(rows.map((r) => [r.label, r.value])).toEqual([
+      ['Target · WETH', '27.5%'],
+      ['Target · CBBTC', '27.5%'],
+      ['Cash', '45%'],
+      ['Weights', '55%, 30%, 15%'],
+      ['Sleeves', 'Blue-chip crypto, Tokenized equities, Stable yield'],
+    ]);
+  });
+
+  it("names an agent's limits, in dollars", () => {
+    expect(d.recordEntries({ maxUsdPerTrade: 50, maxUsdPerDay: 1200 })).toEqual([
+      { key: 'maxUsdPerTrade', label: 'Most per trade', value: '$50.00' },
+      { key: 'maxUsdPerDay', label: 'Most per day', value: '$1,200.00' },
+    ]);
+  });
+
+  it('keeps a key it does not know, spaced out, rather than dropping it', () => {
+    expect(d.recordEntries({ lastLevel: 2, openLots: [0, 1] }).map((r) => [r.label, r.value])).toEqual([
+      ['Last level', '2'],
+      ['Open lots', '0, 1'],
+    ]);
+  });
+
+  it('never renders a value nobody could read', () => {
+    const rows = d.recordEntries({
+      deep: { deeper: { deepest: 1 } },
+      list: [{ usd: 5 }, { usd: 6 }],
+      empty: {},
+      none: null,
+      missing: undefined,
+      broken: Number.NaN,
+      endless: Number.POSITIVE_INFINITY,
+      blank: '',
+      negative: -3.5,
+    });
+    const text = rows.map((r) => `${r.label} ${r.value}`).join('\n');
+    expect(text).not.toMatch(/\[object Object\]|NaN|undefined|null|Infinity/);
+    expect(rows.find((r) => r.label === 'Deep · deeper · deepest')?.value).toBe('1');
+    expect(rows.find((r) => r.label === 'List 2 · Per run')?.value).toBe('$6.00');
+    expect(rows.find((r) => r.label === 'Negative')?.value).toBe(`${MINUS}3.5`);
+    // Every key is still there — the empty and the unreadable ones as a dash, not hidden.
+    expect(rows.filter((r) => r.value === '—').map((r) => r.label)).toEqual([
+      'Empty',
+      'None',
+      'Missing',
+      'Broken',
+      'Endless',
+      'Blank',
+    ]);
   });
 });
 

@@ -11,18 +11,14 @@ import { DEFAULT_BUY } from '@/data/tradable';
 
 // ── Agent controls (screen 4) ────────────────────────────────────────────────
 
+/*
+ * `RISK_LEVELS`, `autoNote` and `runLabel` went with the controls they served — a "Risk Level" pill and
+ * a "Trade Autonomously" switch that nothing signed, sent or read. See app/bot/[id]/settings.tsx.
+ */
 export const RUN_FOR = ['1 Day', '3 Days', '7 Days', '30 Days'] as const;
-export const RISK_LEVELS = ['Low', 'Medium', 'High'] as const;
 export const CAP_MIN = 200;
 export const CAP_MAX = 5000;
 export const CAP_STEP = 200;
-
-/** state.md: the caption that MUST accompany the autonomy switch. */
-export function autoNote(auto: boolean): string {
-  return auto
-    ? 'Executes inside your limits without asking'
-    : 'Every trade waits for your approval';
-}
 
 export function capLabel(cap: number): string {
   return `${money(cap, { fractionDigits: 0 })}/day`;
@@ -31,10 +27,6 @@ export function capLabel(cap: number): string {
 /** Marker position along the $200–$5,000 risk rail, as a 0–100 percentage. */
 export function capMarkerPct(cap: number): number {
   return ((cap - CAP_MIN) / (CAP_MAX - CAP_MIN)) * 100;
-}
-
-export function runLabel(auto: boolean): string {
-  return auto ? 'Run Agent' : 'Save Settings';
 }
 
 /** "Run For" as a real expiry — the pivot turns this control into the delegation's lifetime. */
@@ -262,16 +254,27 @@ export function btEnd(capital: number, ret: number): number {
 export function btGain(capital: number, ret: number): number {
   return btEnd(capital, ret) - capital;
 }
-/** state.md: "U+2212, not a hyphen" — this was called out explicitly for Max DD. */
+/**
+ * state.md: "U+2212, not a hyphen" — this was called out explicitly for Max DD.
+ *
+ * And only on a drawdown there was. A replay that never fell below its peak printed "−0.0%", a minus
+ * sign on a zero. The sign follows the rounded figure, so a dip too small to show reads as none.
+ */
 export function btDrawdown(dd: number): string {
-  return `${MINUS}${Math.abs(dd).toFixed(1)}%`;
+  const figure = Math.abs(dd).toFixed(1);
+  return `${Number(figure) === 0 ? '' : MINUS}${figure}%`;
 }
 
 // ── Leaderboard (screen 16) ──────────────────────────────────────────────────
 
 export type LeaderboardKey = 'pnl30d' | 'win' | 'trades';
 export const LEADERBOARD_KEYS: LeaderboardKey[] = ['pnl30d', 'win', 'trades'];
-export const LEADERBOARD_LABELS = ['P&L', 'Win rate', 'Volume'] as const;
+/**
+ * Each sort named for the number it sorts by. The third was "Volume" and ordered by trade count, so
+ * an agent with forty small buys outranked one with two large ones under a word meaning the opposite.
+ * `/agents/leaderboard` sends no volume to sort by, so the label moved to the number there is.
+ */
+export const LEADERBOARD_LABELS = ['P&L', 'Win rate', 'Trades'] as const;
 
 export function sortLeaderboard<T extends Record<LeaderboardKey, number>>(
   rows: readonly T[],
@@ -283,6 +286,22 @@ export function sortLeaderboard<T extends Record<LeaderboardKey, number>>(
 export function leaderboardBarPct(pnlValue: number, rows: readonly { pnl30d: number }[]): number {
   const max = Math.max(...rows.map((r) => Math.abs(r.pnl30d)), 1);
   return (Math.abs(pnlValue) / max) * 100;
+}
+
+/**
+ * A win rate is a share of trades, so an agent with none has no rate.
+ *
+ * The server sends `win: 0` beside `trades: 0` — honestly, as "no record" — and the agent page, the
+ * comparison and the leaderboard printed it as "0%", which reads as an agent that lost every trade it
+ * made. It made none.
+ */
+export function winRate(agent: { win: number; trades: number }): string {
+  return agent.trades > 0 ? `${agent.win}%` : '—';
+}
+
+/** A signed P&L that does not sign a zero. "+$0.00" is a gain nobody made. */
+export function signedPnl(value: number): string {
+  return Math.abs(value) < 0.005 ? money(0) : signedMoney(value);
 }
 
 // ── Kill switch (screen 20) ──────────────────────────────────────────────────
@@ -673,4 +692,124 @@ export function nothingSettles(
   watchable: readonly unknown[] | null | undefined,
 ): boolean {
   return Array.isArray(tradable) && tradable.length === 0 && (watchable?.length ?? 0) > 0;
+}
+
+// ── Stored records as rows (/risk, /strategy/[id]) ───────────────────────────
+
+/** One row of a stored record: where it came from, what to call it, and the value as a person reads it. */
+export type RecordEntry = { key: string; label: string; value: string };
+
+type RecordUnit = 'money' | 'price' | 'percent';
+
+/**
+ * Names and units for the keys the app and the executor write, in the words the setup screens use.
+ * Anything not listed keeps its own key, spaced out, and a plain value — named plainly beats hidden.
+ */
+const RECORD_FIELDS: Readonly<Record<string, { label: string; unit?: RecordUnit }>> = {
+  // An agent's own limits — `RiskLimits` in server/src/agents/routes.ts.
+  maxUsdPerTrade: { label: 'Most per trade', unit: 'money' },
+  maxUsdPerDay: { label: 'Most per day', unit: 'money' },
+  // Recurring buy and idle cash.
+  usd: { label: 'Per run', unit: 'money' },
+  keepCashUsd: { label: 'Keep spendable', unit: 'money' },
+  minMoveUsd: { label: 'Smallest move', unit: 'money' },
+  // Range accumulation.
+  lower: { label: 'Bottom of range', unit: 'price' },
+  upper: { label: 'Top of range', unit: 'price' },
+  steps: { label: 'Rungs' },
+  usdPerStep: { label: 'Each rung buys', unit: 'money' },
+  // Exit rules.
+  entryPrice: { label: 'Entry', unit: 'price' },
+  takeProfitPct: { label: 'Take profit', unit: 'percent' },
+  stopLossPct: { label: 'Stop loss', unit: 'percent' },
+  trailPct: { label: 'Trailing stop', unit: 'percent' },
+  peakPrice: { label: 'Highest since set', unit: 'price' },
+  // Rebalance. Targets and weights are percents of the whole portfolio.
+  targets: { label: 'Target', unit: 'percent' },
+  cashPct: { label: 'Cash', unit: 'percent' },
+  weights: { label: 'Weights', unit: 'percent' },
+  sleeves: { label: 'Sleeves' },
+  // Momentum and events.
+  usdPerEntry: { label: 'Per entry', unit: 'money' },
+  usdPerEvent: { label: 'Per event', unit: 'money' },
+  stopPct: { label: 'Stop', unit: 'percent' },
+};
+
+function recordField(key: string): { label: string; unit?: RecordUnit } | undefined {
+  // Own keys only: a stored key named `constructor` is data, not the object prototype.
+  return Object.prototype.hasOwnProperty.call(RECORD_FIELDS, key) ? RECORD_FIELDS[key] : undefined;
+}
+
+/** `usdPerEntry` → "USD per entry". */
+function spacedKey(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/\busd\b/g, 'USD');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** As many decimals as the figure has, up to two: 55%, 27.5%, 3.75%. */
+function percentDigits(n: number): number {
+  const hundredths = Math.round(Math.abs(n) * 100);
+  if (hundredths % 100 === 0) return 0;
+  return hundredths % 10 === 0 ? 1 : 2;
+}
+
+function recordValue(value: unknown, unit: RecordUnit | undefined): string {
+  if (typeof value === 'number') {
+    // NaN and Infinity are not values anyone set; they are what an unreadable one looks like.
+    if (!Number.isFinite(value)) return '—';
+    if (unit === 'money') return money(value);
+    if (unit === 'price') return price(value);
+    if (unit === 'percent') return percent(value, { digits: percentDigits(value), explicitSign: false });
+    return `${value < 0 ? MINUS : ''}${Math.abs(value).toLocaleString('en-US', { maximumFractionDigits: 6 })}`;
+  }
+  if (typeof value === 'string') return value.trim() === '' ? '—' : value;
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return '—';
+}
+
+/**
+ * A stored record — an agent's limits, a strategy's params — as rows a person can read.
+ *
+ * Both screens rendered `String(value)` key by key, so anything nested reached the screen as
+ * `[object Object]` (a rebalance's targets) or as `55,30,15` (its weights). Nested objects are flattened
+ * into rows like "Target · WETH" rather than dropped, because the shape differs per strategy and per
+ * agent, and a layout that skipped what it did not expect would hide a field without saying so. A value
+ * that cannot be read is a dash, never `NaN`, `null` or `undefined`.
+ */
+export function recordEntries(
+  record: Readonly<Record<string, unknown>> | null | undefined,
+): RecordEntry[] {
+  const rows: RecordEntry[] = [];
+  const visit = (key: string, label: string, value: unknown, unit: RecordUnit | undefined): void => {
+    if (Array.isArray(value)) {
+      if (value.every((v) => v === null || typeof v !== 'object')) {
+        const joined = value.map((v) => recordValue(v, unit)).join(', ');
+        rows.push({ key, label, value: value.length > 0 ? joined : '—' });
+      } else {
+        value.forEach((v, i) => visit(`${key}.${i}`, `${label} ${i + 1}`, v, unit));
+      }
+      return;
+    }
+    if (value !== null && typeof value === 'object') {
+      const children = Object.entries(value as Record<string, unknown>);
+      if (children.length === 0) rows.push({ key, label, value: '—' });
+      for (const [k, v] of children) {
+        const field = recordField(k);
+        // A child key is usually data — a symbol, a sleeve — so it keeps its own spelling: "Target · CBBTC".
+        visit(`${key}.${k}`, `${label} · ${field?.label ?? k}`, v, field?.unit ?? unit);
+      }
+      return;
+    }
+    rows.push({ key, label, value: recordValue(value, unit) });
+  };
+  for (const [k, v] of Object.entries(record ?? {})) {
+    const field = recordField(k);
+    visit(k, field?.label ?? spacedKey(k), v, field?.unit);
+  }
+  return rows;
 }

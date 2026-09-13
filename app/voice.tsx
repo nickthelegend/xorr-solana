@@ -1,13 +1,17 @@
 /**
- * How the bot talks, with the difference shown rather than described.
+ * How the bot talks: three registers, each a name and a line.
  *
  * The tone control lives in Settings as three radio labels — "Dry", "Sharp", "Flat" — which asks
- * someone to pick a register from an adjective. The instruction behind each is real and specific
- * and goes into every system prompt; showing it turns the choice into an informed one.
+ * someone to pick a register from an adjective. This puts each one's line beside it.
+ *
+ * Not the instruction behind it. That text is written for a model — "Write plainly with dry
+ * understatement…" — and it sat under every card, which put the prompt on the screen. A register is
+ * chosen by what it sounds like, which the line says; the instruction stays with the executor
+ * (server/src/bot/tone.ts), where it is used.
  *
  * What is NOT shown is a sample reply. Generating one per tone would mean four model calls to
  * illustrate a setting, and writing them by hand would put words in the agent's mouth that it never
- * said — the exact thing the voice rules exist to prevent. The instruction is the honest artefact.
+ * said — the exact thing the voice rules exist to prevent.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
@@ -34,7 +38,7 @@ export default function Voice() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Voice</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Every reply is written under one of these. The rules about numbers do not change.
+          How the bot writes to you.
         </Text>
       </View>
 
@@ -79,24 +83,18 @@ export default function Voice() {
                   <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s8 }}>
                     {t.description}
                   </Text>
-
-                  {/*
-                    The actual instruction, verbatim. This is what the model is told, and a person
-                    choosing a register deserves to read it rather than infer it from an adjective.
-                  */}
-                  <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s12 }}>
-                    {t.instruction}
-                  </Text>
                 </SheetCard>
               </Press>
             );
           })}
 
           <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
+            {/*
+              The rule that matters, in one line. Whatever the tone, every figure on screen is rendered
+              by the app from its own records: the tone reaches the words, never a number.
+            */}
             <Text variant="secondarySm" color={colors.ink55}>
-              None of these loosen the rules that matter. Whatever the tone, a reply that contains a
-              figure is rejected before it reaches the screen — every number you see is rendered by
-              the app from its own records.
+              Tone never changes a number.
             </Text>
           </SheetCard>
         </ScrollView>

@@ -19,19 +19,18 @@ import {
   Eyebrow,
   Fill,
   Keypad,
-  MINUS,
   Price,
   Screen,
   Segmented,
   Text,
   colors,
   money,
-  percent,
   radius,
   size,
   space,
   SignInButton,
 } from '@/ui';
+import { percent } from '@/format';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { keypadPress } from '@/state/derived';
 import { repos } from '@/data';
@@ -94,6 +93,15 @@ export default function YieldSetup() {
   const apy = rate.data?.estimatedApy;
   /* Only once the rate has actually loaded — an absent answer is not a refusal. */
   const unavailable = rate.data != null && rate.data.availableHere === false;
+  /*
+   * Asked, and no rate came back.
+   *
+   * The card said "No rate right now. Nothing will move." while the button under it stayed live and
+   * created the strategy — so something WAS set to move, on a schedule, against a rate nobody had read
+   * and a pool nobody had confirmed was there. Without a rate there is nothing to decide with, so the
+   * button waits for one, as it already does while the rate loads.
+   */
+  const noRate = !rate.loading && apy === undefined;
 
   async function create() {
     if (usd <= 0) return;
@@ -152,15 +160,16 @@ export default function YieldSetup() {
             USDC supply
           </Eyebrow>
           <Text variant="secondarySm" color={colors.sheet.muted} style={{ marginTop: space.s4 }}>
-            {rate.loading
-              ? 'Loading…'
-              : apy === undefined
-                ? 'No rate right now. Nothing will move.'
-                : 'Variable rate.'}
+            {rate.loading ? 'Loading…' : noRate ? 'Couldn’t read the rate.' : 'Variable rate.'}
           </Text>
         </View>
         <Price color={apy === undefined ? colors.sheet.muted : colors.up}>
-          {rate.loading ? '…' : apy === undefined ? '—' : percent(apy * 100, 2).replace('+', '')}
+          {/* A rate is unsigned: the unsigned percent, not the signed one with its "+" cut off. */}
+          {rate.loading
+            ? '…'
+            : apy === undefined
+              ? '—'
+              : percent(apy * 100, { digits: 2, explicitSign: false })}
         </Price>
       </View>
 
@@ -206,7 +215,8 @@ export default function YieldSetup() {
             />
             <StatRow
               label="Kept back"
-              value={balance.loading ? '…' : kept === undefined ? MINUS : money(kept)}
+              // Unknown is a dash. U+2212 is a minus sign, and it read as a negative amount kept back.
+              value={balance.loading ? '…' : kept === undefined ? '—' : money(kept)}
             />
             <StatRow
               label="Would move"
@@ -270,18 +280,11 @@ export default function YieldSetup() {
         returns null when there is nothing there, so on a build without Aave this screen was
         offering to schedule a strategy guaranteed to do nothing on every run, for ever, silently.
         The executor now reports that check as `availableHere` and this is the other half of it.
-      */}
-      {unavailable ? (
-        <Text
-          variant="secondarySm"
-          color={colors.sheet.muted}
-          align="center"
-          style={{ marginBottom: space.s12 }}
-        >
-          {rate.data?.note}
-        </Text>
-      ) : null}
 
+        Its note is no longer repeated above the button: it names the venue and the chain, and the
+        button already says the one thing that matters. A rate that could not be read is refused the
+        same way — see `noRate`.
+      */}
       {signedOut ? (
         <SignInButton label="Sign in to start" backgroundColor={colors.candleUp} color={colors.ink} />
       ) : (
@@ -289,11 +292,13 @@ export default function YieldSetup() {
           label={
             unavailable
               ? 'Not available on this network'
-              : `Sweep up to ${money(usd, { decimals: 0 })} ${phrase(cadence)}`
+              : noRate
+                ? 'No rate right now'
+                : `Sweep up to ${money(usd, { decimals: 0 })} ${phrase(cadence)}`
           }
           backgroundColor={colors.candleUp}
           color={colors.ink}
-          disabled={usd <= 0 || unavailable}
+          disabled={usd <= 0 || unavailable || apy === undefined}
           loading={busy}
           onPress={create}
         />

@@ -1,9 +1,13 @@
 /**
  * Screen 16 — Agent leaderboard. screens.md Group C.
  *
- * Sort circle. Segmented P&L / Win rate / Volume. Four cards: rank ("01" in `rankFirst` for
+ * Sort circle. Segmented P&L / Win rate / Trades. Four cards: rank ("01" in `rankFirst` for
  * first, else ink30), 38pt orb, name + "{win}% win · {n} trades", signed P&L, then a 4pt bar
  * normalised to the max.
+ *
+ * The third sort was "Volume" and ordered by trade count; it is named for what it sorts by now (see
+ * `LEADERBOARD_LABELS`). And a read that failed says so: there was no error or empty branch, so a
+ * failed or signed-out read left a blank list under "Ranked by P&L · last 30 days".
  *
  * animations.md: the bar is a 250ms WIDTH transition — the longest in the app, "because a
  * re-sort moves several bars at once and 250 lets the eye follow one".
@@ -16,6 +20,8 @@ import { agentGradient } from '@/design/gradients';
 import {
   AssetMark,
   BackButton,
+  EmptyState,
+  ErrorState,
   Fill,
   IconButton,
   LoadingRows,
@@ -31,12 +37,13 @@ import {
   timing,
   useReducedMotion,
 } from '@/ui';
-import { signedMoney } from '@/format';
 import {
   LEADERBOARD_KEYS,
   LEADERBOARD_LABELS,
   leaderboardBarPct,
+  signedPnl,
   sortLeaderboard,
+  winRate,
 } from '@/state/derived';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
@@ -53,7 +60,7 @@ export default function Leaderboard() {
   const goBack = useGoBack();
   const lbSort = useStore((s) => s.lbSort);
   const setLbSort = useStore((s) => s.setLbSort);
-  const { data, loading } = useAsync(() => repos.bot.leaderboard(), []);
+  const { data, loading, error, reload } = useAsync(() => repos.bot.leaderboard(), []);
 
   const rows = data ? sortLeaderboard(data, LEADERBOARD_KEYS[lbSort]!) : [];
 
@@ -71,10 +78,6 @@ export default function Leaderboard() {
         />
       </View>
 
-      <Text variant="secondary" style={{ marginTop: space.s10 }}>
-        How your agents are actually doing against each other. Fire the laggards.
-      </Text>
-
       <Segmented
         options={SORTS}
         value={lbSort}
@@ -85,6 +88,11 @@ export default function Leaderboard() {
       <Fill style={{ marginTop: space.s14 }}>
         {loading && !data ? (
           <LoadingRows count={4} height={78} />
+        ) : error && !data ? (
+          // Signed out, this asks for a sign-in; otherwise it says what failed. Never a blank league.
+          <ErrorState error={error} onRetry={reload} />
+        ) : rows.length === 0 ? (
+          <EmptyState text="No agents to rank yet." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -97,14 +105,17 @@ export default function Leaderboard() {
         )}
       </Fill>
 
-      <Text
-        variant="footnote"
-        color={colors.ink55}
-        align="center"
-        style={{ marginTop: space.s12 }}
-      >
-        Ranked by {LEADERBOARD_LABELS[lbSort]} · last 30 days
-      </Text>
+      {/* The screen's one line, and only under a ranking — not under an error or an empty league. */}
+      {rows.length > 0 ? (
+        <Text
+          variant="footnote"
+          color={colors.ink55}
+          align="center"
+          style={{ marginTop: space.s12 }}
+        >
+          Ranked by {LEADERBOARD_LABELS[lbSort]} · last 30 days
+        </Text>
+      ) : null}
     </Screen>
   );
 }
@@ -122,7 +133,8 @@ function LeaderRow({ agent, index, all }: { agent: Agent; index: number; all: Ag
   const bar = useAnimatedStyle(() => ({ width: `${width.value}%` }));
 
   // Green means profit and red means loss. A flat agent has made neither, so it takes
-  // neither colour — "+$0.00" in profit-green reads as a win that did not happen.
+  // neither colour — "+$0.00" in profit-green reads as a win that did not happen — and no
+  // plus sign either (`signedPnl`).
   const tone = pnlTone(agent.pnl30d);
   const barColor =
     tone === 'up' ? colors.up : tone === 'down' ? colors.down : colors.ink30;
@@ -140,11 +152,14 @@ function LeaderRow({ agent, index, all }: { agent: Agent; index: number; all: Ag
         <View style={{ flex: 1, gap: space.s2 }}>
           <Text variant="rowPrimary">{agent.name}</Text>
           <Text variant="secondarySm">
-            {agent.win}% win · {agent.trades} trades
+            {/* No trades is no record: "0% win · 0 trades" read as a record of losing. */}
+            {agent.trades > 0
+              ? `${winRate(agent)} win · ${agent.trades} ${agent.trades === 1 ? 'trade' : 'trades'}`
+              : 'No trades yet'}
           </Text>
         </View>
         <Price variant="rowPrimaryLg" tone={tone}>
-          {signedMoney(agent.pnl30d)}
+          {signedPnl(agent.pnl30d)}
         </Price>
       </View>
       <View style={{ height: BAR_H, borderRadius: radius.full, backgroundColor: colors.control }}>

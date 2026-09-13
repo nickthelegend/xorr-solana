@@ -7,6 +7,10 @@
  *
  * Every figure carries the same disclaimer the roster carries, once, at the bottom — not per row,
  * because four copies of a caveat is a caveat nobody reads.
+ *
+ * A read that failed says so. `listAgents` fell back to four fixture personas when /agents could not
+ * answer, so the ErrorState below could never show and an outage read as four agents with no record;
+ * it throws now. And an agent that has not traded shows no win rate — "0%" over nothing is not one.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
@@ -14,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   AgentOrb,
+  EmptyState,
   ErrorState,
   Fill,
   HeaderBar,
@@ -29,7 +34,7 @@ import {
   space,
 } from '@/ui';
 import { agentGradient } from '@/design/gradients';
-import { signedMoney } from '@/format';
+import { signedPnl, winRate } from '@/state/derived';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 
@@ -51,6 +56,8 @@ export default function RosterCompare() {
           <ErrorState error={error} onRetry={reload} />
         ) : loading && !data ? (
           <LoadingRows count={4} height={size.rowLg} />
+        ) : agents.length === 0 ? (
+          <EmptyState text="No agents to compare yet." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -80,20 +87,18 @@ export default function RosterCompare() {
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: space.s20, marginTop: space.s14 }}>
-                    <Cell label="30d" value={signedMoney(a.pnl30d)} tone={pnlTone(a.pnl30d)} />
-                    <Cell label="Won" value={`${a.win}%`} />
+                    <Cell label="30d" value={signedPnl(a.pnl30d)} tone={pnlTone(a.pnl30d)} />
+                    <Cell label="Won" value={winRate(a)} />
                     <Cell label="Trades" value={String(a.trades)} />
                   </View>
                 </SheetCard>
               </Press>
             ))}
 
-            {agents.length > 0 ? (
-              <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
-                {/* Once, at the bottom. Four copies of a caveat is a caveat nobody reads. */}
-                Past performance of a strategy says nothing about tomorrow.
-              </Text>
-            ) : null}
+            <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
+              {/* Once, at the bottom. Four copies of a caveat is a caveat nobody reads. */}
+              Past performance of a strategy says nothing about tomorrow.
+            </Text>
           </ScrollView>
         )}
       </Fill>
