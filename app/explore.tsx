@@ -44,6 +44,7 @@ const GROUPS: Group[] = [
     title: 'Money',
     blurb: 'What was made, what was spent, and what is left.',
     items: [
+      { route: '/deposit', title: 'Deposit', detail: 'Your address, what the wallet holds, and test funds where this network has any' },
       { route: '/history', title: 'History', detail: 'What settled on chain: every spend and close, each with its transaction' },
       { route: '/pnl', title: 'Realised', detail: 'Profit on positions that are actually closed' },
       { route: '/limits', title: "Today's limit", detail: 'The cap, what it has spent, what remains' },

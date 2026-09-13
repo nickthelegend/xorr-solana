@@ -147,7 +147,7 @@ export default function AgentDetail() {
 
           <Rise index={1} style={{ flexDirection: 'row', gap: space.s10 }}>
             <View style={{ flex: 1 }}>
-              <Button label="Add funds" variant={agent.hired ? 'primary' : 'ghost'} onPress={() => router.push('/fund')} />
+              <Button label="Add funds" variant={agent.hired ? 'primary' : 'ghost'} onPress={() => router.push('/deposit')} />
             </View>
             <View style={{ flex: 1 }}>
               <Button label="Withdraw" variant="ghost" onPress={() => router.push('/send')} />

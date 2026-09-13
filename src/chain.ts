@@ -86,3 +86,17 @@ export const userSigningWorks = CHAIN_KEY === 'base' || CHAIN_KEY === 'base-sepo
 export const userSigningNote =
   `This build settles on ${chainLabel}. Your wallet signs through Privy, which uses public Base — ` +
   `so a transaction you sign here will not go through. Run against Base Sepolia to sign for real.`;
+
+/**
+ * Can a deposit code name the chain this build is on?
+ *
+ * A deposit code encodes `ethereum:<address>@<chainId>` (EIP-681), and a phone wallet that scans it opens on that chain
+ * id. On Base and Base Sepolia the id is the chain this build reads. A fork of Base is 8453 too — real Base's id — so on a
+ * fork build the same code opens a phone wallet on real Base, where a transfer is real money sent to an address whose
+ * balance this build never reads.
+ */
+export const depositQrWorks = CHAIN_KEY === 'base' || CHAIN_KEY === 'base-sepolia';
+
+export const depositQrNote =
+  `No code on this build: it settles on ${chainLabel}, which shares real Base's chain id (${activeChain.id}), so a code ` +
+  `would open a phone wallet on real Base — where a transfer is real money that never arrives here.`;

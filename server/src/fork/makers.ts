@@ -26,8 +26,12 @@ import {
 export const AQUA: Address = '0x1111113CCf1426A8E30e2bfF5E005d929bF6a90a';
 export const USDC: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 export const WETH: Address = '0x4200000000000000000000000000000000000006';
-/** Aave v3's aUSDC reserve on Base — a real contract holding tens of millions of real USDC. */
-const WHALE: Address = '0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB';
+/**
+ * Aave v3's aUSDC reserve on Base — a real contract holding tens of millions of real USDC.
+ *
+ * Exported for the executor's fork faucet (`evm/faucet.ts`), which funds a new wallet from the same holder.
+ */
+export const WHALE: Address = '0x4e65fE4DbA92790696d040ac24Aa414708F5c0AB';
 const MAX = (1n << 256n) - 1n;
 
 const AQUA_SHIP_ABI = [
@@ -101,7 +105,8 @@ function forkClients(rpc: string) {
   return { chain, pub: createPublicClient({ chain, transport: http(rpc), cacheTime: 0 }) };
 }
 
-async function anvil(rpc: string, method: string, params: unknown[]): Promise<unknown> {
+/** One JSON-RPC call, cheats included. No retries, so a call that moves value is never sent twice. */
+export async function anvil(rpc: string, method: string, params: unknown[]): Promise<unknown> {
   const r = (await fetch(rpc, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -18,6 +18,7 @@ import { crosschainRoutes } from './routes/crosschain.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { historyRoutes } from './routes/history.js';
 import { limitOrderRoutes } from './routes/limit-orders.js';
+import { faucetRoutes } from './routes/faucet.js';
 import { idempotency } from './http/idempotency.js';
 import { rateLimit } from './http/rate-limit.js';
 import { requestId, currentRequestId, log } from './http/request-id.js';
@@ -173,6 +174,7 @@ app.route('/', crosschainRoutes);
 app.route('/', tokenRoutes);
 app.route('/', historyRoutes);
 app.route('/', limitOrderRoutes);
+app.route('/', faucetRoutes);
 
 const port = Number(process.env.PORT ?? 8787);
 const server = serve({ fetch: app.fetch, port });

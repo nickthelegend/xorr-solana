@@ -251,7 +251,7 @@ export default function Portfolio() {
           style={{ flexDirection: 'row', gap: space.s10, marginTop: space.s18, paddingHorizontal: space.gutter }}
         >
           <View style={{ flex: 1 }}>
-            <Button label="Deposit" onPress={() => router.push('/fund')} />
+            <Button label="Deposit" onPress={() => router.push('/deposit')} />
           </View>
           <View style={{ flex: 1 }}>
             <Button label="Withdraw" variant="ghost" onPress={() => router.push('/send')} />

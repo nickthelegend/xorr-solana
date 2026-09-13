@@ -16,7 +16,7 @@
 import React from 'react';
 import { ScrollView, View  } from 'react-native';
 import { useRouter } from 'expo-router';
-import { activeChain, chainLabel } from '@/chain';
+import { activeChain, chainLabel, depositQrNote, depositQrWorks } from '@/chain';
 import { AddressQR } from '@/ui/AddressQR';
 import { useGoBack } from '@/nav/useGoBack';
 import {
@@ -182,8 +182,12 @@ export default function Fund() {
             pre-filled on the right chain, and one that does not still reads the address out of
             it. Only rendered once there IS an address — a QR of the empty string is a code that
             scans to nothing.
+
+            And only where the chain id is this chain's (PLAN.md 4.5). A fork build encoded 8453,
+            which is real Base: scanned, it pointed a phone wallet at real money. `depositQrWorks`
+            says where a code is true, and a fork build says why it has none.
           */}
-          {wallet?.address ? (
+          {wallet?.address && depositQrWorks ? (
             <View style={{ alignItems: 'center', paddingVertical: space.s12 }}>
               <AddressQR value={`ethereum:${wallet.address}@${activeChain.id}`} size={168} />
             </View>
@@ -191,6 +195,11 @@ export default function Fund() {
           <Text variant="body" selectable>
             {wallet?.address ?? 'Finish signing in to see your address.'}
           </Text>
+          {depositQrWorks ? null : (
+            <Text variant="footnote" color={colors.ink32}>
+              {depositQrNote}
+            </Text>
+          )}
           <Text variant="footnote" color={colors.ink32}>
             {`On ${chainLabel}. Nothing else on this screen moves money — xorr has no custody and no rail to move it for you.`}
           </Text>

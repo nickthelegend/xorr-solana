@@ -74,6 +74,7 @@ const UPSTREAM_PATHS = [
   '/wallet/tokens', // 1inch's Balance and Token APIs on Base (PLAN.md 3.10)
   '/history', // a paged eth_getLogs scan, and 1inch's History API on Base (PLAN.md 3.14)
   '/limit-orders', // the list reads the chain on every call; …/:hash/fill simulates and sends through spend() (PLAN.md 3.15)
+  '/faucet', // reads the node and the holder or faucet key on every call; POST sends a transfer and waits for it (PLAN.md 4.4)
   '/orders',
   '/strategies/', // …/:id/run
   '/agent/strategies/',
