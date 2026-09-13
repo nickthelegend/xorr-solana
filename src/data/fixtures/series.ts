@@ -8,7 +8,12 @@
  */
 import type { Bar, WatchlistGroup } from '../types';
 
-/** G5: sparkline polylines, lifted out of the prototype's inline `data` object. */
+/**
+ * G5: sparkline polylines, lifted out of the prototype's inline `data` object.
+ *
+ * Read by no screen. The watchlist presented these symbols as a list someone had chosen; it lists
+ * `/market/watchable` now. They stay only because `fixtures.test.ts` still checks their shape.
+ */
 export const watchlistGroups: WatchlistGroup[] = [
   {
     "label": "Tokens",

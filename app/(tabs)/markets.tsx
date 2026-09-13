@@ -6,6 +6,10 @@
  * records that the market tabs shipped broken the other way once), and the mark is
  * `AssetMark`, the same radial-gradient recipe the agent orbs use.
  *
+ * Each class is priced by its own read (`src/markets/prices.ts`). The list waited for every source,
+ * so crypto sat behind the share snapshot for eight seconds; and a failed read came back as a list of
+ * dashes, so the error block here could never render — and printed the raw message when it did.
+ *
  * Nothing on this screen carries a hardcoded colour, size or radius.
  */
 import React, { useMemo } from 'react';
@@ -14,16 +18,15 @@ import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import {
   AssetMark,
-  Eyebrow,
-  Press,
-  Price,
-  Row,
-  Screen,
+  ErrorState,
   Fill,
   LoadingRows,
   Pill,
   PillRow,
-  Tag,
+  Press,
+  Price,
+  Row,
+  Screen,
   Text,
   colors,
   radius,
@@ -35,6 +38,7 @@ import { Icon } from '@/design/Icon';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
+import { useMarketPrices } from '@/markets/useMarketPrices';
 import { useStore } from '@/state/store';
 import type { Instrument } from '@/data/types';
 
@@ -42,10 +46,11 @@ export default function MarketsScreen() {
   const router = useRouter();
   const mkt = useStore((s) => s.mkt);
   const setMkt = useStore((s) => s.setMkt);
-  const { data, loading, error, reload } = useAsync(() => repos.markets.listClasses(), []);
-
-  const cls = data?.[mkt];
-  const rows = useMemo(() => cls?.instruments ?? [], [cls]);
+  // The pills, notes and names are the catalog, so they draw at once; only the prices wait, and each
+  // class waits for its own.
+  const classes = useMarketPrices();
+  const cls = classes[mkt] ?? classes[0]!;
+  const rows = cls.instruments;
 
   /*
    * One request for every glyph on the screen.
@@ -62,7 +67,6 @@ export default function MarketsScreen() {
     () => repos.markets.sparklines(sparkSyms),
     [sparkSyms.join(',')],
   );
-
 
   return (
     <Screen tabBar gutter="none">
@@ -91,8 +95,8 @@ export default function MarketsScreen() {
 
       {/* §5: pills never shrink to fit — the row scrolls. */}
       <PillRow style={{ marginTop: space.s16 }} contentPadding={space.gutter}>
-        {(data ?? []).map((c, i) => (
-          <Pill key={c.id} label={c.label} selected={i === mkt} onPress={() => setMkt(i)} />
+        {classes.map((c, i) => (
+          <Pill key={c.id} label={c.label} selected={c.id === cls.id} onPress={() => setMkt(i)} />
         ))}
       </PillRow>
 
@@ -106,34 +110,24 @@ export default function MarketsScreen() {
         }}
       >
         <Text variant="secondarySm" color={colors.ink55} style={{ flex: 1, maxWidth: 220 }}>
-          {cls?.note ?? ''}
+          {cls.note}
         </Text>
         <Text variant="footnote" color={colors.ink55} numberOfLines={1}>
           {/*
-            "0 shown" is a claim, and until the classes land it is a false one. This screen waits
-            on four upstream calls and `/market/stocks` alone can take eight seconds, so the
-            window where it was asserting zero was long enough to read as an empty product.
+            "0 shown" is a claim, and until the class's prices land it is a false one — the list
+            below is a skeleton for exactly that window. A class whose read failed shows nothing,
+            so it counts nothing.
           */}
-          {loading && !data ? 'Loading · 24/7' : `${rows.length} shown · 24/7`}
+          {cls.state === 'ready' ? `${rows.length} shown · 24/7` : cls.state === 'loading' ? 'Loading · 24/7' : ''}
         </Text>
       </View>
 
       <Fill style={{ paddingHorizontal: space.gutter, marginTop: space.s6 }}>
-        {error ? (
-          <View style={{ paddingVertical: space.s30, alignItems: 'center', gap: space.s14 }}>
-            <Text variant="rowPrimary">That did not load.</Text>
-            <Text variant="secondary" align="center">
-              {error.message}
-            </Text>
-            <Press onPress={reload} accessibilityRole="button">
-              <Text variant="control" color={colors.ink65}>
-                Try again
-              </Text>
-            </Press>
-          </View>
-        ) : loading && !data ? (
-          // Was `null`. Every other list in the app shows LoadingRows; this one rendered an empty
-          // black screen under a "0 shown" line for as long as the slowest call took.
+        {cls.state === 'failed' && cls.error ? (
+          <ErrorState error={cls.error} onRetry={cls.reload} />
+        ) : cls.state !== 'ready' ? (
+          // Every other list in the app shows LoadingRows; this one once rendered an empty black
+          // screen under a "0 shown" line for as long as the slowest call took.
           <LoadingRows count={8} height={size.rowLg} spark />
         ) : (
           <FlashList
@@ -154,31 +148,45 @@ export default function MarketsScreen() {
                 title={item.sym}
                 secondary={`${item.name} · ${item.tag}`}
                 value={
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s6 }}>
-                    {item.feed === 'unavailable' ? <Tag label="No price feed" small tone="warn" /> : null}
-                    {/*
-                      No glyph until there is a series. design.md puts the sparkline between the
-                      symbol and the price; a symbol whose history has not arrived simply has none,
-                      rather than a flat line claiming the price never moved.
-                    */}
-                    {(sparks.data?.[item.sym]?.length ?? 0) > 1 ? (
-                      <Sparkline data={sparks.data![item.sym]!} />
-                    ) : null}
-                    <Price variant="rowPrimary">{item.px}</Price>
-                  </View>
+                  item.feed === 'unavailable' ? (
+                    /*
+                      Quiet, not flagged. The class note above already says nothing prices these,
+                      and a yellow "No price feed" tag on every row said it eight more times.
+                    */
+                    <Price variant="rowPrimary" color={colors.ink55}>
+                      {item.px}
+                    </Price>
+                  ) : (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s6 }}>
+                      {/*
+                        No glyph until there is a series. design.md puts the sparkline between the
+                        symbol and the price; a symbol whose history has not arrived simply has none,
+                        rather than a flat line claiming the price never moved.
+                      */}
+                      {(sparks.data?.[item.sym]?.length ?? 0) > 1 ? (
+                        <Sparkline data={sparks.data![item.sym]!} />
+                      ) : null}
+                      <Price variant="rowPrimary">{item.px}</Price>
+                    </View>
+                  )
                 }
                 delta={item.chg}
                 deltaTone={item.up ? 'up' : 'down'}
               />
             )}
             ListFooterComponent={
-              cls ? (
-                <View style={{ alignItems: 'center', paddingVertical: space.s16 }}>
-                  <Eyebrow small color={colors.ink45}>
-                    {cls.more}
-                  </Eyebrow>
-                </View>
-              ) : null
+              // The way into the class's own list, which nothing linked to while this was plain text.
+              <Press
+                onPress={() => router.push(`/markets/${cls.id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={cls.more}
+                hitHeight={size.hit}
+                style={{ alignSelf: 'center', paddingVertical: space.s16 }}
+              >
+                <Text variant="control" color={colors.ink55}>
+                  {cls.more} ›
+                </Text>
+              </Press>
             }
           />
         )}

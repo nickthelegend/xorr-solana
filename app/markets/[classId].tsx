@@ -1,6 +1,9 @@
 /**
- * "See all {n} markets" — PLAN.md 10.5 [G14]. Screen 24's footer link had no destination.
+ * One market class in full — PLAN.md 10.5 [G14]. Screen 24's footer link had no destination, and opens this now.
  * The full list for one class, paginated so a 300-instrument class stays scrollable.
+ *
+ * Priced by the class's own read (`src/markets/prices.ts`). Through `listClasses` a failed read came
+ * back as a list of dashes, so the error state below could never show.
  */
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
@@ -18,34 +21,30 @@ import {
   Price,
   Row,
   Screen,
-  Tag,
   Text,
   colors,
   size,
   space,
 } from '@/ui';
-import { repos } from '@/data';
-import { useAsync } from '@/data/useAsync';
+import { assetClasses } from '@/data/fixtures/markets';
 import { logoProps, useLogos } from '@/data/useLogos';
+import { sourceOf } from '@/markets/prices';
+import { useMarketPrices } from '@/markets/useMarketPrices';
 import type { Instrument } from '@/data/types';
 
 const PAGE = 25;
-
-/** "Crypto, Tokenized equities and Commodities" — an Oxford-comma-free list for one sentence. */
-function listOf(labels: string[]): string {
-  if (labels.length === 0) return 'no classes at all';
-  if (labels.length === 1) return labels[0]!;
-  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-}
 
 export default function ClassList() {
   const { classId } = useLocalSearchParams<{ classId: string }>();
   const router = useRouter();
   const goBack = useGoBack();
   const [page, setPage] = useState(1);
-  const { data, loading, error, reload } = useAsync(() => repos.markets.listClasses(), []);
 
-  const cls = data?.find((c) => c.id === classId);
+  const listed = assetClasses.find((c) => c.id === classId);
+  // Only the read this class needs. The share snapshot is the slow one, and no other class uses it.
+  const classes = useMarketPrices({ stocks: listed !== undefined && sourceOf(listed) === 'stocks' });
+  const cls = classes.find((c) => c.id === classId);
+
   const rows = useMemo(() => (cls?.instruments ?? []).slice(0, page * PAGE), [cls, page]);
   const logos = useLogos(useMemo(() => rows.map((r) => r.sym), [rows]));
   const hasMore = (cls?.instruments.length ?? 0) > rows.length;
@@ -61,18 +60,15 @@ export default function ClassList() {
         </View>
         <Text variant="footnote" color={colors.ink55}>
           {/*
-            "0 of 0 markets" is a claim, and while the classes are loading it is a false one — this
-            screen showed it for a full twenty seconds before rendering nine. The list below already
-            renders LoadingRows for exactly that window; this line was still asserting a count.
-            Same fix as the Markets tab.
+            "0 of 0 markets" is a claim, and while the prices are loading it is a false one — this
+            screen showed it for a full twenty seconds before rendering nine. Nor is it a true one for
+            a class that does not exist, or one whose read failed: there is nothing here to count.
           */}
-          {loading && !data
-            ? 'Loading markets'
-            : // Nor is it a true one for a class that does not exist. Same reason: it counts
-              // something, and there is nothing here to count.
-              !cls
-              ? ''
-              : `${rows.length} of ${cls.instruments.length} markets`}
+          {cls?.state === 'ready'
+            ? `${rows.length} of ${cls.instruments.length} markets`
+            : cls?.state === 'loading'
+              ? 'Loading markets'
+              : ''}
         </Text>
       </View>
 
@@ -81,24 +77,24 @@ export default function ClassList() {
       </Text>
 
       <Fill style={{ marginTop: space.s10 }}>
-        {loading && !data ? (
-          <LoadingRows count={8} />
-        ) : error ? (
-          <ErrorState error={error} onRetry={reload} />
-        ) : !cls ? (
+        {!cls ? (
           /*
-            The classes loaded and none of them is the one in the URL.
-            
+            No class by that name.
+
             Rendering the list anyway gave a black screen under the word "Markets" with "0 of 0
             markets" in the corner — indistinguishable from a class that exists and happens to be
-            empty, and from a failed load. A stale link or a typo lands here, so it should say
-            which it is and name the classes that do exist.
+            empty, and from a failed load. A stale link or a typo lands here, so it says which it is
+            and offers the way back to the classes that do exist.
           */
           <EmptyState
-            text={`There is no "${classId}" class. This build lists ${listOf(data?.map((c) => c.label) ?? [])}.`}
-            actionLabel="Browse all markets"
+            text={`There is no "${classId}" class.`}
+            actionLabel="Browse markets"
             onAction={() => router.replace('/(tabs)/markets')}
           />
+        ) : cls.state === 'failed' && cls.error ? (
+          <ErrorState error={cls.error} onRetry={cls.reload} />
+        ) : cls.state !== 'ready' ? (
+          <LoadingRows count={8} />
         ) : (
           <FlashList
             data={rows}
@@ -115,12 +111,8 @@ export default function ClassList() {
                 }
                 title={item.sym}
                 secondary={`${item.name} · ${item.tag}`}
-                middle={
-                  item.feed === 'unavailable' ? (
-                    <Tag label="No price feed" small tone="warn" />
-                  ) : undefined
-                }
-                value={<Price>{item.px}</Price>}
+                // Quiet where nothing prices it: the class note says so once, above.
+                value={<Price color={item.feed === 'unavailable' ? colors.ink55 : undefined}>{item.px}</Price>}
                 delta={item.chg}
                 deltaTone={item.up ? 'up' : 'down'}
                 onPress={() => router.push(`/asset/${item.sym}`)}

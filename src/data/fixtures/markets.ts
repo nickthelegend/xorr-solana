@@ -35,8 +35,8 @@ export const assetClasses: AssetClass[] = [
   {
     "id": "crypto",
     "label": "Crypto",
-    "note": "Spot, settled on-chain",
-    "more": "These nine are what this build prices",
+    "note": "Spot prices, live",
+    "more": "All crypto",
     "instruments": [
       {
         "sym": "BTC",
@@ -160,7 +160,7 @@ export const assetClasses: AssetClass[] = [
     "id": "stocks",
     "label": "Stocks",
     "note": "Tokenized shares",
-    "more": "See all tokenized equities",
+    "more": "All stocks",
     "instruments": [
       {
         "sym": "NVDAc",
@@ -272,7 +272,7 @@ export const assetClasses: AssetClass[] = [
     "id": "commodities",
     "label": "Commodities",
     "note": "Only gold has a price feed. None trade here yet.",
-    "more": "Not tradable here",
+    "more": "All commodities",
     "instruments": [
       {
         "sym": "XAUT",
@@ -388,7 +388,7 @@ export const assetClasses: AssetClass[] = [
     "id": "indices",
     "label": "Indices",
     "note": "No price feed. None trade here yet.",
-    "more": "Not tradable here",
+    "more": "All indices",
     "instruments": [
       {
         "sym": "SPYx",
@@ -503,8 +503,8 @@ export const assetClasses: AssetClass[] = [
   {
     "id": "preipo",
     "label": "Pre-IPO",
-    "note": "No price feed — private markets have no on-chain instrument",
-    "more": "Not tradable here",
+    "note": "No price feed. Private companies have no token.",
+    "more": "All pre-IPO",
     "instruments": [
       {
         "sym": "OPENAI",

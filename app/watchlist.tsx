@@ -1,17 +1,17 @@
 /**
- * Screen 5 — Watchlist. screens.md Group B.
+ * Watchlist — what the bot can follow here, priced. screens.md Group B, screen 5.
  *
- * PLAN.md §3.6 resolves the handoff's open question ("ship one, not both"): screen 24 is
- * the Markets tab; this is a sub-screen off Home → Coins, with the STANDARD tab bar. The
- * white floating footer is dropped.
+ * This listed three groups from the design fixtures — TSLAc, SOL, HYPE / NVDAc, AAPLc, MSTRc / AAVE —
+ * as though someone had built them, under the title "Markets", with a header promising five tabs. The
+ * executor keeps no saved watchlist. What it does keep is `/market/watchable`: the tokens a strategy can
+ * follow on this network. That is the list, split into crypto and shares only when both are there.
  *
- * Five scrolling group tabs, group eyebrow + "{n} markets · 24h", 64pt rows with a 90×30
- * sparkline between symbol and price.
+ * The prices sat at "· · ·" for as long as the share snapshot took, signed in or out: TSLAc was in the
+ * first group and one request priced every row, so SOL waited eight seconds for Tesla. Each row now
+ * waits only for its own source (`useSpotPrices`), and a failed read says so.
  *
- * The sparkline used to be `r.spark` — a polyline string baked into the fixtures from the
- * prototype. A hand-drawn squiggle sitting beside a live price is exactly the thing PLAN
- * §1.3.8 forbids, so the shape now comes from the symbol's own hourly closes. A symbol
- * whose series we cannot fetch gets no line rather than someone else's.
+ * The sparkline is the day's closes from the one request the Markets list already makes. A symbol
+ * without a series gets no line rather than someone else's, and never the fixtures' hand-drawn ones.
  */
 import React, { useMemo } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -20,115 +20,134 @@ import { useGoBack } from '@/nav/useGoBack';
 import { assetGradient } from '@/design/gradients';
 import {
   AssetMark,
-  BackButton,
+  EmptyState,
+  ErrorState,
   Eyebrow,
   Fill,
+  HeaderBar,
+  LoadingRows,
   Pill,
   PillRow,
+  Placeholder,
   Price,
   Row,
   Screen,
   Sparkline,
-  Tag,
   Text,
+  colors,
   percent,
+  pnlTone,
   price as fmtPrice,
   space,
 } from '@/ui';
-import { usePrices } from '@/data/usePrices';
 import { repos } from '@/data';
+import { isStockSymbol } from '@/data/marketData';
+import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
-import { watchlistGroups } from '@/data/fixtures/series';
+import { useSpotPrices } from '@/markets/useSpotPrices';
 import { useStore } from '@/state/store';
 
 const ROW_H = 64;
+const NONE: readonly string[] = [];
+
+/** The watchable tokens as tabs — crypto, then shares — keeping only the tabs with something in them. */
+function groupsOf(symbols: readonly string[]): { label: string; symbols: string[] }[] {
+  return [
+    { label: 'Crypto', symbols: symbols.filter((s) => !isStockSymbol(s)) },
+    { label: 'Stocks', symbols: symbols.filter((s) => isStockSymbol(s)) },
+  ].filter((g) => g.symbols.length > 0);
+}
 
 export default function Watchlist() {
   const router = useRouter();
   const goBack = useGoBack();
   const tab = useStore((s) => s.tab);
   const setTab = useStore((s) => s.setTab);
-  const group = watchlistGroups[tab] ?? watchlistGroups[0]!;
-  const symbols = useMemo(() => group.rows.map((r) => r.sym), [group]);
 
-  const { quotes, loading: pricesLoading } = usePrices(symbols);
+  const watchable = useAsync(() => system.watchable(), []);
+  const groups = useMemo(() => groupsOf((watchable.data ?? []).map((t) => t.symbol)), [watchable.data]);
+  const group = groups[tab] ?? groups[0];
+  const symbols = group?.symbols ?? NONE;
+  const key = symbols.join(',');
+
+  const prices = useSpotPrices(symbols);
   const logos = useLogos(symbols);
-
-  // One pass over the visible group — nine symbols at most, and only when the tab changes.
-  const { data: sparks } = useAsync(async () => {
-    const entries = await Promise.all(
-      symbols.map(async (sym) => {
-        const c = await repos.markets.candles(sym, '1H').catch(() => null);
-        return [sym, (c?.bars ?? []).map((b) => b[3])] as const;
-      }),
-    );
-    return Object.fromEntries(entries) as Record<string, number[]>;
-  }, [symbols]);
+  // A day of closes per row. A decoration: a row without its glyph is still a row.
+  const sparks = useAsync(() => repos.markets.sparklines(key ? key.split(',') : []), [key]);
 
   return (
     <Screen>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="screenTitle">Markets</Text>
-        <BackButton onPress={() => goBack()} />
-      </View>
+      <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Watchlist</Text>} />
+      <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
+        What the bot can follow here.
+      </Text>
 
-      <PillRow style={{ marginTop: space.s16, flexGrow: 0 }}>
-        {watchlistGroups.map((g, i) => (
-          <Pill key={g.tab} label={g.tab} selected={i === tab} onPress={() => setTab(i)} />
-        ))}
-      </PillRow>
+      {groups.length > 1 ? (
+        <PillRow style={{ marginTop: space.s16, flexGrow: 0 }}>
+          {groups.map((g, i) => (
+            <Pill key={g.label} label={g.label} selected={g === group} onPress={() => setTab(i)} />
+          ))}
+        </PillRow>
+      ) : null}
 
-      <Eyebrow small style={{ marginTop: space.s22 }}>
-        {group.label} · {group.rows.length} markets · 24h
-      </Eyebrow>
+      {group ? (
+        <Eyebrow small style={{ marginTop: space.s22 }}>
+          {`${symbols.length} ${symbols.length === 1 ? 'market' : 'markets'} · 24h`}
+        </Eyebrow>
+      ) : null}
 
       <Fill style={{ marginTop: space.s6 }}>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {group.rows.map((r) => {
-            const q = quotes[r.sym];
-            const closes = sparks?.[r.sym] ?? [];
-            return (
-              <Row
-                key={r.sym}
-                left={<AssetMark gradient={assetGradient(r.sym)} {...logoProps(logos, r.sym)} size={32} />}
-                title={r.sym}
-                middle={
-                  <View style={{ marginHorizontal: space.s10 }}>
-                    {closes.length > 1 ? (
-                      <Sparkline data={closes} />
-                    ) : q?.price !== undefined || pricesLoading ? null : (
-                      <Tag label="No price feed" small tone="warn" />
-                    )}
-                  </View>
-                }
-                /*
-                  A dash means "there is no price for this". It must not also mean "the price has
-                  not arrived yet", and here it did: the fallback is `r.px`, which the generated
-                  fixture sets to "—" for every row. So the default tab rendered three dashes and a
-                  SIMULATED tag for sixteen seconds — for SOL and HYPE, which price perfectly well
-                  and were showing $103.17 and $84.19 on the Markets tab at the same moment.
-                  Same conflation already fixed on Markets and on Send.
-                */
-                value={
-                  <Price>
-                    {q?.price !== undefined
-                      ? fmtPrice(q.price)
-                      : pricesLoading
-                        ? '· · ·'
-                        : r.px}
-                  </Price>
-                }
-                delta={
-                  q?.change24h !== undefined ? percent(q.change24h, 2) : pricesLoading ? '' : r.chg
-                }
-                deltaTone={(q?.change24h !== undefined ? q.change24h >= 0 : r.up) ? 'up' : 'down'}
-                height={ROW_H}
-                onPress={() => router.push(`/asset/${r.sym}`)}
-              />
-            );
-          })}
-        </ScrollView>
+        {watchable.error ? (
+          <ErrorState error={watchable.error} onRetry={watchable.reload} />
+        ) : prices.error ? (
+          <ErrorState error={prices.error} onRetry={prices.reload} />
+        ) : watchable.loading && !watchable.data ? (
+          <LoadingRows count={4} height={ROW_H} spark />
+        ) : !group ? (
+          <EmptyState text="Nothing to follow here yet." />
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {symbols.map((sym) => {
+              const price = prices.priceOf(sym);
+              const q = price.loading ? undefined : price.quote;
+              const closes = sparks.data?.[sym] ?? [];
+              return (
+                <Row
+                  key={sym}
+                  left={<AssetMark gradient={assetGradient(sym)} {...logoProps(logos, sym)} size={32} />}
+                  title={sym}
+                  middle={
+                    closes.length > 1 ? (
+                      <View style={{ marginHorizontal: space.s10 }}>
+                        <Sparkline data={closes} />
+                      </View>
+                    ) : undefined
+                  }
+                  /*
+                    A dash means "nothing prices this". It must not also mean "the price has not
+                    arrived yet", so a price still on its way is a placeholder, and quiet.
+                  */
+                  value={
+                    price.loading ? (
+                      <Placeholder height={12} width={64} />
+                    ) : q ? (
+                      fmtPrice(q.price)
+                    ) : (
+                      <Price variant="rowPrimary" color={colors.ink55}>
+                        —
+                      </Price>
+                    )
+                  }
+                  delta={q?.change24h !== undefined ? percent(q.change24h, 2) : undefined}
+                  deltaTone={q?.change24h !== undefined ? pnlTone(q.change24h) : 'neutral'}
+                  height={ROW_H}
+                  onPress={() => router.push(`/asset/${sym}`)}
+                />
+              );
+            })}
+          </ScrollView>
+        )}
       </Fill>
     </Screen>
   );
