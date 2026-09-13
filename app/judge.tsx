@@ -39,7 +39,7 @@ import {
   typeScale,
 } from '@/ui';
 import { api } from '@/data/api';
-import { ApiError, TimedOut, errorText, isRetryable } from '@/data/apiError';
+import { ApiError, TimedOut, errorRef, errorText, isRetryable } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { useStore } from '@/state/store';
 
@@ -190,6 +190,12 @@ export default function Judge() {
               {failureDetail(report.error) ? (
                 <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
                   {failureDetail(report.error)}
+                </Text>
+              ) : null}
+              {/* The request's reference under a server fault or a timeout, as the error state shows it: what a report quotes. */}
+              {errorRef(report.error) ? (
+                <Text variant="footnote" color={colors.ink55} selectable style={{ marginTop: space.s6 }}>
+                  {`Ref ${errorRef(report.error)}`}
                 </Text>
               ) : null}
               <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>

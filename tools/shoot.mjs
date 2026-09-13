@@ -251,7 +251,8 @@ const EXPECT = {
   '32b-strategy-yield': { must: [/USDC SUPPLY/i, /%/, /If it ran now/i, /Only you can withdraw/] },
   '32c-strategy-grid': { must: [/Range accumulation/, /\$[\d,]+/, /leaves the range it stops/] },
   '32d-yield-position': { must: [/Earning/, /Only you can withdraw|No lending pool here/] },
-  '32e-flatten': { must: [/Sell everything/, /does not use your daily cap/] },
+  // "Doesn’t use your daily cap" since the money screens were distilled; either spelling of the same fact passes.
+  '32e-flatten': { must: [/Sell everything/, /(does not|doesn’t|doesn't) use your daily cap/i] },
   /*
    * `never: [/FAIL/]` was wrong, and it was wrong in the direction that matters.
    *
@@ -346,8 +347,11 @@ const EXPECT = {
     never: [/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/],
   },
   '58-network': { must: [/CHAIN/, /BLOCK/, /[\d,]{6,}/] },
-  // The rate, and where it came from. A number with no provenance is the failure here.
-  '59-rates': { must: [/\d+\.\d+%/, /Aave/] },
+  /*
+   * The rate and its caveat. Where it comes from is named on Sources and How it works; the screen itself stopped naming
+   * the pool when the money screens were distilled, and asserting the name here failed a correct screen.
+   */
+  '59-rates': { must: [/Rate/, /\d+\.\d+%/, /not a promise/] },
   '60-graph': { must: [/INDEXED TO/, /[\d,]{6,}/] },
   '61-graph-decision': { must: [/Decision|router/i] },
   '62-graph-spends': { must: [/Spend events|Reconstructed/i] },
