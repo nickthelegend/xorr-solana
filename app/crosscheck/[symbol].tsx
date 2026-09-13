@@ -9,6 +9,10 @@
  * `compared: false` is its own state and not a disagreement. One source being unreachable tells you
  * nothing about the other, and painting an outage as a price discrepancy would send someone looking
  * for a problem in the wrong place.
+ *
+ * The two sources are named for what they are — the on-chain price a trade would pay, and the reference
+ * feed — and by provider once, in the footnote. The executor's note is shown only for a comparison it
+ * made: the one it writes when there is none names the chain.
  */
 import React from 'react';
 import { View } from 'react-native';
@@ -64,14 +68,16 @@ export default function Crosscheck() {
               <Text variant="screenTitle" color={state.tone} style={{ marginTop: space.s6 }}>
                 {state.label}
               </Text>
-              <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s10 }}>
-                {data.note}
-              </Text>
+              {data.compared ? (
+                <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s10 }}>
+                  {data.note}
+                </Text>
+              ) : null}
             </SheetCard>
 
             <View style={{ flexDirection: 'row', gap: space.s10 }}>
-              <Source label="1inch" note="the pools a fill would touch" value={data.oneinch} />
-              <Source label="CoinGecko" note="the reference price" value={data.coingecko} />
+              <Source label="On-chain" note="what a trade would pay" value={data.oneinch} />
+              <Source label="Reference" note="the market feed" value={data.coingecko} />
             </View>
 
             {/*
@@ -88,11 +94,14 @@ export default function Crosscheck() {
                   {percent(Math.abs(data.spreadPct), { digits: 2, explicitSign: false })}
                 </Text>
                 <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                  The executor fills at the 1inch side. Where they diverge, that is the number that
-                  decides what you actually pay.
+                  Trades fill at the on-chain price.
                 </Text>
               </SheetCard>
             ) : null}
+
+            <Text variant="footnote" color={colors.ink55}>
+              On-chain price from 1inch. Reference from CoinGecko.
+            </Text>
           </>
         )}
       </Fill>

@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   AssetMark,
+  EmptyState,
   ErrorState,
   Fill,
   HeaderBar,
@@ -42,6 +43,13 @@ const SORTS = [
 /** A long tail of thin contracts says less than the busiest few dozen. */
 const ROWS = 50;
 
+/** What an empty sort means. Gainers on a day nothing rose drew a blank page. */
+const EMPTY: Readonly<Record<Sort, string>> = {
+  top: 'No contracts listed right now.',
+  gainers: 'Nothing is up today.',
+  losers: 'Nothing is down today.',
+};
+
 function sorted(markets: readonly PerpMarket[], sort: Sort): PerpMarket[] {
   if (sort === 'top') return markets.slice(0, ROWS);
   const moved = markets.filter((m) => m.change24hPct !== null && (sort === 'gainers' ? m.change24hPct > 0 : m.change24hPct < 0));
@@ -66,7 +74,8 @@ export default function Futures() {
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Futures</Text>} />
         {data ? (
           <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-            {`${data.markets.length} contracts on ${data.venue}`}
+            {/* The venue is named once, in the footnote. */}
+            {`${data.markets.length} contracts`}
           </Text>
         ) : loading ? (
           <Placeholder width={170} height={14} style={{ marginTop: space.s10 }} />
@@ -79,6 +88,8 @@ export default function Futures() {
           <ErrorState error={error} onRetry={reload} />
         ) : loading && !data ? (
           <LoadingRows count={8} height={size.rowLg} />
+        ) : rows.length === 0 ? (
+          <EmptyState text={EMPTY[sort]} />
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.s30 }}>
             {rows.map((m, i) => (

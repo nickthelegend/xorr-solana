@@ -77,6 +77,11 @@ export default function CrosschainQuoteScreen() {
   // The chains the route accepts, from the route: a pill on screen is a chain the executor will quote.
   const destinations = useAsync(() => crosschainDestinations(), []);
   const chains = destinations.data?.destinations ?? [];
+  /*
+   * Where the quote starts, as the executor names it. It was written here as "Base", and "here" would be
+   * wrong the other way: on a test build the quoter still prices the mainnet this is sent from.
+   */
+  const origin = destinations.data?.from.name;
   const chain = chains.find((d) => d.chainId === picked) ?? chains[0];
 
   const { quote: price } = usePrice(token);
@@ -120,7 +125,7 @@ export default function CrosschainQuoteScreen() {
       ) : (
         <>
           <View style={{ marginTop: space.s14, gap: space.s8 }}>
-            <Eyebrow small>From Base to</Eyebrow>
+            <Eyebrow small>{origin ? `From ${origin} to` : 'To'}</Eyebrow>
             {chains.length > 0 ? (
               <PillRow>
                 {chains.map((d) => (
@@ -146,7 +151,7 @@ export default function CrosschainQuoteScreen() {
               gap: space.s12,
             }}
           >
-            <Eyebrow small>You send on Base</Eyebrow>
+            <Eyebrow small>{origin ? `You send on ${origin}` : 'You send'}</Eyebrow>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.s12 }}>
               <View style={{ flexShrink: 1 }}>
                 <Price variant="amountLg">{amount}</Price>

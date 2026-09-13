@@ -34,6 +34,7 @@ import { assetGradient } from '@/design/gradients';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { system } from '@/data/system';
+import { routesInto } from '@/markets/route';
 
 export default function Tokens() {
   const goBack = useGoBack();
@@ -51,8 +52,7 @@ export default function Tokens() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Tokens</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          What the executor can settle on this chain. Anything not here is a chart you can look at,
-          not an order you can place.
+          What can be traded here.
         </Text>
       </View>
 
@@ -66,7 +66,7 @@ export default function Tokens() {
             <LoadingRows count={6} height={size.rowLg} />
           </View>
         ) : rows.length === 0 ? (
-          <EmptyState text="Nothing is settleable on this chain right now." />
+          <EmptyState text="Nothing can be traded here right now." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -116,16 +116,19 @@ export default function Tokens() {
                 that already answers "what exactly is this contract".
               */}
               <View style={{ flexDirection: 'row', gap: space.s16, paddingHorizontal: space.s14 }}>
-                <Press
-                  onPress={() => router.push(`/route/${t.symbol}`)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Inspect the route into ${t.symbol}`}
-                  hitHeight={size.hit}
-                >
-                  <Text variant="control" color={colors.ink55}>
-                    Route ›
-                  </Text>
-                </Press>
+                {/* No route into USDC: buys are paid in it, so the quote was USDC for USDC and could only fail. */}
+                {routesInto(t.symbol) ? (
+                  <Press
+                    onPress={() => router.push(`/route/${t.symbol}`)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Inspect the route into ${t.symbol}`}
+                    hitHeight={size.hit}
+                  >
+                    <Text variant="control" color={colors.ink55}>
+                      Route ›
+                    </Text>
+                  </Press>
+                ) : null}
                 <Press
                   onPress={() => router.push(`/crosscheck/${t.symbol}`)}
                   accessibilityRole="button"

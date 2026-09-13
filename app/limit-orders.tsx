@@ -9,8 +9,10 @@
  * Taking is reviewed first, as a swap is: the first press says what confirming pays and delivers, and only a second
  * press on the same order sends it. It spends real USDC against today's limit, so one tap never does.
  *
- * Where nothing settles (Base Sepolia) the executor lists nothing and says why, and so does this screen, rather than
- * showing orders no fill could reach.
+ * Where nothing settles (Base Sepolia) the executor lists nothing and says why, and this screen says so too — without
+ * the network's name, which the executor's sentence carries — rather than showing orders no fill could reach.
+ *
+ * Each order names what it sells, so the subtitle does not: it said "a signed WETH price" above every order.
  */
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -96,7 +98,7 @@ export default function LimitOrders() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Limit orders</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Take a signed WETH price, all or nothing.
+          Take a signed price, all or nothing.
         </Text>
       </View>
 
@@ -110,7 +112,7 @@ export default function LimitOrders() {
             <LoadingRows count={3} height={size.rowLg} />
           </View>
         ) : data && !data.settles ? (
-          <EmptyState text={data.detail ?? 'No limit orders on this network.'} />
+          <EmptyState text="No limit orders on this network." />
         ) : orders.length === 0 ? (
           <EmptyState
             text="No limit orders yet."

@@ -47,6 +47,7 @@ import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
 import type { PerpMetrics, PerpRange } from '@/data/repositories';
+import { intervalWords, nextPaymentAt } from '@/markets/funding';
 
 const RANGES: readonly PerpRange[] = ['1D', '1W', '1M', '1Y'];
 /** How each range reads in the move under the price. */
@@ -69,7 +70,6 @@ const CHART_H = 170;
 const MARK = 26;
 /** The stat grid's height, for its placeholder while the contract loads. */
 const STATS_H = 150;
-const HOUR_MS = 60 * 60 * 1000;
 
 export default function PerpContract() {
   const { symbol = 'BTC' } = useLocalSearchParams<{ symbol: string }>();
@@ -230,8 +230,9 @@ export default function PerpContract() {
  * The four figures under the chart.
  *
  * It owns the funding clock, so only this block re-renders every second — not the screen, and not the
- * chart above it. Funding is paid at the top of every interval, so the countdown needs nothing but a
- * clock.
+ * chart above it. The clock counts to the venue's own next payment, `nextFundingAt`, and rolls on by the
+ * venue's own interval once that passes. It used to count to the top of the phone's hour whatever the
+ * venue said, and the rate was labelled "per hour" whatever interval it was quoted for.
  */
 function ContractStats({ m }: { m: PerpMetrics }) {
   const [now, setNow] = useState(() => Date.now());
@@ -239,13 +240,13 @@ function ContractStats({ m }: { m: PerpMetrics }) {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  const intervalMs = m.fundingIntervalHours * HOUR_MS;
-  const fundingIn = Math.max(0, Math.round((Math.ceil(now / intervalMs) * intervalMs - now) / 1000));
+  const next = nextPaymentAt(m.nextFundingAt, m.fundingIntervalHours, now);
+  const fundingIn = Math.max(0, Math.round((next - now) / 1000));
 
   return (
     <StatGrid
       items={[
-        { label: 'Funding / hour', value: percent(m.fundingRate * 100, 4) },
+        { label: `Funding / ${intervalWords(m.fundingIntervalHours).unit}`, value: percent(m.fundingRate * 100, 4) },
         { label: 'Next funding', value: countdown(fundingIn) },
         { label: 'Open interest', value: compactMoney(m.openInterestUsd) },
         { label: '24h volume', value: compactMoney(m.dayVolumeUsd) },

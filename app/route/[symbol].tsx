@@ -10,39 +10,45 @@
  *
  * The size steps rather than free-types. The interesting thing here is how the route CHANGES across
  * sizes, and a text field invites someone to type one number and learn nothing.
+ *
+ * No venue names: the three ways a fill can be sourced are named for what they are, and the provider
+ * once, at the foot. A failed quote offers a retry wherever asking again could answer differently —
+ * a timeout included, which used to leave this screen with no way back.
  */
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
+  EmptyState,
   ErrorState,
   Fill,
   HeaderBar,
   Pill,
   PillRow,
   Placeholder,
+  Press,
   Screen,
   SheetCard,
   Text,
   colors,
   radius,
+  size,
   space,
 } from '@/ui';
 import { money, percent, quantity } from '@/format';
-import { useSwapQuote } from '@/data/useSwapQuote';
+import { api } from '@/data/api';
+import { NotSignedIn } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
 import { settlementSymbol } from '@/data/tradable';
-
-/**
- * What a buy pays with. The executor settles every purchase out of USDC, so quoting from anything
- * else here would price a route the bot would never take.
- */
-const PAYS_WITH = 'USDC';
+import type { SwapQuoteResult } from '@/data/useSwapQuote';
+import { FILL_PATH, PAYS_WITH, routesInto } from '@/markets/route';
 
 /** Sizes chosen to straddle where routing usually changes, not to be round for their own sake. */
 const SIZES = [100, 500, 2_500, 10_000] as const;
+
+const fillPath = (venue: string) => FILL_PATH[venue] ?? venue;
 
 export default function RouteInspector() {
   const goBack = useGoBack();
@@ -54,29 +60,50 @@ export default function RouteInspector() {
    * this chain does not have; the buy is cbBTC, and that is what the router is asked about.
    */
   const into = settlementSymbol(symbol ?? '');
-  const { data, loading, error } = useSwapQuote(PAYS_WITH, into, usd);
+  // A route into what pays for it is USDC for USDC, and can only fail.
+  const routable = routesInto(into);
+
+  /*
+   * Read here rather than through `useSwapQuote`, which has nothing to retry with. The sizes are
+   * pills, not keystrokes, so there is nothing to debounce either.
+   */
+  const quote = useAsync(
+    () =>
+      routable
+        ? api.get<SwapQuoteResult>(
+            `/swap/quote?in=${PAYS_WITH}&out=${encodeURIComponent(into)}&amount=${usd}`,
+          )
+        : Promise.resolve(null),
+    [into, usd, routable],
+  );
+  // Only the answer for the size on screen: the last size's route under a new pill is another quote.
+  const data = quote.loading ? undefined : quote.data;
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Route</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          {PAYS_WITH} into {into}, quoted live. Nothing here places an order.
+          {`${PAYS_WITH} into ${into}. Quote only.`}
         </Text>
       </View>
 
-      <PillRow style={{ marginTop: space.s14 }} contentPadding={space.gutter}>
-        {SIZES.map((s) => (
-          <Pill key={s} label={money(s)} selected={s === usd} onPress={() => setUsd(s)} />
-        ))}
-      </PillRow>
+      {routable ? (
+        <PillRow style={{ marginTop: space.s14 }} contentPadding={space.gutter}>
+          {SIZES.map((s) => (
+            <Pill key={s} label={money(s)} selected={s === usd} onPress={() => setUsd(s)} />
+          ))}
+        </PillRow>
+      ) : null}
 
       <Fill style={{ marginTop: space.s12, paddingHorizontal: space.gutter }}>
-        {error ? (
-          <ErrorState error={error} />
-        ) : loading && !data ? (
+        {!routable ? (
+          <EmptyState text={`Buys are paid in ${PAYS_WITH}, so there is no route into it.`} />
+        ) : quote.error ? (
+          <ErrorState error={quote.error} onRetry={quote.reload} />
+        ) : !data ? (
           <Placeholder height={180} />
-        ) : !data ? null : (
+        ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: space.s30, gap: space.s10 }}
@@ -89,25 +116,22 @@ export default function RouteInspector() {
                 {quantity(data.outAmount)} {into}
               </Text>
               <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                At worst {quantity(data.minimumOut)}, at {data.slippagePct}% slippage.
+                {`At worst ${quantity(data.minimumOut)}, at ${percent(data.slippagePct, { digits: 1, explicitSign: false })} slippage.`}
               </Text>
             </SheetCard>
 
             <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
               <Text variant="footnote" color={colors.ink55}>
-                THROUGH
+                ROUTE
               </Text>
-              {data.venues.length === 0 ? (
-                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                  The router named no venues for this size.
-                </Text>
-              ) : (
-                data.venues.map((v) => (
-                  <Text key={v} variant="secondary" color={colors.ink65} style={{ marginTop: space.s8 }}>
-                    {v}
-                  </Text>
-                ))
-              )}
+              {/* How the fill is split, not whose pools: the router names venues, and this screen does not. */}
+              <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
+                {data.venues.length === 0
+                  ? 'Direct'
+                  : data.venues.length === 1
+                    ? 'One venue'
+                    : `Split across ${data.venues.length} venues`}
+              </Text>
             </SheetCard>
 
             <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
@@ -123,20 +147,16 @@ export default function RouteInspector() {
                   ? '—'
                   : percent(data.priceImpactPct, { digits: 2, explicitSign: false })}
               </Text>
-              <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                {data.route}
-              </Text>
             </SheetCard>
 
             {/*
-              The other two venues, asked the same question.
-              `settle.ts` chooses between Aqua, SwapVM and the aggregator in a documented order,
-              and the trail names whichever filled — so "Aqua filled this" was a label with nothing
-              behind it. What makes it a claim is what the others would have done, refusals
-              included: a maker quotes what they hold, and "no book is deep enough at this size" is
-              information rather than an absence.
+              The other two ways to fill, asked the same question.
+              `settle.ts` chooses between them in a documented order, and the trail names whichever
+              filled — so "the maker book filled this" was a label with nothing behind it. What makes
+              it a claim is what the others would have done, refusals included: a maker quotes what
+              they hold, and "cannot fill this size" is information rather than an absence.
             */}
-            <VenueComparison inSymbol={PAYS_WITH} outSymbol={into} amount={usd} />
+            <FillComparison inSymbol={PAYS_WITH} outSymbol={into} amount={usd} />
           </ScrollView>
         )}
       </Fill>
@@ -144,14 +164,7 @@ export default function RouteInspector() {
   );
 }
 
-/** How each venue is named on screen. The trail uses the same words. */
-const VENUE_LABEL: Record<string, string> = {
-  aqua: '1inch Aqua',
-  swapvm: '1inch SwapVM',
-  '1inch': '1inch Aggregation',
-};
-
-function VenueComparison({
+function FillComparison({
   inSymbol,
   outSymbol,
   amount,
@@ -160,74 +173,88 @@ function VenueComparison({
   outSymbol: string;
   amount: number;
 }) {
-  const { data, loading, error } = useAsync(
+  const { data, loading, error, reload } = useAsync(
     () => system.routeCompare(inSymbol, outSymbol, amount),
     [inSymbol, outSymbol, amount],
   );
 
   /*
-   * A failed comparison is silent rather than an error state.
+   * A failed comparison is one quiet line with a retry, not the screen's error state.
    *
    * The quote above it is the answer the user came for and is already on screen; turning a
    * secondary panel's failure into a screen-level error would replace working content with a
-   * retry button. It reappears on its own when the call succeeds.
+   * retry button. It used to vanish without a word instead, which read as there being no other
+   * way to fill.
    */
-  if (error) return null;
-  if (loading && !data) return <Placeholder height={140} />;
-  if (!data) return null;
+  if (error) {
+    return error instanceof NotSignedIn ? null : (
+      <Press
+        onPress={reload}
+        accessibilityRole="button"
+        accessibilityLabel="Compare the ways to fill again"
+        hitHeight={size.hit}
+      >
+        <Text variant="secondarySm" color={colors.ink55}>
+          The comparison did not load. Try again ›
+        </Text>
+      </Press>
+    );
+  }
+  // Loading for this size. The last size's comparison is not this one.
+  if (loading || !data) return <Placeholder height={140} />;
 
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <Text variant="footnote" color={colors.ink55}>
-        EVERY VENUE, SAME SIZE
+        SAME SIZE, EVERY WAY TO FILL
       </Text>
       {data.quotes.map((q) => (
         <View key={q.venue} style={{ marginTop: space.s10 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: space.s10 }}>
+            {/* The winner in full ink, not green: green is profit and loss, and a better quote is neither. */}
             <Text
               variant="secondary"
-              color={q.venue === data.best ? colors.up : colors.ink65}
+              color={q.venue === data.best ? colors.ink : colors.ink65}
               style={{ flexShrink: 1 }}
             >
-              {VENUE_LABEL[q.venue] ?? q.venue}
+              {fillPath(q.venue)}
             </Text>
-            <Text variant="secondary" color={q.served ? colors.ink : colors.ink28}>
-              {q.served ? `${quantity(q.outAmount)} ${outSymbol}` : 'cannot serve'}
+            <Text variant="secondary" color={q.served ? colors.ink : colors.ink55}>
+              {q.served ? `${quantity(q.outAmount)} ${outSymbol}` : 'Can’t fill this size'}
             </Text>
           </View>
-          <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s2 }}>
-            {q.served ? q.detail : q.reason}
-          </Text>
           {/*
-            What it costs to send, and what is left after paying it.
-            The venue with the largest output is not always the one that leaves you better off: an
-            aggregator hop through three pools is a more expensive transaction than a single book
-            fill, and on a small trade that gap can be larger than the price it bought. Absent
-            rather than zero when the cost could not be estimated — free is a claim.
+            What is left after paying to send it. The path with the largest output is not always the
+            one that leaves you better off: a three-pool hop costs more to send than a single fill, and
+            on a small trade that gap can be larger than the price it bought. Absent rather than zero
+            when the cost could not be estimated — free is a claim.
           */}
-          {q.served && q.gasUsd !== undefined ? (
-            <Text variant="footnote" color={colors.ink55}>
-              {`gas ${money(q.gasUsd, { fractionDigits: 4 })}${q.netUsd !== undefined ? ` · net ${money(q.netUsd)}` : ''}`}
+          {q.served && q.netUsd !== undefined ? (
+            <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s2 }}>
+              {`${money(q.netUsd)} after gas`}
             </Text>
           ) : null}
         </View>
       ))}
-      {/*
-        The margin, only when there was something to beat. `edgeBps` is deliberately absent when a
-        single venue answered, because "0 bps better" reads as a tie rather than as no competition.
-      */}
       {/* Said only when it differs — otherwise it is the same sentence twice. */}
       {data.bestNet && data.best && data.bestNet !== data.best ? (
-        <Text variant="footnote" color={colors.up} style={{ marginTop: space.s10 }}>
-          {`${VENUE_LABEL[data.bestNet] ?? data.bestNet} wins after gas, even though ${VENUE_LABEL[data.best] ?? data.best} quotes more.`}
+        <Text variant="footnote" color={colors.ink} style={{ marginTop: space.s10 }}>
+          {`After gas, the ${fillPath(data.bestNet).toLowerCase()} leaves more.`}
         </Text>
       ) : null}
+      {/*
+        The margin, only when there was something to beat. `edgeBps` is deliberately absent when a
+        single path answered, because "0% more" reads as a tie rather than as no competition.
+      */}
       <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s12 }}>
-        {data.edgeBps !== undefined
-          ? `${VENUE_LABEL[data.best ?? ''] ?? data.best} wins by ${data.edgeBps} bps.`
+        {data.edgeBps !== undefined && data.best
+          ? `The ${fillPath(data.best).toLowerCase()} gives ${percent(data.edgeBps / 100, { digits: 2, explicitSign: false })} more.`
           : data.best
-            ? `Only ${VENUE_LABEL[data.best] ?? data.best} can serve this size, so there is nothing to compare it against.`
-            : 'No venue can serve this size right now.'}
+            ? `Only the ${fillPath(data.best).toLowerCase()} can fill this size.`
+            : 'Nothing can fill this size right now.'}
+      </Text>
+      <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
+        Quotes from 1inch.
       </Text>
     </SheetCard>
   );
