@@ -21,6 +21,7 @@ import {
   BackButton,
   Button,
   EmptyState,
+  ErrorState,
   Eyebrow,
   Fill,
   IconButton,
@@ -41,7 +42,7 @@ import {
   type KeypadKey,
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
-import { MINUS, percent } from '@/format';
+import { percent } from '@/format';
 import { SWAP_SLIPPAGES, keypadPress, swapRequest, swapSpendable } from '@/state/derived';
 import { usePrice } from '@/data/usePrices';
 import { repos } from '@/data';
@@ -74,6 +75,9 @@ export default function Swap() {
    * What can be swapped here is what this executor settles. Native ETH is left out: the permission moves ERC-20s,
    * and the executor takes "ETH" as WETH, which is listed. Where nothing settles the list is empty, and the screen
    * says so instead of offering a swap that could only be refused.
+   *
+   * A list that did not load says that, with a retry. It used to leave an empty picker under the default pair,
+   * which still looked ready to swap.
    */
   const tradable = useAsync(() => system.tradable(), []);
   const symbols = useMemo(
@@ -82,6 +86,8 @@ export default function Swap() {
   );
   const logos = useLogos(symbols);
   const nothingSettles = tradable.data !== undefined && symbols.length === 0;
+  // The default pair is a starting point, not something the executor listed: it swaps once the list says both sides do.
+  const pairListed = symbols.includes(pay) && symbols.includes(receive);
 
   // The chain's balance, not the ledger's: what can be paid is what the wallet holds.
   const balance = useAsync(() => repos.portfolio.balance(), []);
@@ -178,7 +184,11 @@ export default function Swap() {
         </View>
       ) : null}
 
-      {nothingSettles ? (
+      {tradable.error ? (
+        <Fill style={{ justifyContent: 'center' }}>
+          <ErrorState error={tradable.error} onRetry={tradable.reload} />
+        </Fill>
+      ) : nothingSettles ? (
         <Fill style={{ justifyContent: 'center' }}>
           <EmptyState text="Swaps aren’t available on this network." />
         </Fill>
@@ -193,10 +203,10 @@ export default function Swap() {
                 accessibilityLabel={balanceUnread ? `Retry reading your ${pay} balance` : undefined}
               >
                 <Text variant="footnote" color={colors.ink55}>
-                  {/* A dash while the balance loads, never a zero: see the note on `swapSpendable`. */}
+                  {/* A dash while the balance loads, never a zero: see the note on `swapSpendable`. An em dash, not a minus sign, which read as a negative balance. */}
                   {balanceUnread
-                    ? `Balance ${MINUS} · tap to retry`
-                    : `Balance ${spendable === undefined ? MINUS : units(spendable)}`}
+                    ? 'Balance — · tap to retry'
+                    : `Balance ${spendable === undefined ? '—' : units(spendable)}`}
                 </Text>
               </Press>
             </View>
@@ -235,7 +245,7 @@ export default function Swap() {
             <Eyebrow small>You receive</Eyebrow>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flexShrink: 1 }}>
-                <Price variant="amountLg">{q ? quantity(q.outAmount) : MINUS}</Price>
+                <Price variant="amountLg">{q ? quantity(q.outAmount) : '—'}</Price>
                 <Text variant="secondarySm" numberOfLines={2} style={{ marginTop: space.s4 }}>
                   {q
                     ? `Min ${quantity(q.minimumOut)}`
@@ -279,7 +289,7 @@ export default function Swap() {
                       {symbol}
                     </Text>
                     <Text variant="footnote" color={colors.ink55}>
-                      {held === undefined ? MINUS : `${units(held)} held`}
+                      {held === undefined ? '—' : `${units(held)} held`}
                     </Text>
                   </Press>
                 );
@@ -293,14 +303,14 @@ export default function Swap() {
                   <Row
                     title="Minimum received"
                     // The floor, not a fee: xorr charges none, and this is the number the fill is held to on chain.
-                    value={<Price>{q ? `${quantity(q.minimumOut)} ${receive}` : MINUS}</Price>}
+                    value={<Price>{`${quantity(q.minimumOut)} ${receive}`}</Price>}
                     height={46}
                   />
                   <Row
                     title="Price impact"
                     value={
                       <Price>
-                        {q && q.priceImpactPct !== null ? percent(q.priceImpactPct, { digits: 3, explicitSign: false }) : MINUS}
+                        {q.priceImpactPct !== null ? percent(q.priceImpactPct, { digits: 3, explicitSign: false }) : '—'}
                       </Price>
                     }
                     height={46}
@@ -329,13 +339,13 @@ export default function Swap() {
 
       {signedOut ? (
         <SignInButton label="Sign in to swap" style={{ marginTop: space.s14 }} />
-      ) : !nothingSettles ? (
+      ) : !nothingSettles && !tradable.error ? (
         <Button
           label={cta}
           variant={outcome?.status === 'filled' ? 'success' : 'primary'}
           style={{ marginTop: space.s14 }}
           loading={placing}
-          disabled={outcome?.status !== 'filled' && (!request || overBalance || !q)}
+          disabled={outcome?.status !== 'filled' && (!request || overBalance || !q || !pairListed)}
           onPress={() => {
             if (outcome?.status === 'filled') return setOutcome(undefined);
             if (reviewing) return void confirm();
@@ -349,6 +359,8 @@ export default function Swap() {
         overBalance={overBalance}
         spendable={spendable}
         pay={pay}
+        receive={receive}
+        unlisted={tradable.data !== undefined && !nothingSettles && !pairListed}
       />
     </Screen>
   );
@@ -359,7 +371,7 @@ const units = (n: number) => quantity(n, n >= 1 ? 2 : 4);
 
 /** The route's gas, which the executor pays — in dollars when ETH has a price. */
 function networkFee(gas: SwapQuoteResult['gas']): string {
-  if (!gas) return MINUS;
+  if (!gas) return '—';
   return gas.feeUsd !== null ? `On us · ≈ ${money(gas.feeUsd)}` : 'On us';
 }
 
@@ -369,11 +381,16 @@ function SwapNote({
   overBalance,
   spendable,
   pay,
+  receive,
+  unlisted,
 }: {
   outcome: SwapOutcome | undefined;
   overBalance: boolean;
   spendable: number | undefined;
   pay: string;
+  receive: string;
+  /** The pair on screen is not in what this executor lists, so the button stays off; this says why. */
+  unlisted: boolean;
 }) {
   const note =
     outcome?.status === 'blocked'
@@ -382,7 +399,9 @@ function SwapNote({
         ? { text: outcome.error, color: colors.down }
         : overBalance
           ? { text: spendable === 0 ? `You hold no ${pay}.` : `You hold ${quantity(spendable ?? 0)} ${pay}.`, color: colors.down }
-          : null;
+          : unlisted
+            ? { text: `${pay} for ${receive} can’t be swapped here.`, color: colors.ink55 }
+            : null;
   if (!note) return null;
   return (
     <Text variant="footnote" color={note.color} align="center" style={{ marginTop: space.s10 }}>

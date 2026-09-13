@@ -2,9 +2,9 @@
  * Screen 14 — Order ticket. screens.md Group B. WHITE SHEET, radius 30 30 0 0.
  *
  * Title + close. Buy/Sell segmented on `sheet.fill`. 52/700 amount + unit conversion.
- * Quick pills $100 / $500 / Max. 3×4 numeric keypad. Fee row (0.1%). CTA
- * "{side} ${amount} of SOL" in `candleUp` / `candleDown`. Footnote reflecting the live
- * Auto Close settings.
+ * Quick pills $100 / $500 / Max. 3×4 numeric keypad. Minimum received and network fee, from the
+ * route. CTA "{side} ${amount} of WETH" in `candleUp` / `candleDown`, with the reason under it when
+ * the wallet cannot cover the order.
  *
  * Keypad rules live in state.md and are implemented in state/derived.ts#keypadPress:
  * max 7 chars, one decimal point, backspace pops, a leading 0 is REPLACED.
@@ -42,6 +42,7 @@ import { DEFAULT_BUY } from '@/data/tradable';
 import { useSettleable } from '@/data/useSettleable';
 import { errorText } from '@/data/apiError';
 import type { SwapQuoteResult } from '@/data/useSwapQuote';
+import { sellMax, ticketLimit } from '@/markets/ticket';
 
 type Side = 'buy' | 'sell';
 
@@ -107,9 +108,19 @@ export default function OrderTicket() {
   // A SELL is not a spend. It reduces a position the user already holds, so what caps it is
   // the position, not the balance — and it goes through the same close path screen 22 uses
   // rather than a second implementation of selling.
-  const { data: positions } = useAsync(() => repos.portfolio.positions(), []);
-  const held = (positions ?? []).find((p) => p.symbol === symbol);
+  const positions = useAsync(() => repos.portfolio.positions(), []);
+  const held = (positions.data ?? []).find((p) => p.symbol === symbol);
   const heldUsd = held?.notional;
+  /*
+   * What a sale is checked against: the position's value once the book has answered — no position is
+   * 0 — and nothing before it has. With no position the ceiling used to be `undefined`, which read as
+   * "no limit", so "Sell $250 of WETH" stayed live for a token the wallet did not hold.
+   */
+  const heldRead: number | 'loading' | 'unread' = positions.error
+    ? 'unread'
+    : positions.data === undefined
+      ? 'loading'
+      : (heldUsd ?? 0);
 
   const amount = parseFloat(orderAmt || '0') || 0;
 
@@ -146,8 +157,9 @@ export default function OrderTicket() {
         : Promise.resolve(null),
     [quoteFor],
   );
-  const ceiling = side === 'buy' ? availableUsd : heldUsd;
-  const overBalance = ceiling !== undefined && amount > ceiling;
+  const limit = ticketLimit({ side, symbol, amountUsd: amount, cashUsd: availableUsd, held: heldRead });
+  /** What Max inserts: the cash for a buy, and for a sale the holding — which Max used to ignore, composing a sale of the cash. */
+  const maxUsd = side === 'sell' ? (typeof heldRead === 'number' ? heldRead : undefined) : availableUsd;
 
   // The conversion a user acts on must come from the market, not from a design constant.
   const { quote } = usePrice(symbol);
@@ -243,7 +255,7 @@ export default function OrderTicket() {
            * the user's input because our own data is late is worse than one that does nothing, so
            * it is disabled until the number it inserts is actually known.
            */
-          const maxUnknown = q === 'Max' && availableUsd === undefined;
+          const maxUnknown = q === 'Max' && maxUsd === undefined;
           return (
             <Pill
               key={q}
@@ -255,7 +267,11 @@ export default function OrderTicket() {
                   ? undefined
                   : () =>
                       setOrderAmt(
-                        q === 'Max' ? String(Math.floor(availableUsd!)) : q.slice(1),
+                        q !== 'Max'
+                          ? q.slice(1)
+                          : side === 'sell'
+                            ? sellMax(maxUsd!)
+                            : String(Math.floor(maxUsd!)),
                       )
               }
             />
@@ -315,7 +331,7 @@ export default function OrderTicket() {
           backgroundColor={side === 'buy' ? colors.candleUp : colors.candleDown}
           color={colors.ink}
           disabled={
-            settleable === 'checking' || overBalance || amount <= 0 || filled !== undefined
+            settleable === 'checking' || limit.state !== 'ok' || amount <= 0 || filled !== undefined
           }
           loading={placing}
           onPress={place}
@@ -338,16 +354,15 @@ export default function OrderTicket() {
           {refusal}
         </Text>
       ) : null}
-      {overBalance ? (
+      {/* Why the order cannot go, on the ticket: nothing held, more than is held, more than the cash. */}
+      {limit.state === 'refused' && tradable && !signedOut && filled === undefined ? (
         <Text
           variant="footnote"
           color={colors.down}
           align="center"
           style={{ marginTop: space.s10 }}
         >
-          {side === 'buy'
-            ? `You have ${money(availableUsd ?? 0)}.`
-            : `You hold ${money(heldUsd ?? 0)} of ${symbol}.`}
+          {limit.reason}
         </Text>
       ) : null}
 
