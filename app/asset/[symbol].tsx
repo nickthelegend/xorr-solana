@@ -1,15 +1,18 @@
 /**
  * Screen 13 — Asset detail. screens.md Group B.
  *
- * Back / mark + name / star. Price at `priceLg` with a live delta chip. A chart — candles by
+ * Back / mark + name. Price at `priceLg` with a delta chip that names its window. A chart — candles by
  * default, tapping switches to the line — over the real series for the selected range. Range
  * pills. The position rows, from the real book. Sell / Buy.
  *
  * Rebuilt on `src/ui`. Everything that used to be invented is gone: the position rows were
  * hardcoded (1,750.30 SOL, avg cost $81.14, +$12,566), and the chart fell back to
  * `areaSeries.SOL`, drawing Solana's shape under whatever symbol you had opened.
+ *
+ * The price and the history are read through `src/markets`, where a failed read throws. Through the
+ * repository both failures came back as "no feed", so the error state this screen carried could never show.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -31,7 +34,6 @@ import {
   Price,
   Row,
   Screen,
-  Tag,
   Text,
   colors,
   money,
@@ -49,14 +51,25 @@ import { RollingNumber } from '@/ui/RollingNumber';
 import { signedMoney } from '@/format';
 import { repos } from '@/data';
 import { api } from '@/data/api';
+import { NotSignedIn } from '@/data/apiError';
+import type { HistoryRange } from '@/data/marketData';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
-import { usePrice } from '@/data/usePrices';
 import { rangeChange } from '@/state/derived';
 import { settlementSymbol } from '@/data/tradable';
 import { useSettleable } from '@/data/useSettleable';
+import { quoteOf } from '@/markets/quote';
+import { historySeries, stillWarming } from '@/markets/series';
+import { DUST_USD } from '@/markets/ticket';
+import { useLiveRead } from '@/markets/useLiveRead';
 
-const RANGES = ['1D', '1W', '1M', '1Y', 'All'] as const;
+/**
+ * The ranges, each as long as its label.
+ *
+ * `1Y` fetched ninety days, and so did `All`, under "past year" and "all time". A year is a year now.
+ * `All` is gone: the price feed keeps no more than a year of history, so there is no all time to draw.
+ */
+const RANGES: readonly HistoryRange[] = ['1D', '1W', '1M', '1Y'];
 /**
  * Candles or line, as a visible control.
  *
@@ -74,9 +87,6 @@ const CHART_VIEWS: { value: number; label: string }[] = [
 const CHART_VIEW_SEGMENT = 58;
 const CHART_VIEW_W = CHART_VIEW_SEGMENT * 2 + space.s4 + size.segPad * 2;
 
-/** The timeframe each range pill maps to when asking for real candles. */
-const RANGE_TF = { '1D': '1H', '1W': '4H', '1M': '1D', '1Y': '1W', All: '1W' } as const;
-
 const CHART_H = 170;
 const ROW_H = 52;
 
@@ -84,7 +94,7 @@ export default function AssetDetail() {
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
   const router = useRouter();
   const goBack = useGoBack();
-  const [range, setRange] = useState(0);
+  const [range, setRange] = useState<HistoryRange>('1D');
   // design.md calls the candlestick the centrepiece, and the bars are already fetched — the
   // area chart was only ever a summary of the same data. Both are offered; candles are the
   // default wherever there are real ones to draw.
@@ -94,26 +104,24 @@ export default function AssetDetail() {
   const inst = useAsync(() => repos.markets.getInstrument(symbol!), [symbol]);
   const positions = useAsync(() => repos.portfolio.positions(), []);
   // Dust a sale left behind is not a position (as on Portfolio): a cent or more is held.
-  const held = (positions.data ?? []).find((p) => p.symbol === symbol && p.notional >= 0.01);
-  const candles = useAsync(
-    () => repos.markets.candles(symbol!, RANGE_TF[RANGES[range]!]),
-    [symbol, range],
-  );
+  const held = (positions.data ?? []).find((p) => p.symbol === symbol && p.notional >= DUST_USD);
+  // Signed out there is no position to show, which is not a failure. Anything else that stopped the read is.
+  const positionUnread = positions.error !== undefined && !(positions.error instanceof NotSignedIn);
 
-  const i = inst.data;
-  const bars = candles.data?.bars;
-  const series = useMemo(() => toCandles(bars ?? []), [bars]);
+  // Tokenized equities have a real spot price and no history: they are priced off the route
+  // that would fill them, not a candle feed. A real price with no chart is a true state to show.
+  const spotRead = useLiveRead(() => quoteOf(symbol!), [symbol]);
+  const history = useLiveRead(() => historySeries(symbol!, range), [symbol, range], stillWarming);
+
+  // The answer for this symbol and range — not the last range's candles under the new label while this one loads.
+  const shown = history.data?.symbol === symbol && history.data.window === range ? history.data : undefined;
+  const series = useMemo(() => toCandles(shown?.bars ?? []), [shown]);
   const closes = series.map((c) => c.close);
   const hasSeries = closes.length > 1;
-  // "Not yet" and "not ever" get different words, and the first one retries.
-  const warming = candles.data?.feed === 'warming';
+  // From the window's first open, so the change covers the whole range its label names.
+  const seriesPct = hasSeries ? ((closes.at(-1)! - series[0]!.open) / series[0]!.open) * 100 : 0;
 
-  const seriesPct = hasSeries ? ((closes.at(-1)! - closes[0]!) / closes[0]!) * 100 : 0;
-
-  // Tokenized equities have a real spot price and no history: they are priced off the 1inch
-  // route that would fill them, not a candle feed. A real price with no chart is a true
-  // state to show.
-  const { quote, loading: priceLoading, reload: reloadQuote } = usePrice(symbol);
+  const quote = spotRead.data ?? undefined;
 
   /*
    * The percentage names the window it measured.
@@ -124,20 +132,16 @@ export default function AssetDetail() {
    * deriving it a second way from the candles is what made one asset show 2.1% here and 2.55%
    * there at the same moment.
    */
-  const { pct: changePct, label: changeLabel } = rangeChange(
-    RANGES[range] ?? '1D',
-    seriesPct,
-    quote?.change24h,
-  );
+  const { pct: changePct, label: changeLabel } = rangeChange(range, seriesPct, quote?.change24h);
   const up = changePct >= 0;
 
   /*
    * The same asset, priced a second way.
    *
    * Every number in this app came from one feed, and one feed is one point of being wrong.
-   * 1inch's spot price is derived from the on-chain liquidity a fill would actually go
-   * through, which makes it the right second opinion rather than just another API: when the
-   * two disagree, the one that decides what a trade costs is the on-chain one.
+   * The on-chain spot price is derived from the liquidity a fill would actually go through,
+   * which makes it the right second opinion rather than just another API: when the two
+   * disagree, the one that decides what a trade costs is the on-chain one.
    */
   const cross = useAsync(
     () =>
@@ -149,29 +153,18 @@ export default function AssetDetail() {
 
   // The hero reads live SPOT, not the last candle close — a candle series is a history and
   // the number at the top of this screen is a price.
-  const spot = quote?.price && quote.price > 0 ? quote.price : hasSeries ? closes.at(-1)! : undefined;
+  const spot = quote && quote.price > 0 ? quote.price : undefined;
 
   /*
-   * Still arriving, in any of the three ways it can be.
+   * Still arriving, in any of the ways it can be.
    *
    * The screen only knew "have data" and "have none", so during the very first fetch it said
    * "No live price for this market" and "No chart for this market yet" — a confident claim
-   * about a market it had not finished asking about. Loading, warming and empty are three
-   * different states and only the last one is news.
+   * about a market it had not finished asking about. Loading, warming and empty are different
+   * states and only the last one is news; a warming answer is asked again by `useLiveRead`.
    */
-  const warmingAny =
-    warming || quote?.warming === true || priceLoading || (candles.loading && !candles.data);
-
-  // The executor answered "come back", so come back. Without this the screen sits on its
-  // warming message until the user navigates, which looks identical to being stuck.
-  useEffect(() => {
-    if (!warmingAny) return;
-    const t = setTimeout(() => {
-      candles.reload();
-      reloadQuote();
-    }, 4_000);
-    return () => clearTimeout(t);
-  }, [warmingAny, candles, reloadQuote]);
+  const priceLoading = spotRead.loading && spotRead.data === undefined;
+  const historyLoading = history.loading && !shown;
 
   /*
    * Asked of the executor, like the order ticket. A Buy button that leads to a ticket the chain
@@ -180,14 +173,6 @@ export default function AssetDetail() {
   // 'checking' is rendered, not guessed through — see useSettleable.
   const settleable = useSettleable(symbol ?? '');
   const tradable = settleable !== 'no';
-
-  if (inst.error) {
-    return (
-      <Screen sheet>
-        <ErrorState error={inst.error} onRetry={inst.reload} />
-      </Screen>
-    );
-  }
 
   return (
     <Screen gutter="none" sheet>
@@ -211,12 +196,12 @@ export default function AssetDetail() {
             from the symbol, so there is nothing to wait for.
           */}
           <AssetMark
-            gradient={i ? { c1: i.c1, c2: i.c2 } : assetGradient(symbol ?? '')}
+            gradient={inst.data ? { c1: inst.data.c1, c2: inst.data.c2 } : assetGradient(symbol ?? '')}
             {...logo}
             size={26}
           />
           <Text variant="cardTitleLg" numberOfLines={1}>
-            {i?.name ?? symbol}
+            {inst.data?.name ?? symbol}
           </Text>
         </View>
       </View>
@@ -235,27 +220,37 @@ export default function AssetDetail() {
         showsVerticalScrollIndicator={false}
       >
       <View style={{ alignItems: 'center', marginTop: space.s22, gap: space.s6 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s10 }}>
-          {/* The price rolls in when it first arrives; live ticks after that change in place. */}
-          {spot !== undefined ? (
-            <RollingNumber value={fmtPrice(spot)} variant="priceLg" />
-          ) : warmingAny ? (
-            <Placeholder width={150} height={34} style={{ borderRadius: radius.tile }} />
-          ) : (
-            <Price variant="priceLg">—</Price>
-          )}
-          {spot === undefined && !warmingAny ? <Tag label="No price feed" small tone="warn" /> : null}
-        </View>
-        {hasSeries ? (
-          <DeltaChip
-            label={`${up ? 'up' : 'down'} ${percent(Math.abs(changePct)).replace('+', '')} ${changeLabel}`}
-            tone={pnlTone(changePct)}
-            style={{ alignSelf: 'center' }}
-          />
+        {spotRead.error ? (
+          <ErrorState error={spotRead.error} onRetry={spotRead.reload} />
         ) : (
-          <Text variant="body" color={colors.ink55}>
-            {warmingAny ? 'Loading…' : spot === undefined ? 'No price yet.' : 'No history yet.'}
-          </Text>
+          <>
+            {/* The price rolls in when it first arrives; live ticks after that change in place. */}
+            {spot !== undefined ? (
+              <RollingNumber value={fmtPrice(spot)} variant="priceLg" />
+            ) : priceLoading ? (
+              <Placeholder width={150} height={34} style={{ borderRadius: radius.tile }} />
+            ) : (
+              <Price variant="priceLg" color={colors.ink55}>
+                —
+              </Price>
+            )}
+            {hasSeries ? (
+              <DeltaChip
+                label={`${up ? 'up' : 'down'} ${percent(Math.abs(changePct)).replace('+', '')} ${changeLabel}`}
+                tone={pnlTone(changePct)}
+                style={{ alignSelf: 'center' }}
+              />
+            ) : priceLoading || historyLoading ? (
+              <Text variant="body" color={colors.ink55}>
+                Loading…
+              </Text>
+            ) : spot === undefined ? (
+              // One quiet line, not a warning tag beside it saying the same thing again.
+              <Text variant="body" color={colors.ink55}>
+                No price feed.
+              </Text>
+            ) : null}
+          </>
         )}
 
         {/*
@@ -285,7 +280,7 @@ export default function AssetDetail() {
         chart itself — an affordance with nothing on screen to suggest it existed, so the line view
         may as well not have shipped. The tap still works; this is what says so.
 
-        Above the chart rather than beside the range pills, which is where it went first: five range
+        Above the chart rather than beside the range pills, which is where it went first: the range
         pills and a two-word control do not fit one 402pt row, and what that shipped was "All"
         sliced in half by the control's left edge. They also answer different questions — the pills
         pick a period, this picks a rendering — and the one that belongs to the chart sits with it.
@@ -319,7 +314,7 @@ export default function AssetDetail() {
         <Press
           onPress={() => setCandleView((v) => !v)}
           accessibilityRole="button"
-          accessibilityLabel={`${i?.name ?? symbol} ${candleView ? 'candlestick' : 'price'} chart, ${RANGES[range]}. Switch to the ${candleView ? 'line' : 'candle'} view.`}
+          accessibilityLabel={`${inst.data?.name ?? symbol} ${candleView ? 'candlestick' : 'price'} chart, ${range}. Switch to the ${candleView ? 'line' : 'candle'} view.`}
           style={{ marginTop: space.s10, paddingHorizontal: space.gutter }}
         >
           {candleView ? (
@@ -349,19 +344,22 @@ export default function AssetDetail() {
             justifyContent: 'center',
           }}
         >
-          {warmingAny || (candles.loading && !candles.data) ? (
+          {history.error ? (
+            // The pills stay below it, so another range is still one tap away.
+            <ErrorState error={history.error} onRetry={history.reload} />
+          ) : historyLoading ? (
             <Placeholder height={CHART_H} style={{ borderRadius: radius.tile }} />
-          ) : (
+          ) : spot !== undefined ? (
             <Text variant="body" color={colors.ink55}>
               No chart yet.
             </Text>
-          )}
+          ) : null}
         </View>
       )}
 
       <PillRow style={{ marginTop: space.s16 }} contentPadding={space.gutter}>
-        {RANGES.map((r, idx) => (
-          <Pill key={r} label={r} selected={idx === range} onPress={() => setRange(idx)} />
+        {RANGES.map((r) => (
+          <Pill key={r} label={r} selected={r === range} onPress={() => setRange(r)} />
         ))}
       </PillRow>
 
@@ -384,6 +382,18 @@ export default function AssetDetail() {
               divider={false}
             />
           </>
+        ) : positionUnread ? (
+          // Not "you hold none": the book did not answer, so this screen cannot say either way.
+          <Press
+            onPress={positions.reload}
+            accessibilityRole="button"
+            accessibilityLabel="Read your position again"
+            hitHeight={size.hit}
+          >
+            <Text variant="secondary" color={colors.ink55}>
+              Your position did not load. Try again ›
+            </Text>
+          </Press>
         ) : null}
       </View>
       </ScrollView>

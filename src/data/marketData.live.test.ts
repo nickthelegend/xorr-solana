@@ -5,12 +5,29 @@
  * does on web: a direct browser call to CoinGecko dies in a CORS preflight. So this test also
  * proves the proxy is up and the symbol map on both sides agrees.
  *
+ * The pure folding and the requests each pill makes are covered offline in `marketData.test.ts`.
+ *
  * Run with: npm run test:live   (excluded from the default suite so CI stays hermetic)
  */
 import { describe, expect, it } from 'vitest';
-import { aggregateBars, fetchCandles, fetchQuotes, pricedSymbols } from './marketData';
+import {
+  CHART_TIMEFRAMES,
+  fetchCandles,
+  fetchChartCandles,
+  fetchHistory,
+  fetchQuotes,
+  pricedSymbols,
+} from './marketData';
 import { assetClasses } from './fixtures/markets';
 import type { Bar } from './types';
+
+const wellFormed = (bars: readonly Bar[]) => {
+  for (const [o, h, l, cl] of bars) {
+    expect(h).toBeGreaterThanOrEqual(Math.max(o, cl));
+    expect(l).toBeLessThanOrEqual(Math.min(o, cl));
+    expect(o).toBeGreaterThan(0);
+  }
+};
 
 describe('live market data', () => {
   it('prices all 9 crypto instruments for real', async () => {
@@ -48,22 +65,36 @@ describe('live market data', () => {
     expect(Math.abs(quotes.USDC!.price - 1)).toBeLessThan(0.01);
   }, 90_000);
 
-  it('returns real 12-candle OHLC for every timeframe [G8]', async () => {
-    for (const tf of ['15m', '1H', '4H', '1D', '1W'] as const) {
+  it('returns real 12-candle OHLC for every repository window [G8]', async () => {
+    for (const tf of ['1H', '4H', '1D', '1W'] as const) {
       const c = await fetchCandles('BTC', tf);
       expect(c, `${tf} returned nothing`).not.toBeNull();
       expect(c!.feed).toBe('live');
       expect(c!.bars.length).toBeGreaterThan(0);
       expect(c!.bars.length).toBeLessThanOrEqual(12);
-      for (const [o, h, l, cl] of c!.bars) {
-        expect(h).toBeGreaterThanOrEqual(Math.max(o, cl));
-        expect(l).toBeLessThanOrEqual(Math.min(o, cl));
-        expect(o).toBeGreaterThan(0);
-      }
+      wellFormed(c!.bars);
+    }
+    // `15m` fetched `1H`'s day under another name; nothing the feed sends is fine enough for it.
+    expect(await fetchCandles('BTC', '15m')).toBeNull();
+  }, 90_000);
+
+  it('cuts twelve candles of every chart length from the feed’s real rows', async () => {
+    for (const tf of CHART_TIMEFRAMES) {
+      const bars = await fetchChartCandles('BTC', tf);
+      // Twelve exactly: fewer means the feed's row length changed and the pill is no longer true.
+      expect(bars, `${tf} could not be cut from the feed's rows`).toHaveLength(12);
+      wellFormed(bars!);
     }
   }, 90_000);
 
-  it('different timeframes really do return different series — the pills are no longer decorative', async () => {
+  it('reaches a whole year back for 1Y', async () => {
+    const year = await fetchHistory('BTC', '1Y');
+    expect(year!.length).toBeGreaterThan(0);
+    expect(year!.length).toBeLessThanOrEqual(12);
+    wellFormed(year!);
+  }, 120_000);
+
+  it('different windows really do return different series — the pills are no longer decorative', async () => {
     const short = await fetchCandles('BTC', '1H');
     const long = await fetchCandles('BTC', '1W');
     expect(short!.bars).not.toEqual(long!.bars);
@@ -71,24 +102,6 @@ describe('live market data', () => {
     const range = (b: Bar[]) => Math.max(...b.map((x) => x[1])) - Math.min(...b.map((x) => x[2]));
     expect(range(long!.bars)).toBeGreaterThan(range(short!.bars));
   }, 60_000);
-});
-
-describe('bar aggregation', () => {
-  it('folds n raw bars into 12: first open, max high, min low, last close', () => {
-    const raw: Bar[] = Array.from({ length: 48 }, (_, i) => [i, i + 2, i - 1, i + 1]);
-    const out = aggregateBars(raw, 12);
-    expect(out).toHaveLength(12);
-    for (const [o, h, l, c] of out) {
-      expect(h).toBeGreaterThanOrEqual(Math.max(o, c));
-      expect(l).toBeLessThanOrEqual(Math.min(o, c));
-    }
-    expect(out[11]![3]).toBe(raw[47]![3]);
-  });
-
-  it('passes through when there are already 12 or fewer', () => {
-    const raw: Bar[] = [[1, 2, 0, 1], [1, 3, 1, 2]];
-    expect(aggregateBars(raw, 12)).toEqual(raw);
-  });
 
   it('the priceable symbols come from the SERVER, and include the ones we trade', async () => {
     /*

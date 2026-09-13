@@ -6,9 +6,13 @@
  * things, and it needs both series normalised to the same start — an absolute overlay of a
  * seventy-thousand-dollar asset and a one-dollar one is a flat line and a spike.
  *
- * Normalised to percent from the first bar, which is why the axis is a percentage and not a price.
- * The two series may have different bar counts if one market has less history; both are drawn over
- * however many bars they have, and the shorter one simply stops.
+ * Normalised to percent from the window's first open, which is why the axis is a percentage and not a
+ * price. The two series may have different bar counts if one market has less history; both are drawn
+ * over however many bars they have, and the shorter one simply stops.
+ *
+ * The window was never stated, and the pills were every tradable symbol — eight of them shares with no
+ * candle history, which could only ever answer "No history". The pills are what the feed prices now,
+ * the window is said once, and a failed read shows as one, with a retry for every read that failed.
  */
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -21,22 +25,28 @@ import {
   Pill,
   PillRow,
   Placeholder,
+  Price,
   Screen,
   SheetCard,
   Text,
   colors,
+  pnlTone,
   radius,
+  size,
   space,
   toCandles,
 } from '@/ui';
 import { percent } from '@/format';
+import { HISTORY_DAYS, type HistoryRange } from '@/data/marketData';
+import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
-import { repos } from '@/data';
-import { TRADABLE } from '@/data/tradable';
+import { historySeries, stillWarming, type Series } from '@/markets/series';
+import { useLiveRead } from '@/markets/useLiveRead';
 
 const CHART_H = 130;
 /** Enough history to be a comparison, short enough that both markets have it. */
-const TIMEFRAME = '1D' as const;
+const RANGE: HistoryRange = '1M';
+const WINDOW = `past ${HISTORY_DAYS[RANGE]} days`;
 
 /**
  * The gap between two percentage changes.
@@ -50,11 +60,12 @@ function points(n: number): string {
   return `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} points`;
 }
 
-/** Percent change from the first bar, so two very different prices can share an axis. */
-function normalise(closes: number[]): number[] {
-  const first = closes[0];
-  if (!first) return [];
-  return closes.map((c) => ((c - first) / first) * 100);
+/** Percent change from the window's first open, so two very different prices share an axis and both start at zero. */
+function normalise(series: Series<HistoryRange> | undefined): number[] {
+  const candles = toCandles(series?.bars ?? []);
+  const start = candles[0]?.open;
+  if (!start) return [];
+  return [start, ...candles.map((c) => c.close)].map((c) => ((c - start) / start) * 100);
 }
 
 export default function Compare() {
@@ -62,62 +73,63 @@ export default function Compare() {
   const [left, setLeft] = useState<string>('WETH');
   const [right, setRight] = useState<string>('CBBTC');
 
-  const a = useAsync(() => repos.markets.candles(left, TIMEFRAME), [left]);
-  const b = useAsync(() => repos.markets.candles(right, TIMEFRAME), [right]);
+  // What can be compared: what the price feed has history for, asked of the executor.
+  const symbols = useAsync(() => system.symbols(), []);
+  const a = useLiveRead(() => historySeries(left, RANGE), [left], stillWarming);
+  const b = useLiveRead(() => historySeries(right, RANGE), [right], stillWarming);
 
-  /*
-   * Through `toCandles`, not by indexing the tuple. A `Bar` is `[o, h, l, c]` and reaching for
-   * element three by hand is how a chart silently plots opens: the named accessor is the reason
-   * that helper exists.
-   */
-  const seriesA = useMemo(
-    () => normalise(toCandles(a.data?.bars ?? []).map((c) => c.close)),
-    [a.data],
-  );
-  const seriesB = useMemo(
-    () => normalise(toCandles(b.data?.bars ?? []).map((c) => c.close)),
-    [b.data],
-  );
+  // Each side's own symbol only — never the previous pick's line under the new name while it loads.
+  const shownA = a.data?.symbol === left ? a.data : undefined;
+  const shownB = b.data?.symbol === right ? b.data : undefined;
+  const seriesA = useMemo(() => normalise(shownA), [shownA]);
+  const seriesB = useMemo(() => normalise(shownB), [shownB]);
 
   const changeA = seriesA.at(-1);
   const changeB = seriesB.at(-1);
 
-  const error = a.error ?? b.error;
-  const loading = (a.loading && !a.data) || (b.loading && !b.data);
+  const error = symbols.error ?? a.error ?? b.error;
+  /** Every read that failed. The retry used to reload the first chart alone. */
+  const retry = () => {
+    if (symbols.error) symbols.reload();
+    if (a.error) a.reload();
+    if (b.error) b.reload();
+  };
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Compare</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Both normalised to where they started, so the shapes are comparable.
+          {`Change over the ${WINDOW}, side by side.`}
         </Text>
       </View>
 
       <Fill style={{ marginTop: space.s12 }}>
         {error ? (
           <View style={{ paddingHorizontal: space.gutter }}>
-            <ErrorState error={error} onRetry={a.reload} />
+            <ErrorState error={error} onRetry={retry} />
           </View>
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.s30 }}>
             <Side
               label="First"
               symbol={left}
+              pills={symbols.data}
               onPick={setLeft}
               series={seriesA}
               change={changeA}
-              loading={loading}
-              tone={colors.up}
+              loading={a.loading && !shownA}
+              line={colors.ink}
             />
             <Side
               label="Second"
               symbol={right}
+              pills={symbols.data}
               onPick={setRight}
               series={seriesB}
               change={changeB}
-              loading={loading}
-              tone={colors.ink65}
+              loading={b.loading && !shownB}
+              line={colors.ink55}
             />
 
             {changeA !== undefined && changeB !== undefined ? (
@@ -135,7 +147,9 @@ export default function Compare() {
                     {points(Math.abs(changeA - changeB))}
                   </Text>
                   <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-                    {changeA > changeB ? left : right} is ahead over this window.
+                    {changeA === changeB
+                      ? `Level over the ${WINDOW}.`
+                      : `${changeA > changeB ? left : right} is ahead over the ${WINDOW}.`}
                   </Text>
                 </SheetCard>
               </View>
@@ -150,19 +164,26 @@ export default function Compare() {
 function Side({
   label,
   symbol,
+  pills,
   onPick,
   series,
   change,
   loading,
-  tone,
+  line,
 }: {
   label: string;
   symbol: string;
+  /** Undefined until the executor has said what it prices. */
+  pills: readonly string[] | undefined;
   onPick: (s: string) => void;
   series: number[];
   change: number | undefined;
   loading: boolean;
-  tone: string;
+  /**
+   * The line's ink. Neutral on purpose: the first line was always green, so a first pick that fell
+   * was drawn — and its change printed — in profit green.
+   */
+  line: string;
 }) {
   return (
     <View style={{ marginTop: space.s16 }}>
@@ -172,25 +193,35 @@ function Side({
         </Text>
       </View>
 
-      <PillRow style={{ marginTop: space.s8 }} contentPadding={space.gutter}>
-        {TRADABLE.map((t) => (
-          <Pill key={t} label={t} selected={t === symbol} onPress={() => onPick(t)} />
-        ))}
-      </PillRow>
+      {pills ? (
+        <PillRow style={{ marginTop: space.s8 }} contentPadding={space.gutter}>
+          {pills.map((t) => (
+            <Pill key={t} label={t} selected={t === symbol} onPress={() => onPick(t)} />
+          ))}
+        </PillRow>
+      ) : (
+        <View style={{ paddingHorizontal: space.gutter, marginTop: space.s8 }}>
+          <Placeholder height={size.pillH} width="70%" />
+        </View>
+      )}
 
       <View style={{ paddingHorizontal: space.gutter, marginTop: space.s12 }}>
         {loading ? (
           <Placeholder height={CHART_H} />
         ) : series.length < 2 ? (
           <Text variant="secondarySm" color={colors.ink55}>
-            No history for {symbol} over this window.
+            No history for {symbol}.
           </Text>
         ) : (
           <>
-            <AreaChart data={series} height={CHART_H} color={tone} endDot />
-            <Text variant="rowPrimary" color={tone} style={{ marginTop: space.s8 }}>
-              {symbol} {change === undefined ? '—' : percent(change, { explicitSign: true })}
-            </Text>
+            <AreaChart data={series} height={CHART_H} color={line} endDot />
+            <Price
+              variant="rowPrimary"
+              tone={change === undefined ? 'neutral' : pnlTone(change)}
+              style={{ marginTop: space.s8 }}
+            >
+              {`${symbol} ${change === undefined ? '—' : percent(change, { explicitSign: true })}`}
+            </Price>
           </>
         )}
       </View>
