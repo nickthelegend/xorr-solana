@@ -4,7 +4,16 @@
  * The chain is the source of truth for what the bot may spend. Our database caches it for display,
  * and every enforcement decision re-reads the contract rather than trusting that cache.
  */
-import { parseUnits, formatUnits, type Address, type ContractFunctionParameters, type Hex } from 'viem';
+import {
+  parseUnits,
+  formatUnits,
+  parseEventLogs,
+  type Address,
+  type ContractFunctionParameters,
+  type Hex,
+  type Log,
+  type TransactionReceipt,
+} from 'viem';
 import { publicClient, walletClient, delegateAccount } from './client.js';
 import { ADDRESSES, SETTLEMENT_VENUES } from './chains.js';
 import 'dotenv/config';
@@ -117,6 +126,29 @@ export const DELEGATION_ABI = [
       { name: 'venue', type: 'address' },
     ],
     outputs: [{ name: '', type: 'bool' }],
+  },
+
+  /*
+   * The two events an owner's own transaction leaves (PLAN.md 4.8), so a hash the app reports is
+   * checked for what it did rather than only for whether it succeeded. See `grantInLogs`.
+   */
+  {
+    type: 'event',
+    name: 'Granted',
+    inputs: [
+      { name: 'owner', type: 'address', indexed: true },
+      { name: 'delegate', type: 'address', indexed: true },
+      { name: 'dailyCap', type: 'uint256', indexed: false },
+      { name: 'expiresAt', type: 'uint64', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'Revoked',
+    inputs: [
+      { name: 'owner', type: 'address', indexed: true },
+      { name: 'delegate', type: 'address', indexed: true },
+    ],
   },
 
   /*
@@ -389,6 +421,23 @@ export async function waitForTx(
   timeoutMs = 30_000,
   lookupMs = 15_000,
 ): Promise<boolean | undefined> {
+  const receipt = await waitForReceipt(hash, timeoutMs, lookupMs);
+  return receipt ? receipt.status === 'success' : undefined;
+}
+
+/**
+ * The same wait, with the receipt kept (PLAN.md 4.8).
+ *
+ * Whether a transaction succeeded is not what it did. `/delegation/record` has to see the logs to
+ * know a hash is a grant — this wallet's, naming this executor — so the receipt the wait already
+ * fetched is handed back instead of being reduced to a boolean. Undefined in exactly the cases
+ * `waitForTx` reports as absent.
+ */
+export async function waitForReceipt(
+  hash: Hex,
+  timeoutMs = 30_000,
+  lookupMs = 15_000,
+): Promise<TransactionReceipt | undefined> {
   /*
    * Looked up for a few seconds, not once (2026-09-13).
    *
@@ -407,11 +456,134 @@ export async function waitForTx(
   }
   if (!known) return undefined;
 
-  const receipt = await publicClient
+  return publicClient
     .waitForTransactionReceipt({ hash, timeout: timeoutMs, confirmations: 1 })
     .catch(() => undefined);
-  if (!receipt) return undefined;
-  return receipt.status === 'success';
+}
+
+const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** What a grant set, read from the `Granted` event its transaction emitted. */
+export type GrantEvent = {
+  owner: Address;
+  delegate: Address;
+  dailyCapUsd: number;
+  /** Unix ms, as `OnChainPolicy.expiresAt` is. */
+  expiresAt: number;
+};
+
+export type GrantInLogs =
+  | { ok: true; grant: GrantEvent }
+  | {
+      ok: false;
+      error: 'no_grant_event' | 'grant_owner_mismatch' | 'grant_delegate_mismatch';
+      message: string;
+    };
+
+/**
+ * The grant a transaction made, read from its own logs (PLAN.md 4.8).
+ *
+ * `/delegation/record` checked that a hash was mined and succeeded, then read whatever policy the
+ * wallet held. So any successful transaction passed — an approval, a transfer, another wallet's
+ * grant — and went into the append-only trail as "Trading permission granted" on the strength of a
+ * grant made some other time. The numbers recorded were the chain's; the claim that THIS
+ * transaction made them was only the client's.
+ *
+ * Now the transaction has to say it:
+ *   - a `Granted` log emitted BY the delegation contract. The same event from any other address is
+ *     anyone's to emit, naming any owner they like;
+ *   - for this owner. `grant` records `msg.sender`, so the owner in the event is whoever signed;
+ *   - naming the key this executor signs with. A grant to another delegate is inert — `spend`
+ *     checks the caller — and recording it would put a permission the bot cannot use in the trail.
+ *
+ * Cap and expiry come from the event, never from the request. Where one transaction granted more
+ * than once, the last grant is the one in force, because a grant replaces the one before it.
+ */
+export function grantInLogs(
+  logs: readonly Log[],
+  expected: { contract: Address; owner: Address; delegate: Address },
+): GrantInLogs {
+  const granted = parseEventLogs({
+    abi: DELEGATION_ABI,
+    eventName: 'Granted',
+    logs: logs.filter((l) => sameAddress(l.address, expected.contract)),
+  });
+  if (granted.length === 0) {
+    return {
+      ok: false,
+      error: 'no_grant_event',
+      message:
+        'That transaction did not grant a permission through the xorr delegation contract, so it ' +
+        'was not recorded.',
+    };
+  }
+  const own = granted.filter((g) => sameAddress(g.args.owner, expected.owner));
+  const last = own[own.length - 1];
+  if (!last) {
+    return {
+      ok: false,
+      error: 'grant_owner_mismatch',
+      message: 'That grant was signed by a different wallet, so it was not recorded against this one.',
+    };
+  }
+  if (!sameAddress(last.args.delegate, expected.delegate)) {
+    return {
+      ok: false,
+      error: 'grant_delegate_mismatch',
+      message:
+        'That grant names a key this executor does not sign with, so the bot could never use it. ' +
+        'It was not recorded.',
+    };
+  }
+  return {
+    ok: true,
+    grant: {
+      owner: last.args.owner,
+      delegate: last.args.delegate,
+      dailyCapUsd: unitsToUsd(last.args.dailyCap),
+      expiresAt: Number(last.args.expiresAt) * 1000,
+    },
+  };
+}
+
+export type RevokeInLogs =
+  | { ok: true }
+  | { ok: false; error: 'no_revoke_event' | 'revoke_owner_mismatch'; message: string };
+
+/**
+ * Whether a transaction revoked this owner's permission, read from its own logs.
+ *
+ * `/delegation/revoke` is authorised by the chain — the policy has to read revoked — so a hash
+ * cannot fake a stop. But the hash is written into the trail as that stop's signature, and an
+ * approval, or another wallet's revoke, carried there is a record pointing at the wrong
+ * transaction. So the rule for a grant applies: a `Revoked` log from the delegation, for this owner.
+ */
+export function revokeInLogs(
+  logs: readonly Log[],
+  expected: { contract: Address; owner: Address },
+): RevokeInLogs {
+  const revoked = parseEventLogs({
+    abi: DELEGATION_ABI,
+    eventName: 'Revoked',
+    logs: logs.filter((l) => sameAddress(l.address, expected.contract)),
+  });
+  if (revoked.length === 0) {
+    return {
+      ok: false,
+      error: 'no_revoke_event',
+      message:
+        'That transaction did not revoke a permission through the xorr delegation contract, so it ' +
+        'was not recorded.',
+    };
+  }
+  if (!revoked.some((r) => sameAddress(r.args.owner, expected.owner))) {
+    return {
+      ok: false,
+      error: 'revoke_owner_mismatch',
+      message: 'That revoke was signed by a different wallet, so it was not recorded against this one.',
+    };
+  }
+  return { ok: true };
 }
 
 /**

@@ -45,9 +45,12 @@ import {
 import { userSigningNote, userSigningWorks } from '@/chain';
 import { useStore } from '@/state/store';
 import { useAllowlist } from '@/wallet/allowlist';
-import { useApprovals } from '@/wallet/useApprovals';
+import { useApprovals, type ApprovalsView } from '@/wallet/useApprovals';
+import { planResume, type GrantOptions } from '@/wallet/grantPlan';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { repos } from '@/data';
+import { api } from '@/data/api';
+import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { errorText, NotSignedIn } from '@/data/apiError';
 
@@ -80,7 +83,6 @@ export default function Safety() {
   // Read it as well as write it: the two parties are rendered below, and a screen that
   // stores the delegation and then cannot see it is why they were never shown at all.
   const delegation = useStore((s) => s.delegation);
-  const cap = useStore((s) => s.cap);
   const recoveryBackedUp = useStore((s) => s.recoveryBackedUp);
   const [localError, setLocalError] = useState<string>();
 
@@ -213,9 +215,49 @@ export default function Safety() {
   const { grant: signGrant, revoke: signRevoke, busy, error: txError } = useGrantDelegation();
   const error = localError ?? txError;
 
+  /*
+   * The grant, called as a resume calls it: with the approvals the plan found missing (PLAN.md 4.7).
+   *
+   * `useGrantDelegation` is being changed separately to take that third argument. Until it does,
+   * its two-parameter `grant` still fits this type and the argument is ignored, so every approval
+   * is sent as before — extra signatures, never a weaker permission. Once it takes the options,
+   * this assignment is where the compiler holds the two to the same shape.
+   */
+  const grantWith: (dailyCapUsd: number, durationMs: number, options: GrantOptions) => Promise<unknown> =
+    signGrant;
+
+  /*
+   * What a re-grant signs, planned from fresh reads of the chain (PLAN.md 4.7).
+   *
+   * This signed `grant(cap, 86_400_000)`: the cap this device's store held and twenty-four hours,
+   * whatever the user had granted — so a $400 permission for a week came back as $1,600 for a day,
+   * and every token was approved again for allowances the revoke never touched. The plan takes the
+   * cap the chain holds, the length the last grant ran, and only the approvals no longer enough.
+   * Read when the button is pressed rather than from what the screen loaded: the chain is what is
+   * being resumed, and an allowance can move while the screen is open.
+   */
+  async function planFromChain() {
+    const [permission, params, allowances] = await Promise.all([
+      repos.wallet.delegation(),
+      system.delegationParams(),
+      api.get<ApprovalsView>('/approvals'),
+    ]);
+    return planResume({ permission, params, allowances, now: Date.now() });
+  }
+
   async function toggle() {
     setLocalError(undefined);
     try {
+      const plan = killed || unusable || expired ? await planFromChain() : undefined;
+      /*
+       * Nothing on record to resume from — no permission, or no record of how long the last one
+       * ran — so nothing is signed here. The limits are the user's to set, on the screen that sets
+       * them, rather than a length this screen would have to make up.
+       */
+      if (plan?.kind === 'choose') {
+        router.push('/delegate');
+        return;
+      }
       // Biometrics gate every change to what the bot may do. PLAN.md 12.20.
       const hasHw = await LocalAuthentication.hasHardwareAsync().catch(() => false);
       const enrolled = hasHw
@@ -250,7 +292,7 @@ export default function Safety() {
        * considers over — a transaction, a wallet prompt and a gas fee to change nothing. The same
        * mistake the ungranted-wallet case was fixed for.
        */
-      if (killed || unusable || expired) await signGrant(cap, 86_400_000);
+      if (plan) await grantWith(plan.dailyCapUsd, plan.durationMs, { approvals: plan.approvals });
       else await signRevoke();
       setDelegation(await repos.wallet.delegation());
       setKilled(unusable || expired ? false : !killed);

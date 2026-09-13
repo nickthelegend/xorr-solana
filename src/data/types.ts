@@ -270,6 +270,16 @@ export type Delegation = {
   dailyCapUsd: number;
   /** screen 4 "Run For" -> a real expiry, unix ms. */
   expiresAt: number;
+  /**
+   * When the grant in force was made, unix ms: the time of the block that carried its `Granted`
+   * event, as `/delegation/record` read it (PLAN.md 4.7). Resume re-grants for as long as that grant
+   * ran — `expiresAt` less this — because "Run For" itself is not kept on chain.
+   *
+   * Null when there is no record of that grant — one made before grants were recorded this way, or
+   * never reported by the app — and absent from an executor older than the field. Neither is a
+   * reason to invent a length.
+   */
+  grantedAt?: number | null;
   /** Programs/venues the authority may touch. */
   venueAllowlist: string[];
   /** Withdrawals may only go here, after a cooling-off period. */

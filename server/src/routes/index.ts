@@ -33,8 +33,11 @@ import { basenameOf } from '../evm/basename.js';
 import { dripGasIfNeeded } from '../evm/gasDrip.js';
 import {
   delegatePublicKey,
+  grantInLogs,
   readPolicy,
   readPolicyAndVenues,
+  revokeInLogs,
+  waitForReceipt,
   waitForTx,
   DELEGATION_ADDRESS,
 } from '../evm/delegation.js';
@@ -390,9 +393,24 @@ routes.get('/delegation', async (c) => {
    * which is the one place that matters. Basenames are Base's own answer and resolving one is a
    * read of a Base contract — null where there is no name, which is most addresses.
    */
-  const [ownerName, delegateName] = await Promise.all([
+  const [ownerName, delegateName, recorded] = await Promise.all([
     basenameOf(w.address as Address),
     basenameOf(policy.delegate as Address),
+    /*
+     * When the grant in force was made (PLAN.md 4.7) — the one fact about it the chain does not keep.
+     *
+     * `/delegation/record` takes it from the block that carried the `Granted` event. The row is found
+     * by what the contract says now: this wallet, this chain, and the delegate and expiry `policyOf`
+     * returned — so the record of an earlier grant, or of a grant on another chain, cannot lend this
+     * one its start. No such row is no record, and the answer is null, not a length made up.
+     */
+    one<{ granted_at: Date }>(
+      `SELECT granted_at FROM delegations
+        WHERE wallet_id = $1 AND chain = current_setting('xorr.chain_key') AND granted_at IS NOT NULL
+          AND lower(delegate_pubkey) = lower($2) AND expires_at = $3
+        ORDER BY granted_at DESC LIMIT 1`,
+      [w.id, policy.delegate, new Date(policy.expiresAt)],
+    ),
   ]);
   return c.json({
     delegatePubkey: policy.delegate,
@@ -411,6 +429,7 @@ routes.get('/delegation', async (c) => {
     ownerName,
     dailyCapUsd: policy.dailyCapUsd,
     expiresAt: policy.expiresAt,
+    grantedAt: recorded ? recorded.granted_at.getTime() : null,
     venueAllowlist: allowed,
     withdrawalAllowlist: [],
     revoked: policy.revoked,
@@ -577,10 +596,17 @@ const TxHash = z
   .regex(/^0x[0-9a-fA-F]{64}$/, 'must be a 32-byte transaction hash, 0x followed by 64 hex digits');
 
 routes.post('/delegation/record', async (c) => {
-  const body = z
-    .object({ txHash: TxHash, dailyCapUsd: z.number().positive(), expiresAt: z.number() })
-    .parse(await c.req.json());
+  /*
+   * The hash, and nothing the client says about it (PLAN.md 4.8).
+   *
+   * The app still sends `dailyCapUsd` and `expiresAt` beside the hash, and they are not read: they
+   * are what the app ASKED the wallet to sign, and the record is of what was signed — the
+   * transaction's own `Granted` event. The schema drops them rather than refusing them, so an app
+   * that sends them keeps working.
+   */
+  const body = z.object({ txHash: TxHash }).parse(await c.req.json());
   const w = await requireWallet(c);
+  const owner = w.address as Address;
 
   /*
    * Wait for the transaction the client says it sent, THEN read the chain.
@@ -600,8 +626,8 @@ routes.post('/delegation/record', async (c) => {
    * A trail whose entries cannot be checked is the one thing this trail may not be, and it cannot
    * be repaired afterwards — so the check belongs before the write, not after it.
    */
-  const mined = await waitForTx(body.txHash as Hex).catch(() => undefined);
-  if (mined === undefined) {
+  const receipt = await waitForReceipt(body.txHash as Hex).catch(() => undefined);
+  if (!receipt) {
     return c.json(
       {
         error: 'tx_not_found',
@@ -612,31 +638,78 @@ routes.post('/delegation/record', async (c) => {
       400,
     );
   }
-  if (mined === false) {
+  if (receipt.status !== 'success') {
     return c.json(
       { error: 'tx_reverted', message: 'That transaction failed on-chain, so it granted nothing.' },
       400,
     );
   }
 
-  const policy = await readPolicy(w.address as Address);
+  /*
+   * What THIS transaction granted, from its own logs (PLAN.md 4.8).
+   *
+   * Existing and succeeding was the whole test, and the record was then made of whatever policy the
+   * wallet held — so an approval's hash, or another wallet's grant, went into the trail as "Trading
+   * permission granted". `grantInLogs` holds the hash to a `Granted` event from the delegation
+   * contract, for this wallet, naming this executor's key, and each refusal says which it was not.
+   */
+  const found = grantInLogs(receipt.logs, {
+    contract: DELEGATION_ADDRESS,
+    owner,
+    delegate: delegatePublicKey,
+  });
+  if (!found.ok) return c.json({ error: found.error, message: found.message }, 400);
+  const { grant } = found;
+
+  /*
+   * Still the permission in force, and the venues it allows; and the block's time, which is when
+   * the grant took effect.
+   *
+   * The event says what was granted then. A grant revoked or replaced since is not what the wallet
+   * holds now, and recording it as the permission — with the current venue list beside it — would
+   * describe one that no longer exists. The venues are the contract's answer rather than the list
+   * the app asked for: the question `allowedVenues` asks, `isVenueAllowed` for every venue this app
+   * routes through, put in the same multicall as the policy (PLAN.md 2.5).
+   */
+  const [{ policy, venues }, block] = await readChain('your permission', () =>
+    Promise.all([readPolicyAndVenues(owner), publicClient.getBlock({ blockNumber: receipt.blockNumber })]),
+  );
   if (!policy || policy.revoked) {
     // Trust the CHAIN, not the client's claim that it signed something.
     return c.json({ error: 'not_granted_on_chain', message: 'No active policy found on-chain.' }, 400);
   }
+  if (
+    policy.delegate.toLowerCase() !== grant.delegate.toLowerCase() ||
+    policy.dailyCapUsd !== grant.dailyCapUsd ||
+    policy.expiresAt !== grant.expiresAt
+  ) {
+    return c.json(
+      {
+        error: 'grant_superseded',
+        message:
+          'That grant has since been replaced on-chain by another, so it is not the permission in ' +
+          'force. Nothing was recorded.',
+      },
+      400,
+    );
+  }
+  // The chain keeps a grant's expiry but not its start. Resume re-grants for `expires_at -
+  // granted_at` (PLAN.md 4.7), so the start is recorded from the block that carried the event.
+  const grantedAt = new Date(Number(block.timestamp) * 1000);
 
   await one(
-    `INSERT INTO delegations (id, wallet_id, owner_pubkey, delegate_pubkey, daily_cap_usd, expires_at, venue_allowlist, grant_signature)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    `INSERT INTO delegations (id, wallet_id, owner_pubkey, delegate_pubkey, daily_cap_usd, expires_at, venue_allowlist, grant_signature, granted_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
     [
       randomUUID(),
       w.id,
       w.address,
-      policy.delegate,
-      policy.dailyCapUsd,
-      new Date(policy.expiresAt),
-      [ADDRESSES.oneInchRouter],
+      grant.delegate,
+      grant.dailyCapUsd,
+      new Date(grant.expiresAt),
+      venues,
       body.txHash,
+      grantedAt,
     ],
   );
 
@@ -644,13 +717,13 @@ routes.post('/delegation/record', async (c) => {
     walletId: w.id,
     agent: 'xorr',
     action: 'Trading permission granted',
-    detail: `Up to $${policy.dailyCapUsd.toLocaleString('en-US')} a day, expiring ${new Date(policy.expiresAt).toDateString()}.`,
+    detail: `Up to $${grant.dailyCapUsd.toLocaleString('en-US')} a day, expiring ${new Date(grant.expiresAt).toDateString()}.`,
     kind: 'risk',
     signature: body.txHash,
     payload: { explorer: explorerTx(body.txHash) },
   });
 
-  return c.json({ ok: true, ...policy });
+  return c.json({ ok: true, ...policy, venueAllowlist: venues, grantedAt: grantedAt.getTime() });
 });
 
 /** Record a revoke the user already signed. */
@@ -658,7 +731,8 @@ routes.post('/delegation/revoke', async (c) => {
   const body = z.object({ txHash: TxHash.optional() }).parse(await c.req.json().catch(() => ({})));
   const w = await requireWallet(c);
 
-  const policy = await readPolicy(w.address as Address);
+  // A read that fails is a 502 (PLAN.md 1.7), never the answer "not revoked".
+  const policy = await readChain('your permission', () => readPolicy(w.address as Address));
   if (policy && !policy.revoked) {
     return c.json(
       { error: 'still_active', message: 'The policy is still active on-chain. Sign the revoke first.' },
@@ -673,10 +747,15 @@ routes.post('/delegation/revoke', async (c) => {
    * But the hash is written into the append-only trail as this entry's signature, and an entry
    * carrying an explorer link to a transaction that does not exist is exactly as unusable as one
    * that faked the event. The hash is optional; a hash that cannot be looked up is not.
+   *
+   * Nor one that did something else (PLAN.md 4.8). Existing was the whole test, so a reverted
+   * transaction, an approval or another wallet's revoke could be carried as the signature of this
+   * wallet's stop. It has to be a successful transaction with a `Revoked` log from the delegation,
+   * for this wallet — `revokeInLogs`, the rule a grant is held to.
    */
   if (body.txHash) {
-    const mined = await waitForTx(body.txHash as Hex).catch(() => undefined);
-    if (mined === undefined) {
+    const receipt = await waitForReceipt(body.txHash as Hex).catch(() => undefined);
+    if (!receipt) {
       return c.json(
         {
           error: 'tx_not_found',
@@ -687,11 +766,21 @@ routes.post('/delegation/revoke', async (c) => {
         400,
       );
     }
+    if (receipt.status !== 'success') {
+      return c.json(
+        { error: 'tx_reverted', message: 'That transaction failed on-chain, so it revoked nothing.' },
+        400,
+      );
+    }
+    const found = revokeInLogs(receipt.logs, { contract: DELEGATION_ADDRESS, owner: w.address as Address });
+    if (!found.ok) return c.json({ error: found.error, message: found.message }, 400);
   }
 
   await tx(async (client) => {
+    // This chain's rows (migration 023): a revoke here says nothing about a grant on another chain.
     await client.query(
-      `UPDATE delegations SET revoked=true, revoke_signature=$2 WHERE wallet_id=$1 AND revoked=false`,
+      `UPDATE delegations SET revoked=true, revoke_signature=$2
+        WHERE wallet_id=$1 AND revoked=false AND chain = current_setting('xorr.chain_key')`,
       [w.id, body.txHash ?? null],
     );
     await append(
