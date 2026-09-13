@@ -5,11 +5,14 @@
  * bar (three segments, 2pt gaps, widths = normalised weights), three sleeve blocks (dot +
  * name + stepper, then an indented rationale), an "Allocated" total row, then the CTA.
  *
- * weights default 55/30/15, ±5 per tap. Total must equal 100 to approve — the CTA reads
- * "Balance to 100% first" (disabled), then "Approve & fund", then "Portfolio approved".
- * Total colour `up` at 100, `warn` otherwise. ANY WEIGHT EDIT CLEARS `approved`.
+ * weights default 55/30/15, ±5 per tap. Total must equal 100 to go on — the CTA reads
+ * "Balance to 100% first" (disabled) until it does. Total colour `up` at 100, `warn` otherwise.
  *
- * After the pivot, approving this creates a real tier-2 rebalance strategy.
+ * After the pivot, going on creates a real tier-2 rebalance strategy — and that is all it does, so
+ * the button says so. It read "Approve & fund" and funded nothing: a rebalance moves what the wallet
+ * already holds. The "Portfolio approved" that followed was a flag kept on the phone, shown on every
+ * later visit whether or not the strategy still existed; what this screen says about a portfolio
+ * already set now comes from the executor's own list of strategies.
  */
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
@@ -33,26 +36,35 @@ import {
   timing,
   useReducedMotion,
 } from '@/ui';
-import { canApprove, proposalCta, proposalRebalance, weightBarPct, weightTotal } from '@/state/derived';
+import { canApprove, proposalRebalance, weightBarPct, weightTotal } from '@/state/derived';
 import { sleeveFixtures } from '@/data/fixtures/sleeves';
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { system } from '@/data/system';
+import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 
 const BAR_H = 8;
 
+/** The weights a stored rebalance was created with, when its params still carry them in this screen's shape. */
+function storedWeights(params: Record<string, unknown> | undefined): number[] | undefined {
+  const w = params?.weights;
+  return Array.isArray(w) &&
+    w.length === sleeveFixtures.length &&
+    w.every((n) => typeof n === 'number' && Number.isFinite(n))
+    ? (w as number[])
+    : undefined;
+}
+
 export default function Proposal() {
   const router = useRouter();
-  const weights = useStore((s) => s.weights);
+  const draft = useStore((s) => s.weights);
   const bumpWeight = useStore((s) => s.bumpWeight);
-  const approved = useStore((s) => s.approved);
-  const setApproved = useStore((s) => s.setApproved);
   const cap = useStore((s) => s.cap);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   /*
-   * Whether trades settle on this network at all — asked before approving, so the user knows what approving does
+   * Whether trades settle on this network at all — asked before starting, so the user knows what starting does
    * (PLAN.md 3.7). Undefined until the executor answers.
    */
   const [settles, setSettles] = useState<boolean>();
@@ -69,14 +81,24 @@ export default function Proposal() {
     };
   }, []);
 
+  /*
+   * A rebalance this wallet already runs, asked of the executor.
+   *
+   * So a second visit neither creates a duplicate — nothing on the server refuses one — nor claims an
+   * approval from a flag on the phone. It shows the weights that portfolio was set with, and the way
+   * on. A read that fails leaves the choice with the person, as the screen did before it asked.
+   */
+  const strategies = useAsync(() => repos.strategies.list(), []);
+  const existing = (strategies.data ?? []).find(
+    (s) => s.kind === 'rebalance' && (s.state === 'live' || s.state === 'watch'),
+  );
+  const weights = (existing && storedWeights(existing.params)) ?? draft;
+
   const total = weightTotal(weights);
   const ok = canApprove(weights);
 
-  async function approve() {
-    if (!ok || approved) {
-      if (approved) router.replace('/(tabs)');
-      return;
-    }
+  async function start() {
+    if (!ok || existing) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -112,13 +134,17 @@ export default function Proposal() {
         cadence: 'weekly',
         dailyAllocationUsd: Math.round(cap / 4),
       });
-      setApproved(true);
+      // It exists on the executor now, which is the only record of it that matters. Home shows what runs.
+      router.replace('/(tabs)');
     } catch (e) {
       setError(errorText(e));
     } finally {
       setBusy(false);
     }
   }
+
+  /* What the button does, said as that: a weekly rebalance, or a watched one where nothing settles. */
+  const label = !ok ? 'Balance to 100% first' : settles === false ? 'Start watching' : 'Start rebalancing';
 
   return (
     <Screen>
@@ -128,7 +154,7 @@ export default function Proposal() {
           Your draft portfolio
         </Text>
         <Text variant="body" color={colors.ink55} align="center">
-          Adjust the weights. Nothing trades until you approve.
+          Adjust the weights. Nothing trades until you start.
         </Text>
       </View>
 
@@ -171,12 +197,13 @@ export default function Proposal() {
                       {s.name}
                     </Text>
                   </View>
+                  {/* A portfolio already set is shown as it runs; editing a draft here would change nothing there. */}
                   <Stepper
                     value={`${weights[i] ?? 0}%`}
                     onDecrement={() => bumpWeight(i, -1)}
                     onIncrement={() => bumpWeight(i, 1)}
-                    canDecrement={(weights[i] ?? 0) > 0}
-                    canIncrement={(weights[i] ?? 0) < 100}
+                    canDecrement={!existing && (weights[i] ?? 0) > 0}
+                    canIncrement={!existing && (weights[i] ?? 0) < 100}
                     valueMinWidth={size.stepperValueMinWSm}
                   />
                 </View>
@@ -209,20 +236,22 @@ export default function Proposal() {
             {error}
           </Text>
         ) : null}
-        {settles === false ? (
+        {existing ? (
+          <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }}>
+            {existing.state === 'watch' ? 'This portfolio is already being watched.' : 'This portfolio is already rebalancing.'}
+          </Text>
+        ) : settles === false ? (
           <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }}>
             Watch-only here: it shows what it would trade.
           </Text>
         ) : null}
       </Fill>
 
-      <Button
-        label={proposalCta(weights, approved)}
-        variant={approved ? 'success' : 'primary'}
-        disabled={!ok && !approved}
-        loading={busy}
-        onPress={approve}
-      />
+      {existing ? (
+        <Button label="Continue" onPress={() => router.replace('/(tabs)')} />
+      ) : (
+        <Button label={label} disabled={!ok} loading={busy} onPress={start} />
+      )}
     </Screen>
   );
 }

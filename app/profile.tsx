@@ -103,8 +103,16 @@ export default function Profile() {
                 <Text variant="screenTitle" align="center" numberOfLines={1} style={{ marginTop: space.s16 }}>
                   {display}
                 </Text>
-              ) : (
+              ) : wallet.loading ? (
                 <Placeholder width={180} height={26} style={{ marginTop: space.s16 }} />
+              ) : (
+                /*
+                  Nothing to call this account by: the executor has no wallet on file and Privy gave no email. This
+                  was a placeholder that never stopped pulsing, which reads as a name still on its way.
+                */
+                <Text variant="screenTitle" align="center" color={colors.ink55} style={{ marginTop: space.s16 }}>
+                  No wallet yet
+                </Text>
               )}
 
               {address && short ? (

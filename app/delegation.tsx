@@ -29,9 +29,25 @@ import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 import { useNow } from '@/state/useNow';
 
-/** Days, floored — "expires in 0 days" is today, and that is what a reader needs to know. */
-function daysLeft(expiresAt: number, now: number): number {
-  return Math.floor((expiresAt - now) / 86_400_000);
+/**
+ * How far off the expiry is, in words — and in the past tense once it has passed.
+ *
+ * This was a signed day count, so an expired grant read "· -3 days": an ASCII hyphen standing in for
+ * a minus, on a duration nobody says with a sign. Days are floored, hours take over on the last day,
+ * and a passed expiry says how long ago.
+ */
+function expiryPhrase(expiresAt: number, now: number): string {
+  const ms = Math.abs(expiresAt - now);
+  const days = Math.floor(ms / 86_400_000);
+  const hours = Math.floor(ms / 3_600_000);
+  const span =
+    days >= 1
+      ? `${days} ${days === 1 ? 'day' : 'days'}`
+      : hours >= 1
+        ? `${hours} ${hours === 1 ? 'hour' : 'hours'}`
+        : undefined;
+  if (expiresAt > now) return span ? `In ${span}` : 'In under an hour';
+  return span ? `Expired ${span} ago` : 'Expired just now';
 }
 
 export default function DelegationDetail() {
@@ -109,8 +125,9 @@ export default function DelegationDetail() {
 
             <Field label="Daily cap" value={money(data.dailyCapUsd)} />
             <Field
-              label="Expires"
-              value={`${new Date(data.expiresAt).toLocaleDateString('en-US')} · ${daysLeft(data.expiresAt, now)} days`}
+              label="Expiry"
+              value={expiryPhrase(data.expiresAt, now)}
+              sub={new Date(data.expiresAt).toLocaleDateString('en-US')}
             />
             <Field
               label="Owner"

@@ -2,18 +2,20 @@
  * Which symbols have a price, which can actually be bought, and where those two lists differ.
  *
  * They are different sets and the difference is the whole point. `/market/symbols` is what has a
- * feed; `/market/tradable` is what the executor can settle on this chain. Everything in the first
- * and not the second is a chart you can look at and an order that would never fill — which is the
+ * feed, and `/market/stocks` prices the tokenized equities, which have none, by what a real buy
+ * would cost; `/market/tradable` is what the executor can settle on this chain. Everything priced
+ * and not settleable is a chart you can look at and an order that would never fill — which is the
  * exact bug the tradable route was created to prevent, and nothing showed the gap.
  *
- * Three groups rather than one list with badges. "Priced and settleable", "priced only" and
- * "settleable only" are three different facts and a reader scanning a badge column has to hold all
+ * Three groups rather than one list with badges. "Priced and tradable", "priced only" and
+ * "tradable only" are three different facts and a reader scanning a badge column has to hold all
  * three in their head at once.
  */
 import React, { useMemo } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
 import {
+  EmptyState,
   ErrorState,
   Eyebrow,
   Fill,
@@ -33,10 +35,22 @@ import { SETTLES_AS, settlementSymbol } from '@/data/tradable';
 export default function Coverage() {
   const goBack = useGoBack();
   const symbols = useAsync(() => system.symbols(), []);
+  const stocks = useAsync(() => system.stocks(), []);
   const tradable = useAsync(() => system.tradable(), []);
 
   const groups = useMemo(() => {
-    const priced = new Set(symbols.data ?? []);
+    /*
+     * Priced means a price exists, from either source.
+     *
+     * This read `/market/symbols` alone, which lists only what has a feed, so the tokenized
+     * equities — priced through `/market/stocks` on Home, Markets and their own screen — landed
+     * under "Tradable only", described as a token nothing prices. An equity whose probe has no
+     * price right now is not counted as priced, because right now it is not.
+     */
+    const priced = new Set([
+      ...(symbols.data ?? []),
+      ...(stocks.data ?? []).filter((s) => s.price !== null).map((s) => s.symbol),
+    ]);
     const settles = new Set((tradable.data ?? []).map((t) => t.symbol.toUpperCase()));
 
     /*
@@ -72,10 +86,20 @@ export default function Coverage() {
       pricedOnly: pricedOnly.sort(),
       settlesOnly: settlesOnly.sort(),
     };
-  }, [symbols.data, tradable.data]);
+  }, [symbols.data, stocks.data, tradable.data]);
 
-  const error = symbols.error ?? tradable.error;
-  const loading = (symbols.loading && !symbols.data) || (tradable.loading && !tradable.data);
+  // Any one read failing leaves the groups unsortable, so any one failure is the screen's, and the retry asks all three.
+  const error = symbols.error ?? stocks.error ?? tradable.error;
+  const loading =
+    (symbols.loading && !symbols.data) ||
+    (stocks.loading && !stocks.data) ||
+    (tradable.loading && !tradable.data);
+  const empty = groups.both.length + groups.pricedOnly.length + groups.settlesOnly.length === 0;
+  const retry = () => {
+    symbols.reload();
+    stocks.reload();
+    tradable.reload();
+  };
 
   const section = (title: string, blurb: string, rows: { symbol: string; via?: string }[]) =>
     rows.length === 0 ? null : (
@@ -106,9 +130,12 @@ export default function Coverage() {
 
       <Fill style={{ marginTop: space.s6, paddingHorizontal: space.gutter }}>
         {error ? (
-          <ErrorState error={error} onRetry={symbols.reload} />
+          <ErrorState error={error} onRetry={retry} />
         ) : loading ? (
           <LoadingRows count={8} height={size.row} />
+        ) : empty ? (
+          /* Three empty lists drew nothing at all, which reads as a screen that failed to render. */
+          <EmptyState text="Nothing is priced or tradable here." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -122,7 +149,7 @@ export default function Coverage() {
             )}
             {section(
               'Tradable only',
-              'An order with no price feed.',
+              'An order with no price.',
               groups.settlesOnly.map((symbol) => ({ symbol })),
             )}
           </ScrollView>

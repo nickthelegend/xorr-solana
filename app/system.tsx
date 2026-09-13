@@ -34,8 +34,11 @@ import {
 import { useAsync } from '@/data/useAsync';
 import { system, type HealthDependency } from '@/data/system';
 import { shortAddress } from '@/format';
+import { useNow } from '@/state/useNow';
 
 const DOT = 8;
+/** A timestamp as the executor writes one into a detail: ISO 8601, UTC, optionally after "at". */
+const ISO_STAMP = /\b(?:at )?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/g;
 
 function toneFor(status: string): string {
   if (status === 'up') return colors.up;
@@ -51,9 +54,35 @@ function uptime(seconds: number): string {
   return `${Math.round(seconds / 86_400)}d`;
 }
 
+/**
+ * How long ago, in a person's words.
+ *
+ * The database probe reports "responded at 2026-09-13T22:20:15.739Z" — a log line's timestamp,
+ * milliseconds and all, on a screen someone reads. Measured against this device's clock, so a second
+ * or two of skew is possible; nothing here needs finer than that.
+ */
+function ago(at: number, now: number): string {
+  if (!Number.isFinite(at)) return '—';
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+/** A dependency's detail, with any timestamp in it said as an age. Everything else is left as sent. */
+function readableDetail(detail: string, now: number): string {
+  return detail.replace(ISO_STAMP, (_match, iso: string) => ago(Date.parse(iso), now));
+}
+
 export default function Status() {
   const goBack = useGoBack();
   const { data, loading, error, reload } = useAsync(() => system.health(), []);
+  // An age has to keep counting while the screen is open, or "just now" goes on being said forever.
+  const now = useNow(15_000);
 
   const deps = data?.dependencies ?? [];
   const criticalDown = deps.filter((d) => d.critical && d.status !== 'up').length;
@@ -102,7 +131,7 @@ export default function Status() {
             </SheetCard>
 
             {deps.map((d) => (
-              <DependencyRow key={d.name} dep={d} />
+              <DependencyRow key={d.name} dep={d} now={now} />
             ))}
           </ScrollView>
         )}
@@ -111,7 +140,7 @@ export default function Status() {
   );
 }
 
-function DependencyRow({ dep }: { dep: HealthDependency }) {
+function DependencyRow({ dep, now }: { dep: HealthDependency; now: number }) {
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s10 }}>
@@ -143,7 +172,7 @@ function DependencyRow({ dep }: { dep: HealthDependency }) {
       </View>
       {dep.detail ? (
         <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          {dep.detail}
+          {readableDetail(dep.detail, now)}
         </Text>
       ) : null}
     </SheetCard>

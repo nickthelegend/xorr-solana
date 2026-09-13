@@ -150,6 +150,12 @@ const ROUTES = [
   ['96-audit-anchor', '/audit/anchor'],
   ['97-portfolio', '/portfolio'],
   ['98-agent', '/agent/momentum-scout'],
+  // Money and markets screens the sweep never opened (docs/qa/SCREENS.md, "tools/shoot.mjs drift").
+  ['99a-deposit', '/deposit'],
+  ['99b-withdraw-everything', '/withdraw-everything'],
+  ['99c-limit-orders', '/limit-orders'],
+  ['99d-crosschain', '/crosschain'],
+  ['99e-futures', '/futures'],
   ['46-dev-ui', '/_dev/ui'],
   ['46b-dev-ui-edge', '/_dev/ui-edge'],
   ['47-dev-fidelity', '/_dev/fidelity'],
@@ -169,12 +175,30 @@ const ROUTES = [
  * change and teach whoever hits it to delete the assertion.
  */
 const EXPECT = {
-  '01-welcome': { must: [/XORR/, /Get started/], never: [/Total value/i] },
-  '02-goals': { must: [/optimise for/i, /Grow long term/, /Steady/, /Balanced/, /Aggressive/, /selected/] },
-  '03-wallet': { must: [/Your wallet, your keys/, /Signed in/, /Wallet created/, /Network ready/] },
-  '04-fund': { must: [/Fund the wallet/, /USDC on Base/, /SEND USDC TO/, /0x[0-9a-fA-F]{40}/], never: [/USDT or SOL/, /^Deposit \$/m] },
+  // The Terms and the Privacy Policy are links now, inside the same sentence.
+  '01-welcome': { must: [/XORR/, /Get started/, /Terms/, /Privacy Policy/], never: [/Total value/i] },
+  // The drawdown caption claimed a position-size cap that nothing applies. It must not come back.
+  '02-goals': {
+    must: [/optimise for/i, /Grow long term/, /Steady/, /Balanced/, /Aggressive/, /selected/],
+    never: [/caps single-position size/],
+  },
+  // "Network ready" was ticked with nothing checked; the third step is the executor registering the wallet.
+  '03-wallet': { must: [/Your wallet, your keys/, /Signed in/, /Wallet created/, /Connected/], never: [/Network ready/] },
+  /*
+   * The address and the network, and nothing invented around them: the presets, the payment methods, the
+   * "Free" fee and the arrival date affected nothing and are gone. A fork build has no code and says to use
+   * test funds, where a Base build names the chain.
+   */
+  '04-fund': {
+    must: [/Fund the wallet/, /SEND USDC TO/, /0x[0-9a-fA-F]{40}/, /USDC on Base|Use test funds/],
+    never: [/USDT or SOL/, /^Deposit \$/m, /HOW YOU ARE PAYING/, /Transfer from an exchange/],
+  },
   '05-delegate': { must: [/It can place trades/, /cannot move your money out/, /expires on its own/, /\$[\d,]+/] },
-  '06-proposal': { must: [/draft portfolio/, /100%/, /Stable yield/], never: [/Staked SOL/, /NVDAx/] },
+  // The button says what it does. "Approve & fund" funded nothing, and "Portfolio approved" was a flag on the phone.
+  '06-proposal': {
+    must: [/draft portfolio/, /100%/, /Stable yield/, /Start rebalancing|Start watching|Balance to 100% first|Continue/],
+    never: [/Staked SOL/, /NVDAx/, /Approve & fund/, /Portfolio approved/],
+  },
   // One balance on top, the Privy wallet above it, agents and gainers below (2026-09-12). The old
   // breakdown moved to the portfolio, so it must not creep back onto Home.
   '07-home': {
@@ -192,7 +216,8 @@ const EXPECT = {
   // The asset screen headlines the instrument's NAME, not its ticker — "Bitcoin", not "BTC".
   // Trimmed 2026-09-12: no "Your position: None" row and no agent note on a coin nobody holds.
   '16-asset': { must: [/Bitcoin|BTC/, /\$[\d,]+/], never: [/No agent holds this yet/] },
-  '17-asset-stock': { must: [/Nvidia|NVDA/, /\$[\d,]+/, /No price history/] },
+  // A stock has a price and no candle feed, and says so in the asset screen's current words.
+  '17-asset-stock': { must: [/Nvidia|NVDA/, /\$[\d,]+/, /No history yet/] },
   '18-chart': { must: [/\$[\d,]+/, /15m/, /1H/, /1D/] },
   '19-order': { must: [/WETH/] },
   '20-order-stock': { must: [/NVDA/] },
@@ -222,9 +247,10 @@ const EXPECT = {
   '30-bot-backtest': { must: [/Nothing here is a promise|promise/] },
   '31-strategies': { must: [/Strategies/, /Running/, /Add new/] },
   '32-strategy-dca': { must: [/Recurring buy/, /Next three runs/i] },
-  '32b-strategy-yield': { must: [/AAVE|Aave/, /%/, /If it ran now/i, /Withdrawing is yours alone/] },
+  // Venue names left the money screens (2026-09-14): the sweep asserts the rate, the preview and who can withdraw.
+  '32b-strategy-yield': { must: [/USDC SUPPLY/i, /%/, /If it ran now/i, /Only you can withdraw/] },
   '32c-strategy-grid': { must: [/Range accumulation/, /\$[\d,]+/, /leaves the range it stops/] },
-  '32d-yield-position': { must: [/Aave|lending pool/, /not the bot|never given/] },
+  '32d-yield-position': { must: [/Earning/, /Only you can withdraw|No lending pool here/] },
   '32e-flatten': { must: [/Sell everything/, /does not use your daily cap/] },
   /*
    * `never: [/FAIL/]` was wrong, and it was wrong in the direction that matters.
@@ -251,9 +277,23 @@ const EXPECT = {
   '35-history': { must: [/History|settled|spend/i] },
   '36-briefing': { must: [/Briefing|briefing/] },
   '37-inbox': { must: [/Inbox|inbox|catch up/i] },
-  '38-safety': { must: [/Agents are live|Agents are stopped/, /YOUR WALLET/, /THE BOT'S KEY/, /0x[0-9a-fA-F]{40}/, /Stopping is not selling/] },
-  '39-settings': { must: [/Settings/] },
-  '40-alerts': { must: [/Alerts/, /What the bot tells you/, /Circuit breakers/] },
+  /*
+   * A state the chain gave, the two parties as short addresses, and the way out. Never the footnote that
+   * said stop-losses survive a stop (a revoked policy refuses `closePosition`), and never "1 agents".
+   */
+  '38-safety': {
+    must: [
+      /Agents are live|All agents stopped|Your permission has ended|Agents cannot trade|No agents can trade/,
+      /Your wallet/,
+      /Agent key/,
+      /0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}/,
+      /Sell everything to cash/,
+    ],
+    never: [/Positions and stop-losses stay/, /\b1 agents\b/, /\b1 strategies\b/],
+  },
+  // The row is named for where it goes: "Alerts" opens /alerts.
+  '39-settings': { must: [/Settings/, /Alerts/] },
+  '40-alerts': { must: [/Alerts/, /What the bot tells you/, /circuit breakers/i], never: [/turns itself off/] },
   /*
    * Not the kind selector — it is gone.
    *
@@ -266,8 +306,10 @@ const EXPECT = {
   // Either real 0x destinations the user added, or an honest empty state. Never the invented
   // base58 pair the handoff seeded, which were not even addresses on this chain.
   '42-allowlist': { must: [/Allowlist/], never: [/[13-9A-HJ-NP-Za-km-z]{40,}/] },
-  '43-send': { must: [/allowlist/i] },
-  '44-recovery': { must: [/Recovery|recovery|backed up/] },
+  // The allowlist is reached through "Manage"; the word itself is no longer on the screen.
+  '43-send': { must: [/Send/, /Manage/] },
+  // Reading this screen marks nothing done; the step is the export, or saying you can open the email.
+  '44-recovery': { must: [/Recovery/, /Your email is the way back/], never: [/Got it/] },
   '45-legal': { must: [/Terms|terms/] },
   /*
    * The `_dev/*` screens are development-only, and `_dev/_layout.tsx` sends them home on a build
@@ -283,7 +325,8 @@ const EXPECT = {
    * silently degraded — a number missing, a provenance label dropped, an empty state replaced by a
    * confident zero.
    */
-  '50-explore': { must: [/Explore/, /MARKETS/, /Safety|Permission/] },
+  // The screens that worked and had no way in are rows now.
+  '50-explore': { must: [/Explore/, /MARKETS/, /Safety|Permission/, /Check it yourself/, /Leaderboard/, /Briefing/] },
   // The cap and the spend must both be money, not a bare 0 — see the $0-with-no-reason bug.
   '51-limits': { must: [/REMAINING TODAY/, /\$[\d,]+\.\d\d/, /cap/] },
   '52-balance': { must: [/TOTAL/, /\$[\d,]+\.\d\d/, /Cash/] },
@@ -297,7 +340,11 @@ const EXPECT = {
    */
   '55-verify': { must: [/Passed/, /Failed/, /Not asked/, /\d+ Passed/] },
   '56-metrics': { must: [/RUNS BY OUTCOME|STRATEGIES BY STATE/, /\d+/] },
-  '57-system': { must: [/EXECUTOR/, /base-sepolia|base-fork|base/, /postgres/] },
+  // A dependency's timestamp is an age now; the raw ISO stamp from the database probe must not be back.
+  '57-system': {
+    must: [/EXECUTOR/, /base-sepolia|base-fork|base/, /postgres/],
+    never: [/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/],
+  },
   '58-network': { must: [/CHAIN/, /BLOCK/, /[\d,]{6,}/] },
   // The rate, and where it came from. A number with no provenance is the failure here.
   '59-rates': { must: [/\d+\.\d+%/, /Aave/] },
@@ -313,9 +360,11 @@ const EXPECT = {
   '68-spend': { must: [/Spend/, /contract|day/i] },
   '69-schedule': { must: [/runs next|scheduled/i] },
   '70-allocation': { must: [/Allocation/] },
-  '71-sources': { must: [/Sources/, /Every number/i] },
+  // Our own database is a source, and the futures venue is named; "None of them are us" was false.
+  '71-sources': { must: [/Sources/, /every number/i, /Hyperliquid/, /database/], never: [/None of them are us/] },
   '72-sponsors': { must: [/How it works|Integrations|Sponsors/, /1inch/i] },
-  '73-venues': { must: [/Venues/, /fill is allowed/i] },
+  // The venues the grant allows, read from the contract, not the executor's current parameters.
+  '73-venues': { must: [/Venues/, /trade can fill/i] },
   '74-tokens': { must: [/Tokens/, /settle/i] },
   '75-coverage': { must: [/Coverage/, /PRICED/i] },
   // Real feeds unlabelled, synthetic ones labelled — the whole point of this screen.
@@ -324,7 +373,8 @@ const EXPECT = {
    * tag — i.e. it asserted that invented moves were in the list. They must now never be.
    */
   '76-movers': { must: [/Movers/, /UP|DOWN/], never: [/SIMULATED/, /NO PRICE FEED/, /\$164\.20|\$121\.55|\$402\.70|\$3,412\.10|\$598\.14|\$38\.71|\$521\.77/] },
-  '77-stocks': { must: [/Equities/, /\$[\d,]+/] },
+  // The screen is titled Stocks, as its Explore row is.
+  '77-stocks': { must: [/Stocks/, /\$[\d,]+/] },
   '78-earnings': { must: [/Earnings/, /EDGAR/i] },
   '79-funding': { must: [/Funding/] },
   '80-compare': { must: [/Compare/] },
@@ -344,6 +394,19 @@ const EXPECT = {
     must: [/Momentum Scout/, /Add funds/, /Withdraw/, /Strategies/, /Add strategy/],
     never: [/Past performance of a strategy/, /runs are recorded against strategies/],
   },
+  /*
+   * The five routes the sweep never opened. Each asserts its title and the one line that must stay true, not the copy
+   * around it: the address and balance on Deposit (and no raw locale timestamp for the faucet), the division of labour
+   * on Withdraw everything, and the disclaimers on the quote-only and data-only screens.
+   */
+  '99a-deposit': {
+    must: [/Deposit/, /0x[0-9a-fA-F]{40}/, /BALANCE/, /USDC/],
+    never: [/Available again \d{1,2}\/\d{1,2}\/\d{4}/],
+  },
+  '99b-withdraw-everything': { must: [/Withdraw everything/, /Only you can send/] },
+  '99c-limit-orders': { must: [/Limit orders/, /Take for|No limit orders|Look again/] },
+  '99d-crosschain': { must: [/Cross-chain quote/, /Quotes only/] },
+  '99e-futures': { must: [/Futures/, /xorr does not trade futures/] },
   '85-notifications': { must: [/Notifications/] },
   '86-catchup': { must: [/Since you (looked|were)/i] },
   '87-export': { must: [/Export/, /audit trail/i] },
@@ -366,7 +429,8 @@ const EXPECT = {
    */
   '96-audit-anchor': {
     must: [/On-chain anchor/, /COMMITTED|DIVERGED|NOT YET ANCHORED/, /CHECK IT YOURSELF/, /0x[0-9a-fA-F]{40}/],
-    never: [/DIVERGED/],
+    // "The chain", not "Base": a fork build anchors to a fork. The raw status line of a failed anchor must not show.
+    never: [/DIVERGED/, /BASE HOLDS/, /to Base\./, /\d{3} [A-Z][a-z]+: \{/],
   },
   '46-dev-ui': { must: [/Design system|TOTAL VALUE/] },
   '46b-dev-ui-edge': { must: [/Edge cases|TOTAL VALUE/] },

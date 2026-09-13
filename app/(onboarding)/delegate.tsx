@@ -14,6 +14,7 @@ import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import {
+  BackButton,
   Button,
   ConsequenceCard,
   Fill,
@@ -31,6 +32,7 @@ import {
   SignInButton,
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
+import { useGoBack } from '@/nav/useGoBack';
 import { useAsync } from '@/data/useAsync';
 import { api } from '@/data/api';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
@@ -42,6 +44,7 @@ import { errorText } from '@/data/apiError';
 
 export default function GrantDelegation() {
   const router = useRouter();
+  const goBack = useGoBack();
   const signedOut = useSignedOut();
   const cap = useStore((s) => s.cap);
   const bumpCap = useStore((s) => s.bumpCap);
@@ -59,12 +62,17 @@ export default function GrantDelegation() {
    * delegation may need to pull — which on a chain where the tokenized equities exist is eleven.
    * Eleven wallet prompts with no warning reads as the app having broken, and a user who stops
    * half way has approvals but no permission. Saying the number first costs one sentence.
+   *
+   * Counted the way the grant counts them (`useGrantDelegation`): one approval per token the
+   * executor names, or USDC alone when it names none, then the grant. And a count that could not be
+   * read does not take the warning with it — a failed read is no evidence of a single signature — so
+   * the sentence then states the rule instead of the number.
    */
   const params = useAsync(
     () => api.get<{ tokens?: { symbol: string }[] }>('/delegation/params'),
     [],
   );
-  const signatures = (params.data?.tokens?.length ?? 0) + 1;
+  const signatures = params.data ? Math.max(params.data.tokens?.length ?? 0, 1) + 1 : undefined;
   const error = localError ?? grantError;
 
   async function grant() {
@@ -92,7 +100,14 @@ export default function GrantDelegation() {
 
   return (
     <Screen>
-      <Text variant="screenTitle">Let the bot trade</Text>
+      {/*
+        A way back. This was the one onboarding step without one — and it is also reached from Safety, where the only
+        other exit was "Not yet", which replaces the whole stack with Home.
+      */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8 }}>
+        <BackButton onPress={() => goBack()} />
+        <Text variant="screenTitle">Let the bot trade</Text>
+      </View>
       <Text variant="body" color={colors.ink55} style={{ marginTop: space.s10 }}>
         What it can and can’t do.
       </Text>
@@ -175,9 +190,15 @@ export default function GrantDelegation() {
           take it the screen says so before asking — rather than letting Privy answer with a
           revert about a balance on a chain the user is not looking at. See src/chain.ts.
         */}
-        {signatures > 2 ? (
+        {signatures !== undefined ? (
+          signatures > 2 ? (
+            <NoteStrip kind="risk" style={{ marginTop: space.s10 }}>
+              You’ll sign {signatures} times. Nothing is granted until the last.
+            </NoteStrip>
+          ) : null
+        ) : params.error ? (
           <NoteStrip kind="risk" style={{ marginTop: space.s10 }}>
-            You’ll sign {signatures} times. Nothing is granted until the last.
+            You’ll sign once per token, then once more. Nothing is granted until the last.
           </NoteStrip>
         ) : null}
 

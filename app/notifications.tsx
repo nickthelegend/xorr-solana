@@ -27,12 +27,13 @@ import {
   space,
 } from '@/ui';
 import { useAsync } from '@/data/useAsync';
-import { system } from '@/data/system';
+import { errorText } from '@/data/apiError';
+import { system, type NotificationPref } from '@/data/system';
 import { useRegisterDevice } from '@/notifications/useRegisterDevice';
 
 export default function Notifications() {
   const goBack = useGoBack();
-  const { data, loading, error, reload } = useAsync(() => system.notificationPrefs(), []);
+  const { data, loading, error, reload, settledAt } = useAsync(() => system.notificationPrefs(), []);
   /*
    * Whether this device can actually be reached.
    *
@@ -45,12 +46,37 @@ export default function Notifications() {
   const device = useRegisterDevice();
 
   /*
-   * Local overrides on top of the fetched list, so a toggle responds immediately rather than after
-   * a round trip. The write still happens; this only decides what the switch looks like while it
-   * is in flight.
+   * Local positions on top of the fetched list, so a toggle responds immediately rather than after
+   * a round trip — and only for as long as the write has not failed.
+   *
+   * The write was fired and forgotten (`void system.setNotificationPref(...)`), so a refused or
+   * failed save left the switch where the user put it while the executor went on sending, or not
+   * sending, exactly as before. A failed write now puts the switch back and says why, as `/alerts`
+   * does. Positions are kept against the read they were made on, so a reload shows the server's
+   * word again.
    */
-  const [pending, setPending] = useState<Record<string, boolean>>({});
-  const enabledFor = (kind: string, fallback: boolean) => pending[kind] ?? fallback;
+  const [pending, setPending] = useState<{ at: number | undefined; on: Record<string, boolean> }>({
+    at: undefined,
+    on: {},
+  });
+  const [saveError, setSaveError] = useState<string>();
+  const enabledFor = (p: NotificationPref) =>
+    (pending.at === settledAt ? pending.on[p.kind] : undefined) ?? p.enabled;
+
+  async function save(p: NotificationPref, on: boolean) {
+    setSaveError(undefined);
+    setPending((s) => ({ at: settledAt, on: { ...(s.at === settledAt ? s.on : {}), [p.kind]: on } }));
+    try {
+      await system.setNotificationPref(p.kind, on);
+    } catch (e) {
+      setPending((s) => {
+        const next = { ...s.on };
+        delete next[p.kind];
+        return { ...s, on: next };
+      });
+      setSaveError(`${p.label} did not save: ${errorText(e)}`);
+    }
+  }
 
   return (
     <Screen gutter="none">
@@ -94,16 +120,19 @@ export default function Notifications() {
               </SheetCard>
             ) : null}
 
+            {saveError ? (
+              <Text variant="secondarySm" color={colors.down} style={{ marginBottom: space.s10 }}>
+                {saveError}
+              </Text>
+            ) : null}
+
             {data.map((p) => (
               <SwitchRow
                 key={p.kind}
                 label={p.label}
-                on={enabledFor(p.kind, p.enabled)}
+                on={enabledFor(p)}
                 caption={() => p.detail}
-                onChange={(on) => {
-                  setPending((s) => ({ ...s, [p.kind]: on }));
-                  void system.setNotificationPref(p.kind, on);
-                }}
+                onChange={(on) => void save(p, on)}
               />
             ))}
             <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s16 }}>

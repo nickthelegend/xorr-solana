@@ -5,9 +5,15 @@
  * can find out which upstream produced which number — and until now that lived in code comments.
  *
  * Each row names a real dependency and what it is authoritative for, and the live ones are probed
- * rather than asserted: the rate row reads Aave, the subgraph row reads `_meta`, the chain row
- * reads the block. A page that listed its sources without checking any of them would be making the
- * same unfalsifiable claim it exists to replace.
+ * rather than asserted: the chain row reads the executor's RPC probe, the database row its Postgres
+ * probe, the subgraph row reads `_meta`. A page that listed its sources without checking any of them
+ * would be making the same unfalsifiable claim it exists to replace.
+ *
+ * Our own database is one of them, and says so. The header read "None of them are us" and the chain
+ * card "Nothing about your money is taken from our database" — while positions, their cost basis,
+ * realised profit, runs, alerts and the stock readings are the executor's own records, and the
+ * futures figures came from a venue the list never named. A sources page that hides one of its
+ * sources is the thing it was written against.
  *
  * Deliberately not exhaustive about libraries. This is about where DATA comes from, not what the
  * app is built with.
@@ -27,6 +33,7 @@ import {
   radius,
   space,
 } from '@/ui';
+import { NotSignedIn } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
 
@@ -41,23 +48,33 @@ type Source = {
 const SOURCES: Source[] = [
   {
     name: 'The chain',
-    owns: 'Balances, the delegation policy, approvals, and every transaction',
-    how: 'Direct RPC reads. Nothing about your money is taken from our database.',
+    owns: 'Balances, the permission, approvals, names and every transaction',
+    how: 'Read directly over RPC.',
+  },
+  {
+    name: 'xorr',
+    owns: 'Positions and their cost, realised profit, runs, alerts, stock readings and the audit trail',
+    how: 'The executor’s own database. The audit trail in it is hash-chained and anchored on the chain.',
   },
   {
     name: '1inch',
-    owns: 'Swap routes, execution prices, and every tokenized equity price',
-    how: 'Aggregation v6 for routes; the equities are priced by probing a real buy, because they have no feed.',
+    owns: 'Swap routes, fill prices, stock prices, limit orders and cross-chain quotes',
+    how: 'Routes from its aggregator; the stocks are priced by quoting a real buy, because they have no feed.',
   },
   {
     name: 'CoinGecko',
-    owns: 'Crypto reference prices and the market logos',
+    owns: 'Crypto prices and charts',
     how: 'One batched request per refresh, cached — the public tier rate-limits hard.',
+  },
+  {
+    name: 'Hyperliquid',
+    owns: 'Futures prices, funding rates, open interest and volume',
+    how: 'Its public market data. xorr does not trade futures.',
   },
   {
     name: 'Aave v3',
     owns: 'The rate idle cash earns',
-    how: '`currentLiquidityRate` read from the pool on Base. It floats; it is not a promise.',
+    how: '`currentLiquidityRate`, read from the lending pool. It floats; it is not a promise.',
   },
   {
     name: 'EDGAR',
@@ -82,17 +99,28 @@ export default function Sources() {
   /* Probed, not asserted. A list of sources that checked none of them would be the same
      unfalsifiable claim this screen exists to replace. */
   const health = useAsync(() => system.health(), []);
-  const graph = useAsync(() => system.graphHealth().catch(() => null), []);
+  const graph = useAsync(() => system.graphHealth(), []);
 
-  const up = (name: string) =>
-    health.data?.dependencies.find((d) => d.name === name)?.status === 'up';
+  /* Undefined until `/health` answers: a probe nobody has read is not a dependency that is down. */
+  const up = (name: string): boolean | undefined =>
+    health.data ? health.data.dependencies.find((d) => d.name === name)?.status === 'up' : undefined;
+
+  /*
+   * The index needs a session to ask about. Signed out it was never asked, which is no label at all —
+   * not "not answering", which is what a request that failed earns.
+   */
+  const graphLive: boolean | undefined = graph.error
+    ? graph.error instanceof NotSignedIn
+      ? undefined
+      : false
+    : graph.data?.healthy;
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Sources</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Every number in this app comes from one of these. None of them are us.
+          Where every number comes from.
         </Text>
       </View>
 
@@ -103,13 +131,18 @@ export default function Sources() {
         >
           {SOURCES.map((s) => {
             /* Only the three the app can actually probe get a live state. Claiming to know
-               CoinGecko is up because a price rendered ten minutes ago would be a guess. */
+               CoinGecko is up because a price rendered ten minutes ago would be a guess. The
+               executor not answering `/health` at all is its database not answering us. */
             const live =
               s.name === 'The chain'
                 ? up('rpc')
-                : s.name === 'The Graph'
-                  ? graph.data?.healthy
-                  : undefined;
+                : s.name === 'xorr'
+                  ? health.error
+                    ? false
+                    : up('postgres')
+                  : s.name === 'The Graph'
+                    ? graphLive
+                    : undefined;
 
             return (
               <SheetCard key={s.name} bordered borderRadius={radius.panel} padding={space.s16}>

@@ -32,14 +32,17 @@ import { shortAddress } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
 
-/** What each chain key means for what the app can actually do. */
+/**
+ * What each chain key means for what the app can actually do, in one line each.
+ *
+ * Sepolia cannot fill a swap because no aggregator is deployed there; a fork fills against copied liquidity that no
+ * public explorer has seen. The reasons live here, not on the screen.
+ */
 const CHAIN_NOTE: Record<string, string> = {
-  base: 'Base mainnet. Real money, real fills, real block explorer links.',
-  'base-sepolia':
-    'Base Sepolia. Transactions are real and settle, but 1inch has no liquidity here, so swaps cannot fill.',
-  'base-fork':
-    'A fork of Base mainnet. Fills are real against forked liquidity, and nothing here exists on the public chain — explorer links would point at transactions no explorer has seen.',
-  localnet: 'A local chain. Nothing here leaves this machine.',
+  base: 'Base mainnet. Real money, real fills.',
+  'base-sepolia': 'A test network. Transactions settle; swaps cannot fill.',
+  'base-fork': 'A fork of Base. Fills are real here and nowhere else.',
+  localnet: 'A local chain. Nothing leaves this machine.',
 };
 
 export default function Network() {

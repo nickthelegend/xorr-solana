@@ -25,8 +25,9 @@ import {
   space,
 } from '@/ui';
 import { money, percent } from '@/format';
+import { CHAIN_KEY } from '@/chain';
 import { useAsync } from '@/data/useAsync';
-import { system } from '@/data/system';
+import { system, type Metrics as MetricsReport } from '@/data/system';
 
 /** Green for what landed, amber for what was refused, red for what broke. */
 function toneFor(status: string): string {
@@ -34,6 +35,20 @@ function toneFor(status: string): string {
   if (status === 'failed') return colors.down;
   if (status === 'pending') return colors.ink40;
   return colors.warn;
+}
+
+/**
+ * What the fill figures rest on, in one line.
+ *
+ * This was a paragraph. The count measured, the count too old to measure (recorded before the
+ * arrival price was kept beside each fill), and — on a fork, where the market price is live while
+ * fills run against a pinned block — that the figures carry that drift and are no ranking of venues.
+ */
+function fillBasis(q: NonNullable<MetricsReport['fillQuality']>): string {
+  const parts = [`${q.measured} measured`];
+  if (q.unmeasurable > 0) parts.push(`${q.unmeasurable} too old to measure`);
+  if (q.basis === 'forked') parts.push('includes fork drift');
+  return parts.join(' · ');
 }
 
 export default function Metrics() {
@@ -199,17 +214,20 @@ export default function Metrics() {
                   HOW CLOSE TO THE MARKET PRICE
                 </Text>
                 {/*
-                  An empty section that explains itself beats an invisible one.
+                  An empty section that explains itself beats an invisible one — with the reason that
+                  is true on THIS build.
 
-                  On Base Sepolia there are no fills to measure at all — 1inch has no deployment
-                  there, which `/network` already says — so this would otherwise vanish and leave a
-                  reader to guess whether the measurement is missing or the fills are.
+                  On Base Sepolia there are no fills to measure at all: no aggregator is deployed
+                  there, which `/network` already says. This said so on every build, fork and mainnet
+                  included, where "cannot settle here" was false.
                 */}
                 {data.fillQuality.venues.length === 0 ? (
                   <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
                     {data.fillQuality.unmeasurable > 0
-                      ? `Nothing to compare yet: ${data.fillQuality.unmeasurable} fills were recorded before the arrival price was kept alongside them, and it cannot be recovered after the fact.`
-                      : 'No fills on this network to measure. 1inch has no deployment on Base Sepolia, so trades cannot settle here — the network screen says the same.'}
+                      ? `Nothing to compare: ${data.fillQuality.unmeasurable === 1 ? 'the one fill predates' : `all ${data.fillQuality.unmeasurable} fills predate`} this measure.`
+                      : CHAIN_KEY === 'base-sepolia'
+                        ? 'No fills to measure. Swaps cannot fill on this network.'
+                        : 'No fills to measure yet.'}
                   </Text>
                 ) : null}
                 {data.fillQuality.venues.map((v) => (
@@ -230,13 +248,11 @@ export default function Metrics() {
                     ) : null}
                   </View>
                 ))}
-                <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s12 }}>
-                  {data.fillQuality.venues.length === 0
-                    ? ''
-                    : data.fillQuality.basis === 'forked'
-                      ? `${data.fillQuality.measured} measured against the market price at decision time, ${data.fillQuality.unmeasurable} recorded before that was kept. On a fork the price is the live market while the fill runs against a pinned block, so this carries drift and the shipping maker's pricing as well as execution quality — not a ranking of venues.`
-                      : `${data.fillQuality.measured} measured against the market price at decision time, ${data.fillQuality.unmeasurable} recorded before that was kept.`}
-                </Text>
+                {data.fillQuality.venues.length > 0 ? (
+                  <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s12 }}>
+                    {fillBasis(data.fillQuality)}
+                  </Text>
+                ) : null}
               </SheetCard>
             ) : null}
 

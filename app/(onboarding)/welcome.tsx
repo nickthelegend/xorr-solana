@@ -23,6 +23,7 @@ import {
   AgentOrb,
   Button,
   Fill,
+  Press,
   Screen,
   SheetCard,
   Text,
@@ -122,14 +123,48 @@ export default function Splash() {
         color={colors.ink}
         onPress={() => router.push('/goals')}
       />
-      <Text
-        variant="footnote"
-        color={colors.ink55}
-        align="center"
-        style={{ marginTop: space.s12 }}
+      {/*
+        The two documents the sentence names, as links. It was plain text, so the first screen asked for agreement to
+        documents it gave no way to read. Each link keeps a full-size touch area without growing the line.
+      */}
+      <View
+        style={{
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          marginTop: space.s12,
+        }}
       >
-        {brand.TERMS}
-      </Text>
+        <Text variant="footnote" color={colors.ink55}>
+          {'By continuing you agree to the '}
+        </Text>
+        <Press
+          onPress={() => router.push('/legal/terms')}
+          accessibilityRole="link"
+          accessibilityLabel="Read the Terms"
+          hitHeight={size.hit}
+        >
+          <Text variant="footnote" color={colors.ink}>
+            Terms
+          </Text>
+        </Press>
+        <Text variant="footnote" color={colors.ink55}>
+          {' and '}
+        </Text>
+        <Press
+          onPress={() => router.push('/legal/privacy')}
+          accessibilityRole="link"
+          accessibilityLabel="Read the Privacy Policy"
+          hitHeight={size.hit}
+        >
+          <Text variant="footnote" color={colors.ink}>
+            Privacy Policy
+          </Text>
+        </Press>
+        <Text variant="footnote" color={colors.ink55}>
+          .
+        </Text>
+      </View>
     </Screen>
   );
 }

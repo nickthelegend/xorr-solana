@@ -31,9 +31,19 @@ import { repos } from '@/data';
 
 export default function AuditEntry() {
   const goBack = useGoBack();
+  /*
+   * `seq` is the entry's sequence number, and matching it against `id` is correct: `/activity`
+   * answers each row's `id` as `String(seq)` (server/src/routes/index.ts), which is also the value
+   * `/audit/chain` links here with.
+   *
+   * What was wrong was the claim when it is missing. `/activity` returns only the newest entries, so
+   * an older sequence number is in the trail and simply not in this list — and the screen said "No
+   * entry with that sequence number is in the trail." It now says what it looked through.
+   */
   const { seq } = useLocalSearchParams<{ seq: string }>();
   const { data, loading, error, reload } = useAsync(() => repos.activity.list(), []);
   const entry = (data ?? []).find((e) => e.id === seq);
+  const searched = (data ?? []).length;
 
   return (
     <Screen gutter="none">
@@ -48,7 +58,9 @@ export default function AuditEntry() {
           <Placeholder height={170} />
         ) : !entry ? (
           <Text variant="body" color={colors.ink55}>
-            No entry with that sequence number is in the trail.
+            {searched === 0
+              ? 'The trail has no entries yet.'
+              : `Entry ${seq ?? ''} is not among the latest ${searched}.`}
           </Text>
         ) : (
           <ScrollView

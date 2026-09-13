@@ -109,8 +109,7 @@ export default function Basename() {
 
         {result === null ? (
           <Text variant="secondarySm" color={colors.ink55}>
-            An address resolves to its name, and a name resolves to the address it points at.
-            Resolution runs against the chain, not a list we keep.
+            Resolved on the chain, both ways.
           </Text>
         ) : result.kind === 'error' ? (
           <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>

@@ -11,6 +11,11 @@
  * different deployment is the honest state of the fork build, and a screen that painted it green
  * anyway would be exactly the overclaim this whole product argues against — and the first thing a
  * judge would catch.
+ *
+ * Each track stands on its own read. One `/metrics` failure used to replace the whole screen with
+ * an error, taking the index and the wallet down with the fill count; now the track whose read
+ * failed says so in place, and the others show what they read. A read that failed is "Unknown",
+ * never "Not here".
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
@@ -33,11 +38,19 @@ import { shortAddress } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 import { system } from '@/data/system';
+import { NotSignedIn } from '@/data/apiError';
 
 const DOT = 8;
 
-/** Live, degraded, or not wired here — three states, because all three occur. */
-type Level = 'live' | 'partial' | 'off';
+/** Live, degraded, not wired here, or not known because its read failed — four states, because all four occur. */
+type Level = 'live' | 'partial' | 'off' | 'unknown';
+
+const LEVEL_LABEL: Record<Level, string> = {
+  live: 'Live',
+  partial: 'Partly',
+  off: 'Not here',
+  unknown: 'Unknown',
+};
 
 function toneFor(level: Level): string {
   if (level === 'live') return colors.up;
@@ -50,14 +63,17 @@ export default function Sponsors() {
   const router = useRouter();
 
   const metrics = useAsync(() => system.metrics(), []);
-  const graph = useAsync(() => system.graphHealth().catch(() => null), []);
+  const graph = useAsync(() => system.graphHealth(), []);
   const policy = useAsync(() => repos.wallet.privyPolicy(), []);
   const wallet = useAsync(() => repos.wallet.current(), []);
 
   const oneInchFills = metrics.data?.fillsByVenue?.['1inch'] ?? 0;
   const aquaFills = metrics.data?.fillsByVenue?.['aqua'] ?? 0;
 
-  const loading = metrics.loading && !metrics.data;
+  /* Signed out is an answer about this session — there is no wallet on it — not a read that failed. */
+  const signedOut = wallet.error instanceof NotSignedIn;
+  const walletError = signedOut ? undefined : wallet.error;
+  const policyFailed = policy.error !== undefined && !(policy.error instanceof NotSignedIn);
 
   return (
     <Screen gutter="none">
@@ -69,111 +85,124 @@ export default function Sponsors() {
       </View>
 
       <Fill style={{ marginTop: space.s16 }}>
-        {metrics.error ? (
-          <View style={{ paddingHorizontal: space.gutter }}>
-            <ErrorState error={metrics.error} onRetry={metrics.reload} />
-          </View>
-        ) : loading ? (
-          <View style={{ paddingHorizontal: space.gutter, gap: space.s12 }}>
-            <Placeholder height={150} />
-            <Placeholder height={150} />
-            <Placeholder height={150} />
-          </View>
-        ) : (
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{
-              paddingHorizontal: space.gutter,
-              paddingBottom: space.s30,
-              gap: space.s12,
-            }}
-          >
-            {/* ── 1inch ─────────────────────────────────────────────────────────── */}
-            <Track
-              name="1inch"
-              does="Every trade. The executor asks the Aggregation router for a route, fills against it, and the price you get is the route's price — not a feed's."
-              level={oneInchFills > 0 ? 'live' : 'partial'}
-              evidence={
-                oneInchFills > 0
-                  ? `${oneInchFills} fills settled through 1inch, counted from the audit trail.`
-                  : 'No fills through 1inch on this deployment yet. Routes still quote live.'
-              }
-              extra={
-                aquaFills > 0
-                  ? `${aquaFills} more settled against our own Aqua book, which is the alternative it is measured against.`
-                  : undefined
-              }
-              onOpen={() => router.push('/route/WETH')}
-              openLabel="Inspect a live route"
-            />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: space.gutter,
+            paddingBottom: space.s30,
+            gap: space.s12,
+          }}
+        >
+          {/* ── 1inch ─────────────────────────────────────────────────────────── */}
+          <Track
+            name="1inch"
+            does="Every trade. The executor asks the Aggregation router for a route, fills against it, and the price you get is the route's price — not a feed's."
+            level={metrics.error ? 'unknown' : oneInchFills > 0 ? 'live' : 'partial'}
+            loading={metrics.loading && !metrics.data}
+            error={metrics.error}
+            onRetry={metrics.reload}
+            evidence={
+              oneInchFills > 0
+                ? `${oneInchFills} fills settled through 1inch, counted from the audit trail.`
+                : 'No fills through 1inch on this deployment yet. Routes still quote live.'
+            }
+            extra={
+              aquaFills > 0
+                ? `${aquaFills} more settled against our own Aqua book, which is the alternative it is measured against.`
+                : undefined
+            }
+            onOpen={() => router.push('/route/WETH')}
+            openLabel="Inspect a live route"
+          />
 
-            {/* ── The Graph ─────────────────────────────────────────────────────── */}
-            <Track
-              name="The Graph"
-              does="What the chain recorded, as opposed to what we intended. The bot sizes a trade against spend the subgraph saw, not against our own database — reading our own records for that would be circular."
-              level={
-                !graph.data
+          {/* ── The Graph ─────────────────────────────────────────────────────── */}
+          <Track
+            name="The Graph"
+            does="What the chain recorded, as opposed to what we intended. The bot sizes a trade against spend the subgraph saw, not against our own database — reading our own records for that would be circular."
+            level={
+              graph.error
+                ? 'unknown'
+                : graph.data?.indexesThisDeployment && graph.data.healthy
+                  ? 'live'
+                  : 'partial'
+            }
+            loading={graph.loading && !graph.data}
+            error={graph.error}
+            onRetry={graph.reload}
+            evidence={
+              graph.data
+                ? `Indexed to block ${graph.data.block.toLocaleString('en-US')}${graph.data.healthy ? ', no indexing errors' : ', with indexing errors'}.`
+                : ''
+            }
+            extra={
+              !graph.data
+                ? undefined
+                : /*
+                   * `indexedDelegation` is absent on an executor older than the field.
+                   *
+                   * That is not hypothetical — it is what a rolling deploy looks like, and it is
+                   * how this screen first crashed. Saying "this build cannot tell you" is both
+                   * true and more useful than a confident answer derived from a missing field.
+                   */
+                  graph.data.indexedDelegation === undefined
+                  ? 'This executor is older than the field that says which contract the index describes, so that cannot be checked from here.'
+                  : graph.data.indexesThisDeployment
+                    ? `Indexing ${shortAddress(graph.data.indexedDelegation)} — the contract this deployment spends through.`
+                    : `Indexing ${shortAddress(graph.data.indexedDelegation)}, but this deployment spends through ${shortAddress(graph.data.activeDelegation)}. The agent will not read permission from an index of a different contract, so on this build the chain itself is the only authority.`
+            }
+            onOpen={() => router.push('/graph')}
+            openLabel="Open the index"
+          />
+
+          {/* ── Privy ─────────────────────────────────────────────────────────── */}
+          <Track
+            name="Privy"
+            does="Keys and signing. You own the wallet; the executor never holds a key that can move funds, and a policy on Privy's side refuses a destination we did not name."
+            level={
+              walletError
+                ? 'unknown'
+                : !wallet.data
                   ? 'off'
-                  : graph.data.indexesThisDeployment && graph.data.healthy
+                  : policy.data?.enforced
                     ? 'live'
-                    : 'partial'
-              }
-              evidence={
-                !graph.data
-                  ? 'The subgraph could not be reached from this deployment.'
-                  : `Indexed to block ${graph.data.block.toLocaleString('en-US')}${graph.data.healthy ? ', no indexing errors' : ', with indexing errors'}.`
-              }
-              extra={
-                !graph.data
-                  ? undefined
-                  : /*
-                     * `indexedDelegation` is absent on an executor older than the field.
-                     *
-                     * That is not hypothetical — it is what a rolling deploy looks like, and it is
-                     * how this screen first crashed. Saying "this build cannot tell you" is both
-                     * true and more useful than a confident answer derived from a missing field.
-                     */
-                    graph.data.indexedDelegation === undefined
-                    ? 'This executor is older than the field that says which contract the index describes, so that cannot be checked from here.'
-                    : graph.data.indexesThisDeployment
-                      ? `Indexing ${shortAddress(graph.data.indexedDelegation)} — the contract this deployment spends through.`
-                      : `Indexing ${shortAddress(graph.data.indexedDelegation)}, but this deployment spends through ${shortAddress(graph.data.activeDelegation)}. The agent will not read permission from an index of a different contract, so on this build the chain itself is the only authority.`
-              }
-              onOpen={() => router.push('/graph')}
-              openLabel="Open the index"
-            />
-
-            {/* ── Privy ─────────────────────────────────────────────────────────── */}
-            <Track
-              name="Privy"
-              does="Keys and signing. The wallet is embedded and the user owns it; the executor never holds a key that can move funds, and a policy on Privy's side refuses a destination we did not name."
-              level={wallet.data ? (policy.data?.enforced ? 'live' : 'partial') : 'off'}
-              evidence={
-                wallet.data
-                  ? `Signed in, embedded wallet ${shortAddress(wallet.data.address)}.`
+                    : policyFailed
+                      ? 'unknown'
+                      : 'partial'
+            }
+            loading={wallet.loading && !wallet.data}
+            error={walletError}
+            onRetry={wallet.reload}
+            evidence={
+              wallet.data
+                ? /* Its kind, as the executor records it: Privy creates some wallets, and people bring others. */
+                  `Signed in, ${wallet.data.kind === 'embedded' ? 'embedded' : 'connected'} wallet ${shortAddress(wallet.data.address)}.`
+                : signedOut
+                  ? 'Not signed in.'
                   : 'No wallet on this session.'
-              }
-              extra={
-                !policy.data
-                  ? undefined
-                  : policy.data.enforced
-                    ? `Policy enforcing, owned by key quorum ${policy.data.ownedByQuorum ?? '—'} — which the executor is not a member of, so it cannot widen it.`
-                    : `The policy exists and names ${policy.data.wouldAllow.length} destinations, but attaching it is authorised by the wallet's owner, which is you rather than us.`
-              }
-              onOpen={() => router.push('/policy')}
-              openLabel="What Privy refuses"
-            />
+            }
+            extra={
+              !wallet.data
+                ? undefined
+                : policyFailed
+                  ? 'The wallet policy could not be read.'
+                  : !policy.data
+                    ? undefined
+                    : policy.data.enforced
+                      ? `Policy enforcing, owned by key quorum ${policy.data.ownedByQuorum ?? '—'} — which the executor is not a member of, so it cannot widen it.`
+                      : `The policy exists and names ${policy.data.wouldAllow.length} destinations, but attaching it is authorised by the wallet's owner, which is you rather than us.`
+            }
+            onOpen={() => router.push('/policy')}
+            openLabel="What Privy refuses"
+          />
 
-            <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
-              <Text variant="secondarySm" color={colors.ink55}>
-                Every figure here is read live. Nothing on this screen is a claim the app cannot
-                check while you are looking at it.
-              </Text>
-            </SheetCard>
+          <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
+            <Text variant="secondarySm" color={colors.ink55}>
+              Every figure here is read live.
+            </Text>
+          </SheetCard>
 
-            <Button label="Check every claim" variant="ghost" onPress={() => router.push('/verify')} />
-          </ScrollView>
-        )}
+          <Button label="Check every claim" variant="ghost" onPress={() => router.push('/verify')} />
+        </ScrollView>
       </Fill>
     </Screen>
   );
@@ -183,6 +212,9 @@ function Track({
   name,
   does,
   level,
+  loading = false,
+  error,
+  onRetry,
   evidence,
   extra,
   onOpen,
@@ -191,11 +223,17 @@ function Track({
   name: string;
   does: string;
   level: Level;
+  /** The track's own read has not answered yet. */
+  loading?: boolean;
+  /** The track's own read failed. Shown in place of its evidence, and nowhere else. */
+  error?: Error;
+  onRetry?: () => void;
   evidence: string;
   extra?: string;
   onOpen: () => void;
   openLabel: string;
 }) {
+  const tone = loading ? colors.ink40 : toneFor(level);
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s10 }}>
@@ -204,14 +242,14 @@ function Track({
             width: DOT,
             height: DOT,
             borderRadius: DOT / 2,
-            backgroundColor: toneFor(level),
+            backgroundColor: tone,
           }}
         />
         <Text variant="rowPrimaryLg" style={{ flex: 1 }}>
           {name}
         </Text>
-        <Text variant="control" color={toneFor(level)}>
-          {level === 'live' ? 'Live' : level === 'partial' ? 'Partly' : 'Not here'}
+        <Text variant="control" color={tone}>
+          {loading ? '· · ·' : LEVEL_LABEL[level]}
         </Text>
       </View>
 
@@ -220,15 +258,22 @@ function Track({
       </Text>
 
       {/* The number, set apart from the prose — this is the half that is checkable. */}
-      <Text variant="rowPrimary" style={{ marginTop: space.s14 }}>
-        {evidence}
-      </Text>
-
-      {extra ? (
-        <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          {extra}
-        </Text>
-      ) : null}
+      {error ? (
+        <ErrorState error={error} onRetry={onRetry} />
+      ) : loading ? (
+        <Placeholder height={20} style={{ marginTop: space.s14 }} />
+      ) : (
+        <>
+          <Text variant="rowPrimary" style={{ marginTop: space.s14 }}>
+            {evidence}
+          </Text>
+          {extra ? (
+            <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
+              {extra}
+            </Text>
+          ) : null}
+        </>
+      )}
 
       <Button
         label={openLabel}

@@ -65,7 +65,10 @@ export default function Policy() {
             <Placeholder height={150} />
           </View>
         ) : !data ? (
-          /* `privyPolicy` answers null when the policy could not be read, and a blank screen said nothing at all. */
+          /*
+            A failed read throws and is the error state above; the executor never answers null. This only keeps an
+            empty answer from rendering as a blank screen, which would say nothing at all.
+          */
           <View style={{ paddingHorizontal: space.gutter }}>
             <EmptyState text="The wallet policy could not be read." actionLabel="Try again" onAction={reload} />
           </View>

@@ -22,6 +22,7 @@ import { ScrollView, TextInput, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   BackButton,
+  Button,
   Eyebrow,
   Fill,
   Press,
@@ -38,6 +39,7 @@ import {
   typeScale,
 } from '@/ui';
 import { api } from '@/data/api';
+import { ApiError, TimedOut, errorText, isRetryable } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { useStore } from '@/state/store';
 
@@ -67,6 +69,32 @@ const TONE = {
 } as const;
 
 const FIELD_H = 46;
+
+/**
+ * Which failure it was, in words.
+ *
+ * Every error read "The executor did not answer." with the raw message under it — a 400 refusing the
+ * owner field, a 502 and a dropped connection alike, status line and JSON body included. They are
+ * three different events and each changes what a reader does next: fix the address, wait, or check
+ * the connection.
+ */
+function failureTitle(e: Error): string {
+  if (e instanceof TimedOut) return 'The checks did not finish in time.';
+  if (e instanceof ApiError) {
+    return e.status >= 500 ? 'The executor could not run the checks.' : 'The executor refused this.';
+  }
+  return 'Couldn’t reach the executor.';
+}
+
+/**
+ * The executor's own sentence where it wrote one. A timeout's message is written for trades ("check
+ * Activity before trying again"), which is the wrong advice for a read that changes nothing.
+ */
+function failureDetail(e: Error): string | undefined {
+  if (e instanceof ApiError) return errorText(e);
+  if (e instanceof TimedOut) return 'Running them changes nothing, so running them again is safe.';
+  return undefined;
+}
 
 export default function Judge() {
   const goBack = useGoBack();
@@ -157,15 +185,25 @@ export default function Judge() {
           ) : report.error ? (
             <SheetCard borderRadius={radius.note} padding={space.s16}>
               <Text variant="rowPrimary" color={colors.down}>
-                The executor did not answer.
+                {failureTitle(report.error)}
               </Text>
-              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
-                {report.error.message}
-              </Text>
+              {failureDetail(report.error) ? (
+                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>
+                  {failureDetail(report.error)}
+                </Text>
+              ) : null}
               <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
-                Nothing below is stale — there is nothing below. This is the console failing,
-                not the claims.
+                This is the console failing, not the claims.
               </Text>
+              {/* Only where asking again could get a different answer: a refusal will refuse again. */}
+              {isRetryable(report.error) ? (
+                <Button
+                  label="Run them again"
+                  variant="ghost"
+                  onPress={rerun}
+                  style={{ marginTop: space.s12 }}
+                />
+              ) : null}
             </SheetCard>
           ) : d ? (
             <>

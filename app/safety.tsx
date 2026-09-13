@@ -16,6 +16,7 @@ import {
   Eyebrow,
   Fill,
   NoteStrip,
+  Placeholder,
   Press,
   Row,
   Screen,
@@ -39,6 +40,7 @@ import {
   killTitle,
 } from '@/state/derived';
 import { useStore } from '@/state/store';
+import { useNow } from '@/state/useNow';
 import { useAllowlist } from '@/wallet/allowlist';
 import { useApprovals, type ApprovalsView } from '@/wallet/useApprovals';
 import { planResume, type GrantOptions } from '@/wallet/grantPlan';
@@ -65,12 +67,22 @@ export default function Safety() {
    * now" under a green LIVE badge — while one of those strategies was placing an order. A live
    * strategy is scheduled against this permission exactly as a hired agent is; both stop when the
    * switch below is pulled, so both belong in the sentence that says what the switch stops.
+   *
+   * Counted by kind, and only once both reads have answered. The sum was then called agents — nine
+   * live strategies read "9 agents can trade" — and a roster that failed to load counted as no
+   * agents at all, which is "Nothing is running" under a permission that may be trading.
    */
   const roster = useAsync(() => repos.bot.listAgents(), []);
   const strategies = useAsync(() => repos.strategies.list(), []);
-  const hiredCount =
-    (roster.data ?? []).filter((a) => a.hired).length +
-    (strategies.data ?? []).filter((s) => s.state === 'live').length;
+  const running =
+    roster.data && strategies.data
+      ? {
+          agents: roster.data.filter((a) => a.hired).length,
+          strategies: strategies.data.filter((s) => s.state === 'live').length,
+        }
+      : undefined;
+  /** Still counting, as opposed to unable to count. */
+  const counting = running === undefined && !roster.error && !strategies.error;
 
   const storedKilled = useStore((s) => s.killed);
   const setKilled = useStore((s) => s.setKilled);
@@ -78,6 +90,8 @@ export default function Safety() {
   const delegation = useStore((s) => s.delegation);
   const recoveryBackedUp = useStore((s) => s.recoveryBackedUp);
   const [localError, setLocalError] = useState<string>();
+  // Expiry is judged against a clock that is state, so a render stays a pure function of what it read.
+  const now = useNow();
 
   /*
    * Stopped, according to the chain — not according to a flag we kept.
@@ -103,14 +117,15 @@ export default function Safety() {
    * A permission that ran out. An expired policy showed a green dot reading **Live** over "Agents are live" — seen on
    * the hosted deployment thirteen hours after a grant lapsed, while `/limits` reported `$0 left today`.
    */
-  const expired = delegationExpired(delegation, killed);
+  const expired = delegationExpired(delegation, killed, now);
 
   // The allowlist is real and the executor holds it; read it.
   const { addresses, loading: allowlistLoading, error: allowlistError } = useAllowlist();
 
   /*
    * The second lock, read from the party that enforces it. `XorrDelegation` bounds the BOT; the wallet's own policy
-   * bounds what this wallet may be asked to sign. It has its own screen; here it is one row that says whether it is on.
+   * bounds what this wallet may be asked to sign. It has its own screen; here it is one row that says whether it is on
+   * — or that it could not be read, rather than the row quietly not being there.
    */
   const privy = useAsync(() => repos.wallet.privyPolicy(), []);
 
@@ -127,6 +142,13 @@ export default function Safety() {
   const [delegationError, setDelegationError] = useState<unknown>(undefined);
   /** No session, so the chain was never asked. Distinct from asked-and-absent. */
   const [signedOut, setSignedOut] = useState(false);
+  /**
+   * Whether the chain has answered on this visit, either way.
+   *
+   * The store's `delegation` is null both before the first read and after a read that found nothing, so a cold open
+   * showed NOT GRANTED · "No agents can trade" until the answer arrived — a claim made before anything was asked.
+   */
+  const [answered, setAnswered] = useState(false);
   useEffect(() => {
     let alive = true;
     void repos.wallet
@@ -141,6 +163,9 @@ export default function Safety() {
         if (!alive) return;
         if (e instanceof NotSignedIn) setSignedOut(true);
         else setDelegationError(e);
+      })
+      .finally(() => {
+        if (alive) setAnswered(true);
       });
     return () => {
       alive = false;
@@ -149,6 +174,10 @@ export default function Safety() {
 
   /** Could not be read — distinct from read and absent. Outranks every other state below. */
   const unreadable = permissionUnreadable(delegationError, delegation);
+  /** Nothing read yet and nothing from earlier in the session to show meanwhile. */
+  const asking = !answered && !granted;
+  /** The one sentence that depends on the count: a live permission, read. */
+  const needsCount = !asking && !signedOut && !unreadable && granted && !killed && !unusable && !expired;
 
   // Signed by the user, on-chain: a stop reaches every device without any server needing to be reachable.
   const { grant: signGrant, revoke: signRevoke, busy, error: txError } = useGrantDelegation();
@@ -241,20 +270,21 @@ export default function Safety() {
             width: DOT,
             height: DOT,
             borderRadius: radius.full,
-            backgroundColor: unreadable
-              ? colors.ink30
-              : unusable || expired
-                ? colors.down
-                : killed || !granted
-                  ? colors.ink30
-                  : colors.up,
+            backgroundColor:
+              asking || unreadable
+                ? colors.ink30
+                : unusable || expired
+                  ? colors.down
+                  : killed || !granted
+                    ? colors.ink30
+                    : colors.up,
           }}
         />
         {/* "Unknown" outranks everything: saying "Not granted" because a read failed is the one claim this must never make. */}
         <Text
           variant="tagSm"
           color={
-            unreadable
+            asking || unreadable
               ? colors.ink55
               : unusable || expired
                 ? colors.down
@@ -265,32 +295,42 @@ export default function Safety() {
         >
           {signedOut
             ? 'Not signed in'
-            : unreadable
-              ? 'Unknown'
-              : unusable
-                ? 'Disconnected'
-                : !granted
-                  ? 'Not granted'
-                  : expired
-                    ? 'Expired'
-                    : killed
-                      ? 'Stopped'
-                      : 'Live'}
+            : asking
+              ? '· · ·'
+              : unreadable
+                ? 'Unknown'
+                : unusable
+                  ? 'Disconnected'
+                  : !granted
+                    ? 'Not granted'
+                    : expired
+                      ? 'Expired'
+                      : killed
+                        ? 'Stopped'
+                        : 'Live'}
         </Text>
       </View>
 
-      <Text variant="onboardingTitle" style={{ marginTop: space.s16 }}>
-        {signedOut
-          ? 'Sign in to see what can trade'
-          : unreadable
-            ? 'Couldn’t read your permission'
-            : killTitle(killed, unusable, granted, expired)}
-      </Text>
-      <Text variant="body" color={colors.ink55} style={{ marginTop: space.s8 }}>
-        {signedOut || unreadable
-          ? 'Anything you granted stays in force.'
-          : killExplanation(killed, hiredCount, unusable, granted, expired)}
-      </Text>
+      {!signedOut && asking ? (
+        <Placeholder width={240} height={30} style={{ marginTop: space.s16 }} />
+      ) : (
+        <Text variant="onboardingTitle" style={{ marginTop: space.s16 }}>
+          {signedOut
+            ? 'Sign in to see what can trade'
+            : unreadable
+              ? 'Couldn’t read your permission'
+              : killTitle(killed, unusable, granted, expired)}
+        </Text>
+      )}
+      {!signedOut && (asking || (needsCount && counting)) ? (
+        <Placeholder width={220} height={18} style={{ marginTop: space.s8 }} />
+      ) : (
+        <Text variant="body" color={colors.ink55} style={{ marginTop: space.s8 }}>
+          {signedOut || unreadable
+            ? 'Anything you granted stays in force.'
+            : killExplanation(killed, running, unusable, granted, expired)}
+        </Text>
+      )}
 
       {/* Scrolls on a short phone; the stop button stays pinned below rather than scrolling away. */}
       <Fill style={{ marginTop: space.s20 }}>
@@ -301,6 +341,8 @@ export default function Safety() {
           {/* Signed out, nobody's permission has been read: a sign-in, not a claim about a wallet nobody named. */}
           {signedOut ? (
             <Button label="Sign in" onPress={() => router.push('/welcome')} />
+          ) : asking ? (
+            <Placeholder height={110} style={{ borderRadius: radius.panel }} />
           ) : delegation ? (
             <SheetCard borderRadius={radius.panel} padding={space.s16}>
               <Row
@@ -337,9 +379,9 @@ export default function Safety() {
           )}
 
           {/* The deadline the contract enforces whether or not anyone is watching — only when it is close. */}
-          {expiryNote(delegation?.expiresAt) ? (
-            <NoteStrip kind={expiryState(delegation?.expiresAt) === 'expired' ? 'blocked' : 'risk'}>
-              {expiryNote(delegation?.expiresAt)!}
+          {expiryNote(delegation?.expiresAt, now) ? (
+            <NoteStrip kind={expiryState(delegation?.expiresAt, now) === 'expired' ? 'blocked' : 'risk'}>
+              {expiryNote(delegation?.expiresAt, now)!}
             </NoteStrip>
           ) : null}
 
@@ -355,11 +397,14 @@ export default function Safety() {
                   >
                     <View style={{ flexShrink: 1 }}>
                       <Text variant="rowPrimary">{t.symbol}</Text>
-                      {/* The number, not the word: "Limited" tells nobody whether they are comfortable with it. */}
+                      {/*
+                        The number, not the word: "Limited" tells nobody whether they are comfortable with it. Only a
+                        number the executor actually sent — `Number(null)` is 0, which read "Up to 0.0000".
+                      */}
                       <Text variant="footnote" color={colors.ink55}>
                         {t.unlimited
                           ? 'No limit'
-                          : Number.isFinite(Number(t.display))
+                          : typeof t.display === 'string' && t.display.trim() !== '' && Number.isFinite(Number(t.display))
                             ? `Up to ${quantity(Number(t.display), Number(t.display) >= 1 ? 2 : 4)}`
                             : 'Limited'}
                       </Text>
@@ -378,18 +423,17 @@ export default function Safety() {
 
           {signedOut ? null : (
             <SheetCard borderRadius={radius.panel} padding={space.s16}>
-              {privy.data ? (
-                <Row
-                  title="Wallet policy"
-                  value={
-                    <Text variant="rowPrimary" color={colors.ink55}>
-                      {privy.data.enforced ? 'On' : 'Off'}
-                    </Text>
-                  }
-                  height={SETTING_ROW}
-                  onPress={() => router.push('/policy')}
-                />
-              ) : null}
+              <Row
+                title="Wallet policy"
+                value={
+                  <Text variant="rowPrimary" color={colors.ink55}>
+                    {/* A policy nobody could read is not a policy that is off, and not a row to leave out. */}
+                    {privy.error ? '—' : privy.data ? (privy.data.enforced ? 'On' : 'Off') : '· · ·'}
+                  </Text>
+                }
+                height={SETTING_ROW}
+                onPress={() => router.push('/policy')}
+              />
               <Row
                 title="Allowlist"
                 value={

@@ -393,6 +393,9 @@ export function killTitle(
   if (expired) return 'Your permission has ended';
   return killed ? 'All agents stopped' : 'Agents are live';
 }
+/** What is scheduled against the permission right now, counted by kind. */
+export type RunningCount = { agents: number; strategies: number };
+
 /**
  * What is actually able to place an order, said in a sentence that survives the number being one.
  *
@@ -400,14 +403,23 @@ export function killTitle(
  * can trade: a wallet with no agent hired and five live strategies was told "0 agents can place
  * orders inside your limits right now" — under a green LIVE badge headed "Agents are live", on the
  * screen whose entire job is to say what the bot may do, minutes after one of those strategies
- * placed an order. Callers pass everything scheduled against the permission now.
+ * placed an order.
+ *
+ * The fix passed the sum, and the sentence then called the sum agents: a wallet with no agent hired
+ * and nine live strategies read "9 agents can trade within your limits" while Home showed all four
+ * agents "Not hired". Both kinds stop when the switch is pulled, so both belong in the sentence —
+ * each under its own name. The two counts arrive separately for that reason.
+ *
+ * `running` is undefined when it could not be counted. That is not zero: "Nothing is running" over
+ * a roster or a strategy list that failed to load is the same false negative as a failed permission
+ * read reported as "Not granted".
  *
  * And "1 agents" was reachable. The docblock above records seeing it on screen; nothing pluralised
  * it, because the only test used 3.
  */
 export function killExplanation(
   killed: boolean,
-  liveAgents: number,
+  running: RunningCount | undefined,
   unusable = false,
   granted = true,
   expired = false,
@@ -431,12 +443,18 @@ export function killExplanation(
     return 'It reached its end date. Grant again to continue.';
   }
   if (killed) return 'Nothing trades until you resume.';
-  if (liveAgents === 0) {
+  if (!running) return 'Couldn’t count what is running.';
+  const { agents, strategies } = running;
+  if (agents + strategies === 0) {
     // Not "0 agents can place orders", which reads as a stopped bot next to a LIVE badge. The
     // permission is live and unused, and those are different facts.
     return 'Nothing is running. Anything you start can trade.';
   }
-  return `${liveAgents} ${liveAgents === 1 ? 'agent' : 'agents'} can trade within your limits.`;
+  const named = [
+    agents > 0 ? `${agents} ${agents === 1 ? 'agent' : 'agents'}` : undefined,
+    strategies > 0 ? `${strategies} ${strategies === 1 ? 'strategy' : 'strategies'}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return `${named.join(' and ')} can trade within your limits.`;
 }
 /**
  * What the big button on Safety should offer.

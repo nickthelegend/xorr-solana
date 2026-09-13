@@ -276,10 +276,10 @@ describe('kill switch — screen 20', () => {
     expect(d.killTitle(true)).toBe('All agents stopped');
     expect(d.killCta(false)).toBe('Stop all agents');
     expect(d.killCta(true)).toBe('Resume agents');
-    expect(d.killExplanation(false, 3)).toBe(
+    expect(d.killExplanation(false, { agents: 3, strategies: 0 })).toBe(
       '3 agents can trade within your limits.',
     );
-    expect(d.killExplanation(true, 3)).toContain('until you resume');
+    expect(d.killExplanation(true, { agents: 3, strategies: 0 })).toContain('until you resume');
   });
 
   /*
@@ -287,9 +287,48 @@ describe('kill switch — screen 20', () => {
    * test used 3, so nothing caught it.
    */
   it('counts one thing as one thing', () => {
-    expect(d.killExplanation(false, 1)).toBe(
+    expect(d.killExplanation(false, { agents: 1, strategies: 0 })).toBe(
       '1 agent can trade within your limits.',
     );
+    expect(d.killExplanation(false, { agents: 0, strategies: 1 })).toBe(
+      '1 strategy can trade within your limits.',
+    );
+  });
+
+  /*
+   * A strategy is not an agent.
+   *
+   * Safety counts hired agents and live strategies together, because the switch stops both — and
+   * the sentence then called the total agents. Observed: no agent hired, nine live strategies, and
+   * "9 agents can trade within your limits." while Home showed all four agents "Not hired".
+   */
+  it('names each kind by its own name', () => {
+    const strategiesOnly = d.killExplanation(false, { agents: 0, strategies: 9 });
+    expect(strategiesOnly).toBe('9 strategies can trade within your limits.');
+    expect(strategiesOnly).not.toMatch(/agent/);
+    expect(d.killExplanation(false, { agents: 2, strategies: 9 })).toBe(
+      '2 agents and 9 strategies can trade within your limits.',
+    );
+    expect(d.killExplanation(false, { agents: 1, strategies: 1 })).toBe(
+      '1 agent and 1 strategy can trade within your limits.',
+    );
+  });
+
+  /*
+   * A count that could not be read is not zero.
+   *
+   * The roster read no longer falls back to fixture personas, so it can fail — and counting a failed
+   * read as nothing running would put "Nothing is running" under a live permission that may be
+   * trading, the same false negative as a failed permission read reported as "Not granted".
+   */
+  it('does not report an uncounted roster as an empty one', () => {
+    const unknown = d.killExplanation(false, undefined);
+    expect(unknown).toBe('Couldn’t count what is running.');
+    expect(unknown).not.toContain('Nothing is running');
+    expect(unknown).not.toMatch(/\d/);
+    // The states that never needed a count still say what they say.
+    expect(d.killExplanation(true, undefined)).toContain('until you resume');
+    expect(d.killExplanation(false, undefined, false, false)).toContain('Nothing is granted yet');
   });
 
   /*
@@ -300,12 +339,12 @@ describe('kill switch — screen 20', () => {
    * the fix for the zero case itself, which is why it gets its own test.
    */
   it('does not describe a permission that was never granted', () => {
-    const none = d.killExplanation(false, 0, false, false);
+    const none = d.killExplanation(false, { agents: 0, strategies: 0 }, false, false);
     expect(none).toContain('Nothing is granted yet');
     expect(none).not.toContain('the permission is live');
     expect(d.killTitle(false, false, false)).toBe('No agents can trade');
     // And an ungranted wallet with strategies somehow counted still must not claim they can trade.
-    expect(d.killExplanation(false, 3, false, false)).toContain('Nothing is granted yet');
+    expect(d.killExplanation(false, { agents: 0, strategies: 3 }, false, false)).toContain('Nothing is granted yet');
   });
 
   /*
@@ -374,7 +413,7 @@ describe('kill switch — screen 20', () => {
     it('never reads as live', () => {
       expect(d.killTitle(false, false, true, true)).toBe('Your permission has ended');
       expect(d.killTitle(false, false, true, true)).not.toContain('live');
-      const why = d.killExplanation(false, 3, false, true, true);
+      const why = d.killExplanation(false, { agents: 3, strategies: 0 }, false, true, true);
       expect(why).toContain('end date');
       expect(why).not.toContain('can trade');
     });
@@ -403,10 +442,11 @@ describe('kill switch — screen 20', () => {
    * Under a green LIVE badge, "0 agents can place orders" read as a kill switch already pulled.
    */
   it('says nothing is running but anything started can trade, not that nothing can', () => {
-    const live = d.killExplanation(false, 0);
+    const nothing = { agents: 0, strategies: 0 };
+    const live = d.killExplanation(false, nothing);
     expect(live).toContain('Anything you start can trade');
     expect(live).not.toContain('0 agents');
-    expect(live).not.toBe(d.killExplanation(true, 0));
+    expect(live).not.toBe(d.killExplanation(true, nothing));
   });
 
   /*
@@ -434,9 +474,9 @@ describe('kill switch — screen 20', () => {
     expect(d.delegateUnusable({ delegateIsCurrent: false }, false)).toBe(true);
     expect(d.killTitle(false, true)).toBe('Agents cannot trade');
     expect(d.killCta(false, true)).toBe('Reconnect agents');
-    expect(d.killExplanation(false, 1, true)).toContain('Reconnect');
+    expect(d.killExplanation(false, { agents: 1, strategies: 0 }, true)).toContain('Reconnect');
     // And it must not read as a working permission.
-    expect(d.killExplanation(false, 1, true)).not.toContain('can trade within');
+    expect(d.killExplanation(false, { agents: 1, strategies: 0 }, true)).not.toContain('can trade within');
   });
 
   it('a stopped switch stays stopped — the two states do not collide', () => {

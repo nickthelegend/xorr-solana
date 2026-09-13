@@ -23,6 +23,7 @@ import {
   SheetCard,
   Text,
   colors,
+  quantity,
   radius,
   size,
   space,
@@ -45,8 +46,7 @@ export default function Approvals() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Approvals</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          What may take tokens from this wallet — the delegation contract and the 1inch router — read from the
-          chain rather than from our record of it.
+          What can take tokens from this wallet, read from the chain.
         </Text>
       </View>
 
@@ -96,7 +96,7 @@ function SpenderSection({
     <View style={{ gap: space.s10 }}>
       <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
         <Text variant="footnote" color={colors.ink55}>
-          {spender.role === 'router' ? 'Spender · the 1inch router' : 'Spender · the delegation contract'}
+          {spender.role === 'router' ? 'Spender · the swap router' : 'Spender · the delegation contract'}
         </Text>
         <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
           {spender.address ? shortAddress(spender.address) : 'Could not be read'}
@@ -141,6 +141,15 @@ function ApprovalRow({
   const state = token.unread ? 'Could not be read' : token.none ? 'None' : token.unlimited ? 'Unlimited' : 'Limited';
   const busy = spender !== null && revoking === `${spender}:${token.symbol}`;
   const canTakeBack = !token.none && !token.unread && spender !== null;
+  /*
+   * The amount in the token's own units, only when the executor sent one. An executor older than `display` sends
+   * nothing (see `TokenApproval`), and printing it anyway put "undefined USDC" on screen. The raw value below still
+   * says exactly what is allowed, so an absent amount is simply not repeated.
+   */
+  const amount =
+    typeof token.display === 'string' && token.display.trim() !== '' && Number.isFinite(Number(token.display))
+      ? Number(token.display)
+      : undefined;
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
@@ -152,9 +161,9 @@ function ApprovalRow({
       <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s4 }}>
         {shortAddress(token.address)}
       </Text>
-      {token.none || token.unlimited || token.unread ? null : (
+      {token.none || token.unlimited || token.unread || amount === undefined ? null : (
         <Text variant="secondarySm" color={colors.ink65} style={{ marginTop: space.s8 }}>
-          {token.display} {token.symbol}
+          {`${quantity(amount, amount >= 1 ? 2 : 4)} ${token.symbol}`}
         </Text>
       )}
       {/*

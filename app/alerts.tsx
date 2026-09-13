@@ -29,9 +29,9 @@ import {
 import { useSignedOut } from '@/auth/useSignedOut';
 import { repos } from '@/data';
 import { api } from '@/data/api';
+import { errorText } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { useRefreshControl } from '@/ui/useRefreshControl';
-import { useStore } from '@/state/store';
 import type { Alert } from '@/data/types';
 import { useGoBack } from '@/nav/useGoBack';
 
@@ -41,14 +41,14 @@ const ROW_H = 70;
  * What this alert is doing right now, in one line.
  *
  * There are three states behind a switch that is on, not one: watching, fired-and-waiting,
- * and fired-before-but-watching-again. Collapsing them into the alert's own description was
- * fine while nothing evaluated alerts; now that they fire, "already went off" is the most
- * useful thing this row can say — and an alert that has gone off once but is armed again is
- * not the same as one that has never gone off at all.
+ * and fired-before-but-watching-again. They are the executor's (server/src/alerts/evaluate.ts):
+ * an alert fires once per crossing — it disarms when it fires, re-arms when its condition goes
+ * false again, and fires again on the next crossing. It never switches itself off; only this
+ * screen does that.
  */
 function firedCaption(a: Alert): string {
   if (a.armed === false && a.lastFiredAt) {
-    return `Went off ${when(a.lastFiredAt)} — quiet until the condition clears`;
+    return `Went off ${when(a.lastFiredAt)} · quiet until it clears`;
   }
   if (a.fireCount && a.lastFiredAt) return `Watching · last went off ${when(a.lastFiredAt)}`;
   return a.detail;
@@ -65,18 +65,63 @@ function when(iso: string): string {
 
 type Pref = { kind: string; label: string; detail: string; enabled: boolean };
 
+/**
+ * Switch positions asked for and not yet overtaken by a fresh read, keyed to the read they were made on.
+ *
+ * When the list is read again (`settledAt` moves) the server's word stands — including for a save that succeeded,
+ * which that read now carries.
+ */
+type Pending = { at: number | undefined; on: Record<string, boolean> };
+const NOTHING_PENDING: Pending = { at: undefined, on: {} };
+
 export default function Alerts() {
   const goBack = useGoBack();
   const router = useRouter();
-  const alerts = useStore((s) => s.alerts);
-  const toggleAlert = useStore((s) => s.toggleAlert);
-  const { data, loading, error, reload } = useAsync(() => repos.alerts.list(), []);
+  const { data, loading, error, reload, settledAt } = useAsync(() => repos.alerts.list(), []);
   const prefs = useAsync(() => api.get<Pref[]>('/notifications/prefs'), []);
   // Both halves of this screen come from the server, so both are refreshed by the gesture.
   const refresh = useRefreshControl(() => Promise.all([reload(), prefs.reload()]));
-  /** Optimistic local state, reverted if the server disagrees. */
-  const [pushOn, setPushOn] = useState<Record<string, boolean>>({});
   const signedOut = useSignedOut();
+
+  /*
+   * On or off is the SERVER's answer, with a local position only while a save is in flight.
+   *
+   * The alert switches read `alerts[a.name] ?? a.default` — a map persisted on this device, keyed
+   * by name and still carrying the fixture catalogue's entries — and `setEnabled` swallowed its own
+   * failure. So a save the executor refused, or never received, flipped the row anyway, and the
+   * device remembered a state the executor never had. A failed save now puts the switch back and
+   * says why, for both groups on this screen.
+   */
+  const [alertSaves, setAlertSaves] = useState<Pending>(NOTHING_PENDING);
+  const [prefSaves, setPrefSaves] = useState<Pending>(NOTHING_PENDING);
+  const [saveError, setSaveError] = useState<string>();
+  const alertOn = (a: Alert) =>
+    (alertSaves.at === settledAt ? alertSaves.on[a.id] : undefined) ?? a.default;
+  const prefOn = (p: Pref) =>
+    (prefSaves.at === prefs.settledAt ? prefSaves.on[p.kind] : undefined) ?? p.enabled;
+
+  /** Show the new position now, write it, and put it back — with the executor's reason — if the write fails. */
+  async function save(
+    key: string,
+    next: boolean,
+    at: number | undefined,
+    setSaves: React.Dispatch<React.SetStateAction<Pending>>,
+    write: () => Promise<unknown>,
+    label: string,
+  ) {
+    setSaveError(undefined);
+    setSaves((s) => ({ at, on: { ...(s.at === at ? s.on : {}), [key]: next } }));
+    try {
+      await write();
+    } catch (e) {
+      setSaves((s) => {
+        const on = { ...s.on };
+        delete on[key];
+        return { ...s, on };
+      });
+      setSaveError(`${label} did not save: ${errorText(e)}`);
+    }
+  }
 
   /*
    * Count the alerts that EXIST, not the toggle map.
@@ -86,7 +131,7 @@ export default function Alerts() {
    * read "2 of 1 on". A count larger than the list it counts is the kind of small wrongness
    * that makes a user stop believing the rest of the screen.
    */
-  const onCount = (data ?? []).filter((a) => alerts[a.name] ?? a.default).length;
+  const onCount = (data ?? []).filter(alertOn).length;
 
   return (
     <Screen>
@@ -101,8 +146,11 @@ export default function Alerts() {
           <BackButton onPress={() => goBack()} />
           <Text variant="screenTitle">Alerts</Text>
         </View>
-        {/* A count of the list the server gave. Before it answers there is nothing to count. */}
-        {data ? (
+        {/*
+          A count of the list the server gave. Before it answers there is nothing to count, and an empty list is
+          said once, by the empty state: "0 of 0 on" above "No alerts yet." said it twice.
+        */}
+        {data && data.length > 0 ? (
           <Text variant="footnote" color={colors.ink55}>
             {onCount} of {data.length} on
           </Text>
@@ -131,24 +179,20 @@ export default function Alerts() {
               empty list now says it is empty; the button that fixes that is below the list.
             */}
             {(data ?? []).length === 0 ? <EmptyState text="No alerts yet." /> : null}
-            {(data ?? []).map((a) => {
-              const on = alerts[a.name] ?? a.default;
-              return (
-                <SwitchRow
-                  key={a.id}
-                  label={a.name}
-                  // The caption changes with state, as design.md §5 requires.
-                  caption={(v) => (v ? firedCaption(a) : 'Off')}
-                  on={on}
-                  onChange={() => {
-                    toggleAlert(a.name);
-                    void repos.alerts.setEnabled(a.id, !on);
-                  }}
-                  height={ROW_H}
-                  compact
-                />
-              );
-            })}
+            {(data ?? []).map((a) => (
+              <SwitchRow
+                key={a.id}
+                label={a.name}
+                // The caption changes with state, as design.md §5 requires.
+                caption={(v) => (v ? firedCaption(a) : 'Off')}
+                on={alertOn(a)}
+                onChange={(next) =>
+                  void save(a.id, next, settledAt, setAlertSaves, () => repos.alerts.setEnabled(a.id, next), a.name)
+                }
+                height={ROW_H}
+                compact
+              />
+            ))}
 
             {/*
               What the BOT interrupts you for, as opposed to what you asked it to watch.
@@ -166,18 +210,17 @@ export default function Alerts() {
                 key={p.kind}
                 label={p.label}
                 caption={() => p.detail}
-                on={pushOn[p.kind] ?? p.enabled}
-                onChange={() => {
-                  const next = !(pushOn[p.kind] ?? p.enabled);
-                  setPushOn((m) => ({ ...m, [p.kind]: next }));
-                  void api
-                    .post('/notifications/prefs', { kind: p.kind, enabled: next })
-                    .catch(() => {
-                      // Put it back. A switch that stays where you left it while the server
-                      // never agreed is the failure this whole screen used to be.
-                      setPushOn((m) => ({ ...m, [p.kind]: !next }));
-                    });
-                }}
+                on={prefOn(p)}
+                onChange={(next) =>
+                  void save(
+                    p.kind,
+                    next,
+                    prefs.settledAt,
+                    setPrefSaves,
+                    () => api.post('/notifications/prefs', { kind: p.kind, enabled: next }),
+                    p.label,
+                  )
+                }
                 height={ROW_H}
                 compact
               />
@@ -189,6 +232,13 @@ export default function Alerts() {
           </ScrollView>
         )}
       </Fill>
+
+      {/* Outside the list, so the reason a switch went back is on screen wherever the list is scrolled. */}
+      {saveError && !signedOut ? (
+        <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s10 }}>
+          {saveError}
+        </Text>
+      ) : null}
 
       {signedOut ? null : (
         <Button

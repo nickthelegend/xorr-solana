@@ -40,9 +40,10 @@ import {
   size,
   space,
 } from '@/ui';
+import { useAuth } from '@/auth/useAuth';
 import { useAsync } from '@/data/useAsync';
-import { useStore } from '@/state/store';
-import { system, type VerifyCheck } from '@/data/system';
+import { useHasHydrated, useStore } from '@/state/store';
+import { system, type VerifyCheck, type VerifyReport } from '@/data/system';
 
 const DOT = 8;
 
@@ -57,12 +58,24 @@ export default function Verify() {
   const goBack = useGoBack();
   /*
    * `owner` is undefined for a signed-out reader, which keeps the anonymous behaviour the note
-   * above describes — the wallet checks skip rather than fail.
+   * above describes — the wallet checks skip rather than fail. Signed in, it is the wallet on file,
+   * or Privy's own address in a session that never ran onboarding.
    */
-  const owner = useStore((s) => s.wallet?.address);
+  const auth = useAuth();
+  const storedOwner = useStore((s) => s.wallet?.address);
+  const owner = storedOwner ?? (auth.authenticated ? auth.address : undefined);
+  /*
+   * Asked once the store has loaded, not before.
+   *
+   * Before hydration the wallet reads as absent, so the screen ran an anonymous report and then a
+   * second one for the wallet a moment later — and kept the first on screen while the second ran:
+   * seconds of rows about nobody, with nothing saying the real answer was still coming. Until the
+   * store has loaded there is no question to ask yet, so the request waits rather than guessing.
+   */
+  const hydrated = useHasHydrated();
   const { data, loading, error, reload } = useAsync(
-    () => system.verifyReport(owner),
-    [owner],
+    () => (hydrated ? system.verifyReport(owner) : new Promise<VerifyReport>(() => undefined)),
+    [owner, hydrated],
   );
 
   return (
@@ -70,19 +83,26 @@ export default function Verify() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Verification</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Each row is a claim, the call that tests it, and what came back. Run against whatever this
-          build is actually pointed at.
+          Each claim, how it was tested, and what came back.
         </Text>
       </View>
 
       <Fill style={{ marginTop: space.s16 }}>
-        {error ? (
+        {/*
+          Loading whenever a report is running, not only before the first one. `useAsync` keeps the
+          previous answer while a new one is fetched, and a report for a different owner is not this
+          one — it is not shown while the right one runs.
+        */}
+        {loading ? (
+          <View style={{ paddingHorizontal: space.gutter, gap: space.s12 }}>
+            <Text variant="secondarySm" color={colors.ink55}>
+              Running every check…
+            </Text>
+            <LoadingRows count={7} height={size.rowLg} />
+          </View>
+        ) : error ? (
           <View style={{ paddingHorizontal: space.gutter }}>
             <ErrorState error={error} onRetry={reload} />
-          </View>
-        ) : loading && !data ? (
-          <View style={{ paddingHorizontal: space.gutter }}>
-            <LoadingRows count={7} height={size.rowLg} />
           </View>
         ) : !data || data.checks.length === 0 ? (
           <EmptyState text="The report came back with nothing in it." />

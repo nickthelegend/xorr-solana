@@ -36,6 +36,7 @@ import {
   space,
 } from '@/ui';
 import { useAsync } from '@/data/useAsync';
+import { errorText } from '@/data/apiError';
 import { system } from '@/data/system';
 import type { AnchorReport, AuditAnchor } from '@/data/types';
 
@@ -47,24 +48,28 @@ const STATE: Record<
   AnchorReport['state'],
   { label: string; tone: string; line: (r: AnchorReport) => string }
 > = {
+  /*
+   * "The chain", never "Base". A fork build anchors to a fork, and the screen said Base whatever
+   * `data.chain` was; the one place the network is named is the check-it-yourself line, from the data.
+   */
   match: {
     label: 'COMMITTED',
     tone: colors.up,
     line: (r) =>
-      `All ${r.entryCount.toLocaleString('en-US')} entries are covered by the hash Base is holding.`,
+      `All ${r.entryCount.toLocaleString('en-US')} entries are covered by the hash the chain is holding.`,
   },
   ahead: {
     label: 'COMMITTED · NEWER ENTRIES',
     tone: colors.up,
     line: (r) =>
       `${(r.entryCount - (r.latest?.entryCount ?? 0)).toLocaleString('en-US')} entries have been ` +
-      'written since the last anchor. The entry that was anchored still hashes to what Base holds.',
+      'written since the last anchor. The entry that was anchored still hashes to what the chain holds.',
   },
   diverged: {
     label: 'DIVERGED',
     tone: colors.down,
     line: () =>
-      'The trail no longer hashes to the value published on Base. Something changed underneath a ' +
+      'The trail no longer hashes to the value published on the chain. Something changed underneath a ' +
       'commitment that was already made.',
   },
   none: {
@@ -79,25 +84,27 @@ export default function AuditAnchorScreen() {
   const goBack = useGoBack();
   const { data, loading, error, reload } = useAsync(() => system.auditAnchor(), []);
   const [busy, setBusy] = React.useState(false);
-  const [note, setNote] = React.useState<string>();
+  const [note, setNote] = React.useState<{ text: string; failed: boolean }>();
 
   async function anchorNow() {
     setBusy(true);
     setNote(undefined);
     try {
       const out = await system.anchorNow();
-      setNote(
-        out.anchored
-          ? `Published entry ${out.entryCount} to Base.`
+      setNote({
+        text: out.anchored
+          ? `Published entry ${out.entryCount} to the chain.`
           : /*
              * "Already anchored" is a success, not a failure, and saying so plainly matters:
              * pressing this twice should read as "there was nothing new to say", never as an error.
              */
             out.detail,
-      );
+        failed: false,
+      });
       reload();
     } catch (e) {
-      setNote(e instanceof Error ? e.message : 'Could not anchor just now.');
+      // The executor's sentence. `e.message` carried the status line and the raw JSON body.
+      setNote({ text: errorText(e), failed: true });
     } finally {
       setBusy(false);
     }
@@ -132,7 +139,7 @@ export default function AuditAnchorScreen() {
             {data.latest ? (
               <SheetCard bordered borderRadius={radius.panel} padding={space.s18}>
                 <Text variant="footnote" color={colors.ink55}>
-                  WHAT BASE HOLDS
+                  WHAT THE CHAIN HOLDS
                 </Text>
                 <Text variant="rowPrimary" style={{ marginTop: space.s6 }}>
                   {shortHash(data.latest.head)}
@@ -185,8 +192,8 @@ export default function AuditAnchorScreen() {
             ) : null}
 
             {note ? (
-              <Text variant="footnote" color={colors.ink55}>
-                {note}
+              <Text variant="footnote" color={note.failed ? colors.down : colors.ink55}>
+                {note.text}
               </Text>
             ) : null}
 

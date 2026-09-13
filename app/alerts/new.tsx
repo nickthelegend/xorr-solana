@@ -99,7 +99,8 @@ export default function NewAlert() {
         kind: 'price',
         symbol: sym,
         name: `${sym} above $${level}`,
-        detail: `Notifies you once when ${sym} trades above $${level}.`,
+        // Once per crossing, not once ever: see the note on the screen below.
+        detail: `Each time ${sym} crosses above $${level}.`,
         config: { above: value },
       });
       goBack();
@@ -118,7 +119,7 @@ export default function NewAlert() {
       </View>
 
       <Text variant="secondary" style={{ marginTop: space.s10 }}>
-        Alerts interrupt you. Circuit breakers stop the bot. This creates the first kind.
+        Tells you when a price crosses a level. It never trades.
       </Text>
 
       {/*
@@ -131,17 +132,21 @@ export default function NewAlert() {
         evaluates an agent alert by looking for an agent and a risk alert by reading the policy,
         so either one would have been created successfully and then failed every time it ran.
 
-        This screen builds a price alert, which is what its own first line has always said: "This
-        creates the first kind." Risk alerts come from the catalogue on /alerts, which the
-        executor knows how to evaluate.
+        This screen builds a price alert, which is what its first line says. Agent and risk
+        alerts need fields this form does not have, so it does not offer to make them half-built.
       */}
       <Fill style={{ marginTop: space.s20, gap: space.s14 }}>
         <Field label="Symbol" value={symbol} onChange={setSymbol} autoCapitalize="characters" />
         <Field label="Above" value={level} onChange={setLevel} keyboard="decimal-pad" />
 
+        {/*
+          What the executor's sweep actually does (server/src/alerts/evaluate.ts): it fires when the price
+          reaches the level, disarms, re-arms once the price is back under it, and fires again on the next
+          crossing. It never turns itself off. This said it did, while /alerts said it goes quiet until the
+          condition clears — the second was the true one.
+        */}
         <NoteStrip kind="acted">
-          The executor watches this, not your phone — so it still fires with the app closed.
-          It notifies once, then turns itself off.
+          Fires each time the price crosses above it, even with the app closed.
         </NoteStrip>
 
         {error ? (

@@ -1,22 +1,29 @@
 /**
- * The venues the delegation may reach, and the tokens it may pull.
+ * The venues this wallet's permission may reach, as granted — read from the contract.
  *
  * This is the allowlist the contract enforces on every single route. It is why "the bot can only
  * trade" is a property and not a promise: a swap to an address that is not in this list reverts,
  * whatever the executor intended and whoever is holding its key.
  *
- * The token list is the other half and is easy to miss. The delegation spends USDC, but a swap has
- * to be able to pull the token it is selling too, so the approval set is wider than the settlement
- * token — and "wider than you would guess" is exactly the kind of fact worth showing rather than
- * summarising.
+ * It showed `/delegation/params`, which is the list the executor would ask a NEW grant to allow.
+ * That is not the list the contract holds for this wallet, and it answers wrongly for anyone who
+ * granted before a venue was added or removed: "anything not here reverts" was only true when the
+ * grant happened to match today's parameters. The venues now come from `/delegation`, which asks the
+ * contract what this wallet actually allowed.
+ *
+ * The tokens it may pull are the standing approvals, and those have their own screen, read from the
+ * chain. The executor's list of what a grant would approve was the same mistake one section down, so
+ * it is a link now rather than a second list.
  *
  * Addresses in full. This is a list someone checks against a block explorer, and six characters of
  * a router address identifies nothing.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
+  Button,
   EmptyState,
   ErrorState,
   Fill,
@@ -32,36 +39,40 @@ import {
 } from '@/ui';
 import { shortAddress } from '@/format';
 import { useAsync } from '@/data/useAsync';
+import { repos } from '@/data';
 import { system } from '@/data/system';
 
 export default function Venues() {
   const goBack = useGoBack();
-  const { data, loading, error, reload } = useAsync(() => system.delegationParams(), []);
+  const router = useRouter();
+  const grant = useAsync(() => repos.wallet.delegation(), []);
+  /* Only for the contract's own address, which the permission does not carry. */
+  const params = useAsync(() => system.delegationParams(), []);
 
-  const venues = data?.venues ?? [];
-  const tokens = data?.tokens ?? [];
+  const venues = grant.data?.venueAllowlist ?? [];
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Venues</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Where a fill is allowed to go. Anything not here reverts on-chain, whatever the executor
-          intended.
+          The only places a trade can fill.
         </Text>
       </View>
 
       <Fill style={{ marginTop: space.s16 }}>
-        {error ? (
+        {grant.error ? (
           <View style={{ paddingHorizontal: space.gutter }}>
-            <ErrorState error={error} onRetry={reload} />
+            <ErrorState error={grant.error} onRetry={grant.reload} />
           </View>
-        ) : loading && !data ? (
+        ) : grant.loading && grant.data === undefined ? (
           <View style={{ paddingHorizontal: space.gutter }}>
             <LoadingRows count={4} height={size.row} />
           </View>
+        ) : !grant.data ? (
+          <EmptyState text="Nothing is granted, so no trade can fill." />
         ) : venues.length === 0 ? (
-          <EmptyState text="No venues are allowlisted, so no route can settle." />
+          <EmptyState text="No venues are allowed, so no trade can fill." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -76,10 +87,11 @@ export default function Venues() {
                 CONTRACT
               </Text>
               <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
-                {shortAddress(data!.contract)}
+                {params.data ? shortAddress(params.data.contract) : params.error ? '—' : '· · ·'}
               </Text>
               <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s6 }}>
-                signs as {shortAddress(data!.delegate)}
+                {/* The key the grant names, which is not always the key the executor signs with today. */}
+                granted to {shortAddress(grant.data.delegatePubkey)}
               </Text>
             </SheetCard>
 
@@ -94,21 +106,12 @@ export default function Venues() {
               </SheetCard>
             ))}
 
-            {tokens.length > 0 ? (
-              <>
-                <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
-                  TOKENS IT MAY PULL
-                </Text>
-                {tokens.map((t) => (
-                  <SheetCard key={t.address} bordered borderRadius={radius.panel} padding={space.s14}>
-                    <Text variant="rowPrimary">{t.symbol}</Text>
-                    <Text variant="footnoteSm" color={colors.ink55} style={{ marginTop: space.s6 }}>
-                      {t.address}
-                    </Text>
-                  </SheetCard>
-                ))}
-              </>
-            ) : null}
+            <Button
+              label="What it may pull"
+              variant="ghost"
+              style={{ marginTop: space.s6 }}
+              onPress={() => router.push('/approvals')}
+            />
           </ScrollView>
         )}
       </Fill>

@@ -5,7 +5,7 @@
  * seen landing; and test funds where this network has them. The network is named here, in a chip, because this is
  * where money moves. A fork build shows no code: a fork shares Base's chain id, so a phone wallet would open on real Base.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useGoBack } from '@/nav/useGoBack';
@@ -35,6 +35,7 @@ import { useAuth } from '@/auth/useAuth';
 import { shortAddress } from '@/format';
 import { activeChain, chainLabel, depositQrNote, depositQrWorks, networkChip } from '@/chain';
 import { useStore } from '@/state/store';
+import { useNow } from '@/state/useNow';
 import { useAsync } from '@/data/useAsync';
 import { usePoll } from '@/data/usePoll';
 import type { PollState } from '@/data/pollState';
@@ -44,6 +45,23 @@ import { faucetStatus, requestFaucet, walletFunds, type FaucetOutcome, type Wall
 /** Often enough to see a deposit land while you wait for it. Each read is two balance calls against the executor's node. */
 const POLL_MS = 5_000;
 const QR_SIZE = 168;
+/** The longest delay a timer takes on every platform: 2³¹ − 1 ms, a little under 25 days. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * When the faucet opens again, in a person's words: "in 22 h", "in 5 min", or a day and a time once it is more than a
+ * day off. It printed `toLocaleString()` — "9/15/2026, 2:07:08 AM", seconds and all. Rounded up, so it never says
+ * sooner than the executor will allow.
+ */
+function againIn(at: number, now: number): string {
+  const ms = at - now;
+  if (ms < 60_000) return 'in under a minute';
+  const minutes = Math.ceil(ms / 60_000);
+  if (minutes < 60) return `in ${minutes} min`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 24) return `in ${hours} h`;
+  return new Date(at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
 
 export default function Deposit() {
   const goBack = useGoBack();
@@ -53,9 +71,22 @@ export default function Deposit() {
   const address = useStore((s) => s.wallet)?.address ?? auth.address;
   const funds = usePoll(walletFunds, POLL_MS);
   const faucet = useAsync(() => faucetStatus(), []);
+  const now = useNow();
   const [copied, setCopied] = useState(false);
   const [asking, setAsking] = useState(false);
   const [outcome, setOutcome] = useState<FaucetOutcome>();
+
+  /*
+   * Ask again when the window opens, so a disabled button does not go on saying "in under a minute" about a wallet the
+   * executor would already serve. The moment is the executor's; this device's clock only runs the timer.
+   */
+  const nextAt = faucet.data?.wallet?.nextAt ?? undefined;
+  const reloadFaucet = faucet.reload;
+  useEffect(() => {
+    if (nextAt === undefined) return;
+    const timer = setTimeout(reloadFaucet, Math.min(Math.max(nextAt - Date.now(), 0) + 1_000, MAX_TIMER_MS));
+    return () => clearTimeout(timer);
+  }, [nextAt, reloadFaucet]);
 
   async function copy() {
     if (!address) return;
@@ -159,7 +190,7 @@ export default function Deposit() {
                 </Text>
               ) : status.wallet?.nextAt ? (
                 <Text variant="footnote" color={colors.ink55} align="center" style={{ marginTop: space.s8 }}>
-                  {`Available again ${new Date(status.wallet.nextAt).toLocaleString()}`}
+                  {`Available again ${againIn(status.wallet.nextAt, now)}`}
                 </Text>
               ) : null}
               <Outcome outcome={outcome} />
@@ -234,4 +265,6 @@ function Outcome({ outcome }: { outcome: FaucetOutcome | undefined }) {
   );
 }
 
-const clock = (at: number | undefined) => (at === undefined ? 'unknown' : new Date(at).toLocaleTimeString());
+/** A time to the minute. Seconds on "last read 2:07:08 AM" were precision nobody reads. */
+const clock = (at: number | undefined) =>
+  at === undefined ? 'unknown' : new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });

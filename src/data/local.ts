@@ -575,7 +575,14 @@ export const LocalRepositories: Repositories = {
       return api.post<Alert>('/alerts', input);
     },
     async setEnabled(id, enabled) {
-      await api.post(`/alerts/${id}`, { enabled }).catch(() => undefined);
+      /*
+       * A save that did not happen reaches the screen that asked for it.
+       *
+       * This was `.catch(() => undefined)`, so a refused or unreachable write resolved exactly like
+       * a saved one: the switch on `/alerts` stayed where the user left it, and the executor went on
+       * evaluating the alert in its old state. `/alerts` now puts the switch back and says why.
+       */
+      await api.post(`/alerts/${id}`, { enabled });
     },
   },
 
@@ -616,10 +623,16 @@ export const LocalRepositories: Repositories = {
       return absentOrThrow(() => api.get<Delegation | null>('/delegation'));
     },
     async privyPolicy(): Promise<PrivyPolicyView | null> {
-      // Null on failure rather than throwing: this is a second opinion about safety, and a screen
-      // that cannot render because the extra reassurance is unavailable is worse than one that
-      // shows the lock it can read.
-      return (await api.get<PrivyPolicyView>('/privy/policy').catch(() => undefined)) ?? null;
+      /*
+       * A failed read THROWS. The executor answers a policy or an error, never null.
+       *
+       * This swallowed every failure into `null`, on the reasoning that a second opinion about
+       * safety should not stop a screen rendering. No screen stopped — each one lost the row
+       * instead: Safety's "Wallet policy" disappeared when the read failed, and `/policy` showed a
+       * header over nothing, its error state unreachable. A lock nobody could read now says so,
+       * on every screen that shows it, beside the locks that could be read.
+       */
+      return api.get<PrivyPolicyView>('/privy/policy');
     },
   },
 };

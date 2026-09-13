@@ -26,13 +26,14 @@ import {
   space,
   signIn,
 } from '@/ui';
-import { capLabel } from '@/state/derived';
+import { capLabel, delegateUnusable, delegationExpired, permissionUnreadable } from '@/state/derived';
 import { useStore } from '@/state/store';
+import { useNow } from '@/state/useNow';
 import { useAllowlist } from '@/wallet/allowlist';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { TONES, useTone } from '@/bot/tone';
-import { errorText } from '@/data/apiError';
+import { NotSignedIn, errorText } from '@/data/apiError';
 
 const SETTING_ROW = 54;
 const TONE_OPTIONS = TONES.map((t) => ({ value: t.id, label: t.label }));
@@ -50,13 +51,45 @@ export default function Settings() {
   // "None" and "—" are claims about the wallet. If we could not reach the executor we have
   // no claim to make, so say that instead.
   const unreachable = walletError !== undefined && !wallet;
-  const delegation = useStore((s) => s.delegation);
-  const killed = useStore((s) => s.killed);
   const recoveryBackedUp = useStore((s) => s.recoveryBackedUp);
   const { addresses, loading: allowlistLoading, error: allowlistError } = useAllowlist();
   const { tone, setTone } = useTone();
 
-  const stopped = killed || delegation?.revoked;
+  /*
+   * The permission, read from the chain when the screen opens — and judged the way Safety judges it.
+   *
+   * Status was `killed || delegation?.revoked` over whatever the store happened to hold: no expiry
+   * check, no delegate-key check, and the `killed` flag that drifts from the chain. So a grant that
+   * had run out, or that named a key the executor no longer signs with, read "Live" here while
+   * Safety, one tap away, said Expired or Disconnected. The same helpers now decide both rows, in the
+   * same order, and the stored delegation is only the answer until the read lands.
+   */
+  const storedDelegation = useStore((s) => s.delegation);
+  const storedKilled = useStore((s) => s.killed);
+  const permission = useAsync(() => repos.wallet.delegation(), []);
+  const delegation = permission.data !== undefined ? permission.data : storedDelegation;
+  const now = useNow();
+  const killed = delegation ? delegation.revoked : storedKilled;
+  const unusable = delegateUnusable(delegation, killed);
+  const expired = delegationExpired(delegation, killed, now);
+  // Signed out is not a failed read: the whole section is left out then, below.
+  const readError = permission.error instanceof NotSignedIn ? undefined : permission.error;
+  const unreadable = permissionUnreadable(readError, delegation);
+  const reading = permission.loading && permission.data === undefined && !storedDelegation;
+
+  const status = reading
+    ? { label: '· · ·', color: colors.ink55 }
+    : unreadable
+      ? { label: '—', color: colors.ink55 }
+      : unusable
+        ? { label: 'Disconnected', color: colors.down }
+        : !delegation
+          ? { label: 'Not granted', color: colors.ink55 }
+          : expired
+            ? { label: 'Expired', color: colors.down }
+            : killed
+              ? { label: 'Stopped', color: colors.ink55 }
+              : { label: 'Live', color: colors.up };
 
   /*
    * Sign out. There was no way to.
@@ -158,7 +191,7 @@ export default function Settings() {
                 "Live · $1,600/day" for a wallet that has granted nothing.
 
                 `cap` is the value the SLIDER is sitting on — a preference the user has not signed —
-                and `stopped` is only true once a delegation exists and is revoked. So before any
+                and `stopped` was only true once a delegation existed and was revoked. So before any
                 grant this section read "Status Live, Daily cap $1,600/day" under a heading that says
                 "What the bot may do". The bot may do nothing; there is no permission. Same mistake as
                 the two dashes on Safety, in the opposite direction: there it said too little, here it
@@ -167,11 +200,8 @@ export default function Settings() {
               <Row
                 title="Status"
                 value={
-                  <Text
-                    variant="rowPrimary"
-                    color={!delegation ? colors.ink55 : stopped ? colors.ink55 : colors.up}
-                  >
-                    {!delegation ? 'Not granted' : stopped ? 'Stopped' : 'Live'}
+                  <Text variant="rowPrimary" color={status.color}>
+                    {status.label}
                   </Text>
                 }
                 height={SETTING_ROW}
@@ -237,10 +267,11 @@ export default function Settings() {
           )}
 
           <Eyebrow small style={{ marginTop: space.s26 }}>
-            Alerts
+            Notifications
           </Eyebrow>
+          {/* Named for where it goes. It read "Notifications" and opened Alerts. */}
           <Row
-            title="Notifications"
+            title="Alerts"
             value={<Text variant="rowPrimary" color={colors.ink55}>Manage</Text>}
             height={SETTING_ROW}
             onPress={() => router.push('/alerts')}

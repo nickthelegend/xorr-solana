@@ -38,6 +38,13 @@ const GROUPS: Group[] = [
   {
     title: 'Markets',
     items: [
+      /*
+        The four that worked and had no way in (docs/qa/SCREENS.md, "Orphaned routes"), titled as each screen titles
+        itself. `/watchlist` calls itself "Markets" too, so its detail is what tells the two apart.
+      */
+      { route: '/markets', title: 'Markets', detail: 'Every class, priced' },
+      { route: '/search', title: 'Search', detail: 'Find a market' },
+      { route: '/watchlist', title: 'Markets', detail: 'Three short lists' },
       { route: '/limit-orders', title: 'Limit orders', detail: 'Take a signed price' },
       { route: '/crosschain', title: 'Cross-chain', detail: 'Quotes to other chains' },
       { route: '/movers', title: 'Movers', detail: 'Biggest moves today' },
@@ -52,6 +59,8 @@ const GROUPS: Group[] = [
   {
     title: 'Activity',
     items: [
+      // The one place a strategy can be paused, and it had no row: only agent pages and strategy alerts led there.
+      { route: '/strategies', title: 'Strategies', detail: 'What runs, and pausing it' },
       { route: '/runs', title: 'Runs', detail: 'Fills and refusals' },
       { route: '/proposals', title: 'Proposals', detail: 'Asked and answered' },
       { route: '/catchup', title: 'Since you looked', detail: 'While you were away' },
@@ -60,12 +69,16 @@ const GROUPS: Group[] = [
       { route: '/roster-compare', title: 'Compare agents', detail: 'Side by side' },
       { route: '/risk', title: 'Risk limits', detail: 'Per agent' },
       { route: '/voice', title: 'Voice', detail: 'How the bot talks' },
+      { route: '/bot/roster', title: 'Agents', detail: 'Hire or let go' },
+      { route: '/bot/leaderboard', title: 'Leaderboard', detail: 'Agents, ranked' },
+      { route: '/briefing', title: 'Briefing', detail: 'Headlines, and what agents did' },
     ],
   },
   {
     title: 'Proof',
     items: [
       { route: '/verify', title: 'Verification', detail: 'Live checks, with evidence' },
+      { route: '/judge', title: 'Check it yourself', detail: 'Every claim, run again' },
       { route: '/sponsors', title: 'How it works', detail: 'The tech behind xorr' },
       { route: '/delegation', title: 'Permission', detail: 'Key, venues, cap, expiry' },
       { route: '/approvals', title: 'Approvals', detail: 'What can be pulled' },
