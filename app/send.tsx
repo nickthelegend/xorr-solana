@@ -10,8 +10,9 @@
  * holds" (false since the Privy pivot, and the opposite of the product's central claim).
  *
  * The withdrawal was never the executor's to make. The owner signs it with their own embedded
- * wallet, the same way they sign the grant, and `useWithdraw` refuses anything not on the
- * allowlist or still inside its cooling-off period before a signature is requested.
+ * wallet, the same way they sign the grant. Since PLAN.md 4.9 the list is the executor's: only the
+ * addresses its clock says are usable can be chosen here, a pending one says when it will be, and
+ * `useWithdraw` asks the executor again immediately before a signature is requested.
  */
 import React, { useMemo, useState } from 'react';
 import { TextInput, View } from 'react-native';
@@ -36,7 +37,7 @@ import {
   space,
   typeScale,
 } from '@/ui';
-import { useAllowlist } from '@/wallet/allowlist';
+import { useAllowlist, usableFromText, usableIn } from '@/wallet/allowlist';
 import { useWithdraw } from '@/wallet/useWithdraw';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
@@ -47,7 +48,7 @@ import { swapSpendable } from '@/state/derived';
 import { transferCall } from '@/wallet/transfer';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { formatEther, type Address } from 'viem';
-import { MINUS } from '@/format';
+import { MINUS, shortAddress } from '@/format';
 import { userSigningNote, userSigningWorks } from '@/chain';
 
 const FIELD_H = 52;
@@ -55,8 +56,15 @@ const FIELD_H = 52;
 export default function Send() {
   const router = useRouter();
   const goBack = useGoBack();
-  const { addresses, pendingFor } = useAllowlist();
-  const [selected, setSelected] = useState(0);
+  const {
+    addresses,
+    usable,
+    pending,
+    serverTime,
+    loading: listLoading,
+    error: listError,
+  } = useAllowlist();
+  const [chosen, setChosen] = useState<string>();
   const [amount, setAmount] = useState('');
   const { withdraw, busy, error, txHash } = useWithdraw();
 
@@ -73,19 +81,26 @@ export default function Send() {
 
   // Cash for USDC and the chain's holding for anything else; undefined while it is unknown, never a zero.
   const held = swapSpendable(balance.data, symbol);
-  const entry = addresses[selected];
+  /*
+   * Only a usable address can be the destination. Chosen by address, not by position, so a list read
+   * again — an address that became usable, or one removed elsewhere — cannot move the selection onto
+   * a different card.
+   */
+  const entry = usable.find((a) => a.address === chosen) ?? usable[0];
   const typed = Number(amount);
   const overBalance = held !== undefined && typed > held;
 
   const problem = useMemo(() => {
+    if (listLoading) return undefined;
+    if (listError && addresses.length === 0) return 'Your allowlist could not be read, so there is nowhere to send to yet.';
     if (addresses.length === 0) return 'Add a destination to your allowlist first.';
+    if (usable.length === 0) return 'None of your addresses is usable yet.';
     if (!entry) return 'Choose a destination.';
-    if (pendingFor(entry)) return 'That address is still cooling off.';
     if (!amount) return undefined;
     if (!(typed > 0)) return 'Enter an amount above zero.';
     if (overBalance) return `That is more ${symbol} than you hold.`;
     return undefined;
-  }, [addresses.length, entry, pendingFor, amount, typed, overBalance, symbol]);
+  }, [listLoading, listError, addresses.length, usable.length, entry, amount, typed, overBalance, symbol]);
 
   /*
    * What the send costs you in gas (PLAN.md 3.13), asked of your own wallet, which pays it — nothing here goes
@@ -113,8 +128,7 @@ export default function Send() {
       ? Number(formatEther(fee.data.gas * fee.data.gasPrice)) * ethPrice.price
       : undefined;
 
-  const ready =
-    userSigningWorks && Boolean(entry) && !pendingFor(entry!) && typed > 0 && !overBalance && Boolean(token);
+  const ready = userSigningWorks && Boolean(entry) && typed > 0 && !overBalance && Boolean(token);
 
   return (
     <Screen>
@@ -131,22 +145,39 @@ export default function Send() {
       <Fill style={{ marginTop: space.s22 }}>
         <Eyebrow small>Destination</Eyebrow>
         <View style={{ gap: space.s10, marginTop: space.s12 }}>
-          {addresses.length === 0 ? (
+          {listLoading ? (
+            <Text variant="secondary" color={colors.ink40}>
+              Reading your allowlist…
+            </Text>
+          ) : listError && addresses.length === 0 ? (
+            // A list that could not be read is not an empty list, and must not look like one.
+            <Text variant="secondary" color={colors.down}>
+              Could not read your allowlist.
+            </Text>
+          ) : addresses.length === 0 ? (
             <Text variant="secondary" color={colors.ink40}>
               Nothing on your allowlist yet.
             </Text>
           ) : (
-            addresses.map((a, i) => (
-              <RadioCard
-                key={a.address}
-                title={a.label}
-                detail={a.address}
-                tag={pendingFor(a) ? 'Pending' : undefined}
-                selected={i === selected}
-                onPress={() => setSelected(i)}
-                showRadio={false}
-              />
-            ))
+            <>
+              {usable.map((a) => (
+                <RadioCard
+                  key={a.address}
+                  title={a.label}
+                  detail={a.address}
+                  selected={a.address === entry?.address}
+                  onPress={() => setChosen(a.address)}
+                  showRadio={false}
+                />
+              ))}
+              {/* Pending addresses are shown, and cannot be chosen: when each becomes usable is the executor's answer. */}
+              {pending.map((a) => (
+                <Text key={a.address} variant="secondarySm" color={colors.ink40}>
+                  {a.label} · {shortAddress(a.address)} — usable from {usableFromText(a)}
+                  {serverTime !== undefined ? `, ${usableIn(a, serverTime)}` : ''}
+                </Text>
+              ))}
+            </>
           )}
         </View>
 
@@ -224,8 +255,8 @@ export default function Send() {
         </View>
 
         <NoteStrip kind="risk" style={{ marginTop: space.s16 }}>
-          A new address takes effect after a cooling-off period. Adding one now does not let you
-          send to it today.
+          A new address takes effect after a cooling-off period, counted by the executor. Adding one
+          now does not let you send to it today.
         </NoteStrip>
 
         {/* Said before the button is pressed, not by a revert afterwards. See src/chain.ts. */}
@@ -259,11 +290,17 @@ export default function Send() {
         style={{ marginBottom: space.s10 }}
       />
       <Button
+        label="Withdraw everything"
+        variant="ghost"
+        onPress={() => router.push('/withdraw-everything')}
+        style={{ marginBottom: space.s10 }}
+      />
+      <Button
         label={busy ? 'Signing…' : 'Send'}
         disabled={!ready || busy}
         onPress={() => {
           if (!token) return;
-          void withdraw({ token, entry, allowlist: addresses, amount }).catch(() => undefined);
+          void withdraw({ token, entry, allowlist: usable, amount }).catch(() => undefined);
         }}
       />
       <Text

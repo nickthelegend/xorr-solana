@@ -49,7 +49,7 @@ export default function Settings() {
   const delegation = useStore((s) => s.delegation);
   const killed = useStore((s) => s.killed);
   const recoveryBackedUp = useStore((s) => s.recoveryBackedUp);
-  const { addresses } = useAllowlist();
+  const { addresses, loading: allowlistLoading, error: allowlistError } = useAllowlist();
   const { tone, setTone } = useTone();
 
   const stopped = killed || delegation?.revoked;
@@ -195,7 +195,14 @@ export default function Settings() {
             title="Withdrawal allowlist"
             value={
               <Text variant="rowPrimary" color={colors.ink55}>
-                {addresses.length === 1 ? '1 address' : `${addresses.length} addresses`}
+                {/* The executor holds the list: a count it has not given is not zero addresses. */}
+                {allowlistError
+                  ? '—'
+                  : allowlistLoading
+                    ? '· · ·'
+                    : addresses.length === 1
+                      ? '1 address'
+                      : `${addresses.length} addresses`}
               </Text>
             }
             height={SETTING_ROW}

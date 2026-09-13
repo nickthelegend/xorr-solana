@@ -54,6 +54,7 @@ const GROUPS: Group[] = [
       { route: '/rates', title: 'Rate', detail: 'What idle cash earns, and who sets it' },
       { route: '/export', title: 'Export', detail: 'The two files an accountant asks for' },
       { route: '/sell-everything', title: 'What would sell', detail: 'A preview of flattening, before you ask' },
+      { route: '/withdraw-everything', title: 'Withdraw everything', detail: 'Sell, leave Aave and send it all to an allowlisted address, step by step' },
     ],
   },
   {

@@ -82,6 +82,7 @@ const UPSTREAM_PATHS = [
   '/agent/positions/close',
   '/yield/supply',
   '/yield/withdraw-calldata',
+  '/withdrawals/', // prepare-all reads a balance from the chain; record waits on a receipt and reads its logs (PLAN.md 4.9)
   '/agents/', // …/:id/backtest — replays a year of history
   '/strategies/backtest',
   '/bot/say',

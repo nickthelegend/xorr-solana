@@ -135,8 +135,8 @@ export default function Safety() {
   const expired = delegationExpired(delegation, killed);
 
 
-  // "2 addresses" was typed in. The allowlist is real and persisted; read it.
-  const { addresses } = useAllowlist();
+  // "2 addresses" was typed in. The allowlist is real and the executor holds it; read it.
+  const { addresses, loading: allowlistLoading, error: allowlistError } = useAllowlist();
 
   /*
    * The second lock, read from the party that enforces it.
@@ -554,7 +554,14 @@ export default function Safety() {
             title="Withdrawal allowlist"
             value={
               <Text variant="rowPrimary" color={colors.ink55}>
-                {addresses.length === 1 ? '1 address' : `${addresses.length} addresses`}
+                {/* A count the executor has not given is not zero addresses. */}
+                {allowlistError
+                  ? '—'
+                  : allowlistLoading
+                    ? '· · ·'
+                    : addresses.length === 1
+                      ? '1 address'
+                      : `${addresses.length} addresses`}
               </Text>
             }
             height={SETTING_ROW}

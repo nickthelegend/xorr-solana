@@ -383,8 +383,13 @@ market.get('/market/tradable', async (c) => {
  */
 market.get('/market/watchable', async (c) => c.json(await functioningHere()));
 
-/** The registry less the equities where they do not function, each at the address a fill would move. */
-async function functioningHere(): Promise<{ symbol: string; address: string; decimals: number }[]> {
+/**
+ * The registry less the equities where they do not function, each at the address a fill would move.
+ *
+ * Exported for `routes/withdrawals.ts`: a withdrawal may move exactly the tokens Send offers, and one list is how the
+ * two cannot disagree about which those are.
+ */
+export async function functioningHere(): Promise<{ symbol: string; address: string; decimals: number }[]> {
   const equitiesOk = await equitiesFunctional();
   return Object.entries(TOKENS)
     .filter(([symbol]) => equitiesOk || !isStock(symbol))

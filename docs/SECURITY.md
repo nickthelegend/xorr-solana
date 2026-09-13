@@ -78,9 +78,59 @@ it prevents. Payout paths should not make the same trade; they are gated by the 
 ## 7. Withdrawal allowlist
 
 Withdrawals may only target an allowlisted address, and a newly added address is unusable for 24
-hours (`src/wallet/allowlist.ts`). This is what stops a stolen unlocked phone from adding an
-address and draining the wallet in one session. **The cooling-off is currently client-side; it must
-move to the server before real value flows.** Recorded as a gap.
+hours. This is what stops a stolen unlocked phone from adding an address and draining the wallet in
+one session.
+
+**The list and its clock are the executor's** (PLAN.md 4.9: `server/src/withdrawals/allowlist.ts`,
+migration `022-withdrawal-addresses.sql`, routes in `server/src/routes/withdrawals.ts`). It used to be
+AsyncStorage on the phone, with the phone's clock deciding when 24 hours had passed — so the device
+the rule guards against decided when the rule ended, and moving its date forward a day removed it.
+Now:
+
+- Adding an address writes `usable_at = now() + 24 hours` on the database's clock, and every check
+  compares `usable_at <= now()` on the same clock. Nothing a client sends moves either end, and the
+  24 hours are a constant, not a setting. The app is handed `usable` and `usableAt` and never compares
+  a time with its own clock.
+- Removal takes effect in the statement that finds the row. The row is kept, with `removed_at`, so the
+  book still says which address was usable when; adding the address back is a new row with a new 24
+  hours. Adding an address that is already listed is refused, and neither restarts nor ends its wait.
+- Every addition and removal is appended to the hash-chained audit trail in the same transaction, and
+  pushed to the owner's devices under a kind with no mute switch: a cooling-off only helps someone who
+  hears about the new address while it runs.
+- Rows are scoped to the chain (`xorr.chain_key`), so an address allowlisted against a fork is not
+  allowlisted on Base, although the two share a chain id.
+
+**Where it is enforced**
+
+- The app asks `POST /withdrawal-addresses/check` immediately before it requests a signature for a send
+  (`src/wallet/useWithdraw.ts`), so an address still cooling off — or removed from another device while
+  a screen was open — is refused before anything is signed. The screens offer only usable addresses
+  and say when a pending one becomes usable, and the check does not rely on them.
+- The executor applies the same check to anything it prepares. `POST /withdrawals/prepare-all`, the
+  whole-balance transfer that "withdraw everything" ends with, refuses before it reads anything else. A
+  refusal at either point is written to the trail as a `block`.
+- `POST /withdrawals/record` reads back each transaction the owner reports and writes every outgoing
+  transfer to the trail, with whether its destination was usable. One that was not is written as a
+  `risk`: the app will not ask for that signature, so it was signed somewhere else.
+- The app builds the transfer it signs from the address the person chose, and it checks what the
+  executor prepares (`src/wallet/withdrawEverything.ts`): a transfer is signed only if it moves exactly
+  the prepared amount to exactly the chosen address, and an Aave exit only if it is addressed to the
+  Aave pool, for the whole position, paying the owner. The executor cannot redirect a withdrawal by
+  rewriting calldata.
+- "Withdraw everything" runs in one order — sells through the permission's close path, then the
+  owner-signed Aave exit, then the owner-signed transfer — and stops at the first step that fails.
+
+**What this does not stop — recorded as gaps**
+
+- The owner's key can still sign a transfer anywhere. The check is the app asking the executor, not the
+  chain or the wallet refusing, so a tampered build, or another client holding the same key, goes
+  around it. Binding the key itself needs a destination policy on the user's own Privy wallet
+  (PLAN.md 4.13), which does not exist yet.
+- The list now lives with the executor, so a compromised executor could insert an address and mark it
+  usable. The owner would still have to choose it and sign the transfer — the app shows the address and
+  Privy's sheet shows the recipient — and the insertion would have to bypass the trail to go
+  unrecorded. Having the owner's wallet sign each entry, so the app can check the list without trusting
+  the server that stores it, would close this. It is not done.
 
 ## 8. Network
 

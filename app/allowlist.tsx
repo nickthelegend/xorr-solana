@@ -1,12 +1,13 @@
 /**
- * Withdrawal allowlist — PLAN.md 10.6 / 12.21 [G31].
+ * Withdrawal allowlist — PLAN.md 10.6 / 12.21 [G31], held by the executor since 4.9.
  *
  * Screen 20 shows "2 addresses" with nothing behind it. Adding one starts a cooling-off
  * period, so an attacker who gets the phone still cannot move funds today.
  *
- * "Add an address" had no `onPress`. It does now — the entry is validated, persisted, and
- * starts its cooling-off clock, which is what makes the "Pending" state on the row below
- * mean something.
+ * "Add an address" had no `onPress`. It does now — and since 4.9 the entry is the executor's: it
+ * is stored there, its cooling-off is counted by the executor's clock rather than this phone's, and
+ * "Pending" on a row is the executor's answer with the moment it ends beside it. Removing an address
+ * takes effect at once, everywhere; adding it back starts the wait again.
  */
 import React, { useState } from 'react';
 import { TextInput, View } from 'react-native';
@@ -14,8 +15,11 @@ import { useGoBack } from '@/nav/useGoBack';
 import {
   BackButton,
   EmptyState,
+  ErrorState,
   Button,
   Fill,
+  LoadingRows,
+  Press,
   Price,
   Row,
   Screen,
@@ -28,7 +32,15 @@ import {
   space,
   typeScale,
 } from '@/ui';
-import { COOLING_OFF_HOURS, isValidAddress, normaliseAddress, useAllowlist } from '@/wallet/allowlist';
+import { errorText } from '@/data/apiError';
+import {
+  isValidAddress,
+  normaliseAddress,
+  sameAddress,
+  usableFromText,
+  usableIn,
+  useAllowlist,
+} from '@/wallet/allowlist';
 
 /*
  * The validator lives in the store, and there is exactly one of it.
@@ -43,15 +55,21 @@ const FIELD_H = 48;
 
 export default function Allowlist() {
   const goBack = useGoBack();
-  const { addresses, add, pendingFor } = useAllowlist();
+  const { addresses, add, remove, pendingFor, coolingOffHours, serverTime, loading, error, reload } = useAllowlist();
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState('');
   const [address, setAddress] = useState('');
+  const [saving, setSaving] = useState(false);
+  /** The executor's own sentence when it refused an add, or the reason it could not be asked. */
+  const [refused, setRefused] = useState<string>();
+  /** The address whose Remove was pressed once. Only a second press on the same row removes it. */
+  const [removing, setRemoving] = useState<string>();
+  const [removeError, setRemoveError] = useState<string>();
 
   const trimmed = normaliseAddress(address);
-  // Case-insensitively, because `0xAB…` and `0xab…` are one address — and the store dedupes that
+  // Case-insensitively, because `0xAB…` and `0xab…` are one address — and the executor dedupes that
   // way, so an exact-match check here disagreed with the refusal the user actually got.
-  const duplicate = addresses.some((a) => a.address.toLowerCase() === trimmed.toLowerCase());
+  const duplicate = addresses.some((a) => sameAddress(a.address, trimmed));
   const valid = isValidAddress(trimmed) && label.trim().length > 0 && !duplicate;
 
   const problem = !trimmed
@@ -62,6 +80,38 @@ export default function Allowlist() {
         ? undefined
         : 'That is not a Base address. It should start 0x and be 42 characters.';
 
+  // The number is the executor's. Until it has answered, the sentence does without one rather than guess.
+  const wait = coolingOffHours === undefined ? 'after a cooling-off period' : `${coolingOffHours} hours after you add it`;
+
+  async function save() {
+    setSaving(true);
+    setRefused(undefined);
+    try {
+      await add(label.trim(), trimmed);
+      setLabel('');
+      setAddress('');
+      setAdding(false);
+    } catch (e) {
+      setRefused(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function pressRemove(target: string) {
+    if (removing !== target) {
+      setRemoving(target);
+      setRemoveError(undefined);
+      return;
+    }
+    setRemoving(undefined);
+    try {
+      await remove(target);
+    } catch (e) {
+      setRemoveError(errorText(e));
+    }
+  }
+
   return (
     <Screen>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8 }}>
@@ -70,39 +120,70 @@ export default function Allowlist() {
       </View>
 
       <Text variant="secondary" style={{ marginTop: space.s10 }}>
-        The only addresses funds can leave to. A new one becomes usable {COOLING_OFF_HOURS}{' '}
-        hours after you add it.
+        The only addresses funds can leave to. A new one becomes usable {wait}, by the executor&apos;s
+        clock rather than this phone&apos;s.
       </Text>
 
       <Fill style={{ marginTop: space.s20 }}>
-        {/*
-          An empty list rendered as an empty screen: a title, a sentence and then nothing at all
-          down to the button. Every other list in the app says why it is empty; this one, which is
-          empty for every new wallet, said nothing.
-        */}
-        {addresses.length === 0 && !adding ? (
+        {error && addresses.length === 0 ? (
+          <ErrorState error={error} onRetry={reload} />
+        ) : loading ? (
+          <LoadingRows count={2} height={68} />
+        ) : addresses.length === 0 && !adding ? (
+          /*
+            An empty list rendered as an empty screen: a title, a sentence and then nothing at all
+            down to the button. Every other list in the app says why it is empty; this one, which is
+            empty for every new wallet, said nothing.
+          */
           <EmptyState
             text="No addresses yet. Until you add one, funds cannot leave this wallet at all — which is the point."
             actionLabel="Add an address"
             onAction={() => setAdding(true)}
           />
         ) : null}
+
         {addresses.map((a) => {
           const pending = pendingFor(a);
+          const confirming = removing === a.address;
           return (
             <Row
               key={a.address}
               title={a.label}
-              secondary={a.address}
+              secondary={
+                pending
+                  ? `Usable from ${usableFromText(a)}${serverTime !== undefined ? `, ${usableIn(a, serverTime)}` : ''}`
+                  : a.address
+              }
               value={
-                <Price color={pending ? colors.warn : colors.up}>
-                  {pending ? 'Pending' : 'Active'}
-                </Price>
+                <Price color={pending ? colors.warn : colors.up}>{pending ? 'Pending' : 'Active'}</Price>
+              }
+              right={
+                <Press
+                  onPress={() => void pressRemove(a.address)}
+                  accessibilityRole="button"
+                  accessibilityLabel={confirming ? `Confirm removing ${a.label}` : `Remove ${a.label}`}
+                  style={{ paddingVertical: space.s8, paddingLeft: space.s10 }}
+                >
+                  <Text variant="secondarySm" color={confirming ? colors.down : colors.ink45}>
+                    {confirming ? 'Confirm' : 'Remove'}
+                  </Text>
+                </Press>
               }
               height={68}
             />
           );
         })}
+
+        {removing ? (
+          <Text variant="secondarySm" color={colors.ink45} style={{ marginTop: space.s8 }}>
+            Removing takes effect at once. Adding the address back starts its cooling-off again.
+          </Text>
+        ) : null}
+        {removeError ? (
+          <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s8 }}>
+            {removeError}
+          </Text>
+        ) : null}
 
         {adding ? (
           <SheetCard
@@ -124,22 +205,18 @@ export default function Allowlist() {
               label="Base address"
               mono
             />
-            {problem ? (
+            {problem || refused ? (
               <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s8 }}>
-                {problem}
+                {problem ?? refused}
               </Text>
             ) : null}
             <Button
-              label={`Add — usable in ${COOLING_OFF_HOURS} hours`}
+              label={coolingOffHours === undefined ? 'Add' : `Add — usable in ${coolingOffHours} hours`}
               disabled={!valid}
+              loading={saving}
               height={size.ghostSm}
               style={{ marginTop: space.s14 }}
-              onPress={() => {
-                add(label.trim(), trimmed);
-                setLabel('');
-                setAddress('');
-                setAdding(false);
-              }}
+              onPress={save}
             />
           </SheetCard>
         ) : null}
@@ -148,7 +225,10 @@ export default function Allowlist() {
       <Button
         label={adding ? 'Cancel' : 'Add an address'}
         variant="ghost"
-        onPress={() => setAdding((v) => !v)}
+        onPress={() => {
+          setRefused(undefined);
+          setAdding((v) => !v);
+        }}
       />
     </Screen>
   );
