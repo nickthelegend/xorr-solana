@@ -93,7 +93,8 @@ export default function Swap() {
   const balance = useAsync(() => repos.portfolio.balance(), []);
   const signedOut = useSignedOut();
   const spendable = swapSpendable(balance.data, pay);
-  const balanceUnread = balance.data === undefined && balance.error !== undefined;
+  // A read that failed for someone signed in. Signed out there is no balance to show, and the button already asks for a sign-in.
+  const balanceUnread = !signedOut && balance.data === undefined && balance.error !== undefined;
 
   const typed = Number(amount) || 0;
   const quote = useSwapQuote(pay, receive, typed, slippagePct);
@@ -197,18 +198,20 @@ export default function Swap() {
           <View style={{ backgroundColor: colors.surface, borderRadius: radius.panelXl, padding: CARD_PAD, gap: space.s12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Eyebrow small>You pay</Eyebrow>
-              <Press
-                onPress={balanceUnread ? () => balance.reload() : undefined}
-                accessibilityRole={balanceUnread ? 'button' : undefined}
-                accessibilityLabel={balanceUnread ? `Retry reading your ${pay} balance` : undefined}
-              >
-                <Text variant="footnote" color={colors.ink55}>
-                  {/* A dash while the balance loads, never a zero: see the note on `swapSpendable`. An em dash, not a minus sign, which read as a negative balance. */}
-                  {balanceUnread
-                    ? 'Balance — · tap to retry'
-                    : `Balance ${spendable === undefined ? '—' : units(spendable)}`}
-                </Text>
-              </Press>
+              {signedOut ? null : (
+                <Press
+                  onPress={balanceUnread ? () => balance.reload() : undefined}
+                  accessibilityRole={balanceUnread ? 'button' : undefined}
+                  accessibilityLabel={balanceUnread ? `Retry reading your ${pay} balance` : undefined}
+                >
+                  <Text variant="footnote" color={colors.ink55}>
+                    {/* A dash while the balance loads, never a zero: see the note on `swapSpendable`. An em dash, not a minus sign, which read as a negative balance. */}
+                    {balanceUnread
+                      ? 'Balance — · tap to retry'
+                      : `Balance ${spendable === undefined ? '—' : units(spendable)}`}
+                  </Text>
+                </Press>
+              )}
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flexShrink: 1 }}>

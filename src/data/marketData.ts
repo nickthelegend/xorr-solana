@@ -203,8 +203,8 @@ const DAY_MS = 24 * HOUR_MS;
  * How many days of history each timeframe asks for when it is read as a WINDOW, folded to the 12
  * candles the design draws. [G8]: the handoff shipped one 12-bar series and the pills were decorative.
  *
- * This is what `repos.markets.candles` means by a timeframe, and Portfolio reads it that way: `4H` is
- * its week of closes, `1H` its day. A pill that promises candles of a length reads `fetchChartCandles`
+ * This is what `repos.markets.candles` means by a timeframe, and Portfolio reads it that way: `1H` is the
+ * day of closes on each position card. A pill that promises candles of a length reads `fetchChartCandles`
  * below, and a range that promises a span reads `fetchHistory`.
  *
  * `15m` asks for nothing. It fetched the same day as `1H` under another name, so the two pills drew

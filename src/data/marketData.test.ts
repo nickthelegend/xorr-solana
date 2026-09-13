@@ -174,7 +174,7 @@ describe('what each pill and range asks the executor for', () => {
     expect(ohlcDays()).toEqual([]);
   });
 
-  it('keeps the repository’s windows: a day for 1H and a week for 4H, which Portfolio reads', async () => {
+  it('keeps the repository’s windows: a day for 1H, which Portfolio’s cards read, and a week for 4H', async () => {
     await fetchCandles('BTC', '1H');
     await fetchCandles('BTC', '4H');
     expect(ohlcDays()).toEqual([1, 7]);

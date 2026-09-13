@@ -19,6 +19,7 @@ import {
   Fill,
   Keypad,
   Pill,
+  Press,
   Price,
   Screen,
   Segmented,
@@ -101,9 +102,11 @@ export default function OrderTicket() {
    * the over-balance guard, and could only fail at the venue. `cash` is the number that can
    * actually be spent, and it is the one the home screen's "Available to trade" row already uses.
    */
-  const { data: bal } = useAsync(() => repos.portfolio.balance(), []);
+  const balanceRead = useAsync(() => repos.portfolio.balance(), []);
   const signedOut = useSignedOut();
-  const availableUsd = bal?.cash;
+  const availableUsd = balanceRead.data?.cash;
+  // A cash read that failed, for someone signed in. Max stays off without the number, and that should not be a mystery.
+  const cashUnread = !signedOut && balanceRead.data === undefined && balanceRead.error !== undefined;
 
   // A SELL is not a spend. It reduces a position the user already holds, so what caps it is
   // the position, not the balance — and it goes through the same close path screen 22 uses
@@ -364,6 +367,19 @@ export default function OrderTicket() {
         >
           {limit.reason}
         </Text>
+      ) : null}
+      {side === 'buy' && cashUnread && tradable && filled === undefined ? (
+        <Press
+          onPress={balanceRead.reload}
+          accessibilityRole="button"
+          accessibilityLabel="Read your balance again"
+          hitHeight={size.hit}
+          style={{ marginTop: space.s10, alignSelf: 'center' }}
+        >
+          <Text variant="footnote" color={colors.sheet.muted} align="center">
+            Your balance did not load. Try again ›
+          </Text>
+        </Press>
       ) : null}
 
     </Screen>

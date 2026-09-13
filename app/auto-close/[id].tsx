@@ -54,7 +54,7 @@ import {
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
-import { NotSignedIn, errorText, isRetryable } from '@/data/apiError';
+import { NotSignedIn, errorRef, errorText, isRetryable } from '@/data/apiError';
 import { chartSeries } from '@/markets/series';
 import { useLiveRead } from '@/markets/useLiveRead';
 
@@ -474,9 +474,13 @@ function SheetNote({ text }: { text: string }) {
   );
 }
 
-/** `ErrorState`'s rules — signed out asks for a sign-in, and only a retryable failure offers a retry — in sheet ink. */
+/**
+ * `ErrorState`'s rules — signed out asks for a sign-in, a server fault or a timeout carries its request's
+ * reference, and only a retryable failure offers a retry — in sheet ink.
+ */
 function SheetFailure({ error, onRetry }: { error: Error; onRetry: () => void }) {
   const signedOut = error instanceof NotSignedIn;
+  const ref = errorRef(error);
   return (
     <View style={{ paddingVertical: space.s30, gap: space.s14, alignItems: 'center' }}>
       <Text variant="rowPrimary" color={colors.sheet.ink} align="center">
@@ -487,6 +491,11 @@ function SheetFailure({ error, onRetry }: { error: Error; onRetry: () => void })
           {errorText(error)}
         </Text>
       )}
+      {ref ? (
+        <Text variant="footnote" color={colors.sheet.muted} selectable>
+          {`Ref ${ref}`}
+        </Text>
+      ) : null}
       {signedOut || isRetryable(error) ? (
         <Button
           label={signedOut ? 'Sign in' : 'Try again'}
