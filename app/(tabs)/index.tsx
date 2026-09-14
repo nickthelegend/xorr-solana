@@ -1,17 +1,18 @@
 /**
  * Home — the reference video's layout, on this app's theme (2026-09-12).
  *
- * Top to bottom: who is signed in — the Privy wallet, tap for the profile; ONE balance — tap for the
- * portfolio, where your coins, positions, profit, cash and earnings live; for a wallet that cannot trade
- * yet, the three steps it has left (FEATURES.md #14); and a sheet with the agents, today's gainers, and —
- * since 2026-09-13 — tokenized stocks and futures. A single figure on top is deliberate: the breakdown
- * belongs to the portfolio.
+ * Top to bottom: who is signed in — the Privy wallet, tap for the profile; ONE balance — its name opens
+ * the portfolio, where your coins, positions, profit, cash and earnings live, and a tap on the figure
+ * hides every amount in the app (FEATURES.md #47); for a wallet that cannot trade yet, the three steps it
+ * has left (FEATURES.md #14); and a sheet with the agents, today's gainers, and — since 2026-09-13 —
+ * tokenized stocks and futures. A single figure on top is deliberate: the breakdown belongs to the
+ * portfolio.
  *
  * Everything arrives the way the reference's screens do, through `<Rise>` and `<RollingNumber>`, so
  * reduced motion turns it off.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { AccessibilityInfo, ScrollView, View } from 'react-native';
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { agentGradient, assetGradient } from '@/design/gradients';
 import { Icon } from '@/design/Icon';
@@ -43,6 +44,7 @@ import {
 import { Rise } from '@/ui/Rise';
 import { RollingNumber } from '@/ui/RollingNumber';
 import { STAGGER } from '@/ui/motion';
+import { selectionTick } from '@/ui/haptics';
 import { repos } from '@/data';
 import { NotSignedIn, isRetryable } from '@/data/apiError';
 import { system, type Limits } from '@/data/system';
@@ -323,6 +325,19 @@ export default function Home() {
     }, [reloadBalance, reloadLimits, reloadPermission, reloadStrategies]),
   );
 
+  /*
+   * A tap on the figure hides every amount in the app, and the next tap shows them (FEATURES.md #47). The choice is the
+   * device's and outlives a sign-out; `Price` and `RollingNumber` read it wherever a figure is drawn.
+   */
+  const balancesHidden = useStore((s) => s.balancesHidden);
+  const toggleBalancesHidden = useStore((s) => s.toggleBalancesHidden);
+  function toggleHidden() {
+    selectionTick();
+    toggleBalancesHidden();
+    // Said as well as shown: the figure only turns to dots, and a screen reader cannot see that happen.
+    AccessibilityInfo.announceForAccessibility(useStore.getState().balancesHidden ? 'Balance hidden' : 'Balance shown');
+  }
+
   /* The Privy account, named by its email when Privy has one, and by its wallet otherwise. */
   const address = wallet?.address;
   const title = email ?? (address ? shortAddress(address) : 'Wallet');
@@ -376,16 +391,32 @@ export default function Home() {
 
       <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
         <Rise index={1} style={{ marginTop: space.s26, paddingHorizontal: space.gutter }}>
+          {/*
+            Two targets since the figure became the switch that hides every amount (FEATURES.md #47): the name and its
+            chevron still open the portfolio, and the figure hides and shows.
+          */}
           <Press
             onPress={() => router.push('/portfolio')}
             accessibilityRole="button"
-            accessibilityLabel={`Total balance ${total !== null ? money(total) : 'not available'}. Opens your portfolio.`}
+            accessibilityLabel="Total balance. Opens your portfolio."
+            hitHeight={typeScale.eyebrow.lineHeight}
+            style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: space.s6 }}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s6 }}>
-              <Eyebrow>Total balance</Eyebrow>
-              <Icon name="chevron" size={11} color={colors.ink40} />
-            </View>
-            {/* Rolls in once it is real. Dots while on its way, a dash when unreadable — never animated. */}
+            <Eyebrow>Total balance</Eyebrow>
+            <Icon name="chevron" size={11} color={colors.ink40} />
+          </Press>
+          <Press
+            onPress={toggleHidden}
+            accessibilityRole="button"
+            accessibilityLabel={
+              balancesHidden ? 'Balance hidden' : `Balance shown, ${total !== null ? money(total) : 'not available'}`
+            }
+            accessibilityHint={balancesHidden ? 'Shows every amount.' : 'Hides every amount.'}
+          >
+            {/*
+              Rolls in once it is real, a placeholder while on its way, a dash when unreadable — never animated. Hidden,
+              it is four dots, as every amount is.
+            */}
             {total !== null ? (
               <RollingNumber
                 value={money(total)}

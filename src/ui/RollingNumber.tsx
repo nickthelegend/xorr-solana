@@ -20,6 +20,9 @@
  * Aave sheet read "$12" for a price of $126.48. A shared value runs on the UI thread and no render can
  * interrupt it, and a character that mounts after the ripple — a wider figure — reads a finished clock
  * and is simply there.
+ *
+ * While balances are hidden (FEATURES.md #47) the figure is masked whole before it is split, and the mask
+ * is what rolls. Masked a character at a time, no character would hold a dollar figure to mask.
  */
 import React, { useEffect, useState } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
@@ -32,8 +35,9 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
+import { maskFigure, maskMode, spokenFigure } from './mask';
 import { easeOut, useReducedMotion } from './motion';
-import { Price, type PriceProps } from './Text';
+import { Price, useBalancesHidden, type PriceProps } from './Text';
 import { duration } from './tokens';
 
 /** Between one character starting and the next — a left-to-right ripple across the figure. */
@@ -51,8 +55,10 @@ export interface RollingNumberProps extends Omit<PriceProps, 'children'> {
 
 export function RollingNumber({ value, delay = 0, containerStyle, ...price }: RollingNumberProps) {
   const reduced = useReducedMotion();
+  const hidden = useBalancesHidden();
+  const shown = maskFigure(value, maskMode(hidden, price.variant, price.mask));
   /* The ripple's length is set by the figure first shown; `slot` covers a wider one later. */
-  const [last] = useState(() => Math.max(0, Array.from(value).length - 1));
+  const [last] = useState(() => Math.max(0, Array.from(shown).length - 1));
   const span = duration.enter + last * DIGIT_STAGGER;
   /* Milliseconds along the ripple. */
   const clock = useSharedValue(0);
@@ -78,10 +84,10 @@ export function RollingNumber({ value, delay = 0, containerStyle, ...price }: Ro
     <View
       accessible
       accessibilityRole="text"
-      accessibilityLabel={value}
+      accessibilityLabel={shown === value ? value : spokenFigure(shown)}
       style={[{ flexDirection: 'row', overflow: 'hidden' }, containerStyle]}
     >
-      {Array.from(value).map((ch, i) => (
+      {Array.from(shown).map((ch, i) => (
         // Keyed by position: a ticking price changes a character in place instead of remounting it.
         <RollChar key={i} clock={clock} slot={Math.min(i, last)} price={price}>
           {ch}
@@ -110,7 +116,8 @@ function RollChar({
   });
   return (
     <Animated.View style={style}>
-      <Price {...price} accessible={false}>
+      {/* Masked with the whole figure already, if it is to be: one character on its own is never masked again. */}
+      <Price {...price} mask={false} accessible={false}>
         {children}
       </Price>
     </Animated.View>

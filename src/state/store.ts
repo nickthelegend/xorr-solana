@@ -109,10 +109,18 @@ type ViewsSlice = {
   lbSort: number;
   btLook: number;
   btCapital: number;
+  /**
+   * Every amount on every screen masked, from a tap on Home's balance (FEATURES.md #47).
+   *
+   * The device's, not the person's, so it is not in `ACCOUNT_KEYS` and signing out leaves it as it was: it is about who
+   * can see this phone, not whose wallet is on it.
+   */
+  balancesHidden: boolean;
   setActFilter: (i: number) => void;
   setLbSort: (i: number) => void;
   setBtLook: (i: number) => void;
   bumpBtCapital: (dir: 1 | -1) => void;
+  toggleBalancesHidden: () => void;
 };
 
 // ── Wallet & delegation (the pivot) ──
@@ -265,11 +273,13 @@ export const useStore = create<Store>()(
       lbSort: 0,
       btLook: 1,
       btCapital: 5000,
+      balancesHidden: false,
       setActFilter: (actFilter) => set({ actFilter }),
       setLbSort: (lbSort) => set({ lbSort }),
       setBtLook: (btLook) => set({ btLook }),
       bumpBtCapital: (dir) =>
         set((s) => ({ btCapital: clamp(s.btCapital + dir * 1000, 1000, 50000) })),
+      toggleBalancesHidden: () => set((s) => ({ balancesHidden: !s.balancesHidden })),
 
       // ── wallet & delegation ──
       wallet: null,
@@ -303,6 +313,7 @@ export const useStore = create<Store>()(
         lbSort: s.lbSort,
         btLook: s.btLook,
         btCapital: s.btCapital,
+        balancesHidden: s.balancesHidden,
         goals: s.goals,
         riskQ: s.riskQ,
         weights: s.weights,

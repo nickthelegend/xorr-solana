@@ -12,7 +12,8 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { Press } from './Press';
 import { Placeholder } from './States';
-import { Price, Text, pnlTone } from './Text';
+import { Price, Text, pnlTone, useBalancesHidden } from './Text';
+import { maskFigure, maskMode, spokenFigure } from './mask';
 import { AreaChart } from './charts/AreaChart';
 import { chart, colors, radius, space } from './tokens';
 
@@ -83,6 +84,9 @@ export function PositionCard({
 }: PositionCardProps) {
   const [open, setOpen] = useState(false);
   const tone = pnlTone(pnlValue);
+  /* While balances are hidden, the card's own words hide with its figures: its label, and the levels on the chart. */
+  const hidden = useBalancesHidden();
+  const dollars = maskMode(hidden, undefined, undefined);
 
   /*
    * One vertical scale for the line AND the levels, so a stop drawn under the chart really is below
@@ -104,7 +108,7 @@ export function PositionCard({
     <Press
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${symbol} ${side}. ${price}. ${pnl}, ${pnlPct}.`}
+      accessibilityLabel={spokenFigure(maskFigure(`${symbol} ${side}. ${price}. ${pnl}, ${pnlPct}.`, dollars))}
       style={{ borderRadius: radius.panel, backgroundColor: colors.surfaceAlt, padding: space.s16, gap: space.s14 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -169,7 +173,7 @@ export function PositionCard({
                   }}
                 >
                   <Text variant="chipSm" color={LEVEL_TONE[level.tone]} numberOfLines={1}>
-                    {`${level.label} ${level.formatted}`}
+                    {maskFigure(`${level.label} ${level.formatted}`, dollars)}
                   </Text>
                 </View>
               </React.Fragment>

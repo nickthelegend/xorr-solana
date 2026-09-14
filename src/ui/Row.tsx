@@ -12,8 +12,9 @@
  */
 import React from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { maskFigure, maskMode } from './mask';
 import { Press } from './Press';
-import { Text, Price, type PriceTone } from './Text';
+import { Text, Price, useBalancesHidden, type PriceTone } from './Text';
 import { colors, divider as dividerStyle, size, space } from './tokens';
 
 export interface RowProps {
@@ -67,6 +68,12 @@ export function Row({
   style,
   testID,
 }: RowProps) {
+  /*
+   * A secondary line can carry money of its own — a holding's value, "avg $2,410.00" — so while balances are
+   * hidden (FEATURES.md #47) its dollar figures hide with the value column's, which `Price` masks.
+   */
+  const hidden = useBalancesHidden();
+  const dollars = maskMode(hidden, undefined, undefined);
   const body = children ?? (
     <>
       {left}
@@ -90,7 +97,7 @@ export function Row({
               numberOfLines={1}
               style={{ marginTop: space.s2 }}
             >
-              {secondary}
+              {maskFigure(secondary, dollars)}
             </Text>
           ) : (
             secondary

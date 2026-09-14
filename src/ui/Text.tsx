@@ -21,6 +21,13 @@ import {
 } from 'react-native';
 import { type as typeScale, variantColor, type TypeVariant } from './type';
 import { colors } from './tokens';
+import { figureText, maskFigure, maskMode, spokenFigure } from './mask';
+/*
+ * App state, read by the design system in this one place: whether balances are hidden (FEATURES.md #47). A tap on Home
+ * has to reach every figure on every screen at once, and figures are drawn here. A provider would need the root layout,
+ * and a prop would need every screen that shows money.
+ */
+import { useStore } from '@/state/store';
 
 /** Forced tabular figures. Applied last so a caller's style cannot drop them. */
 const lockTabular: TextStyle = { fontVariant: ['tabular-nums'] };
@@ -131,6 +138,11 @@ export const Value = React.forwardRef<RNText, ValueProps>(function Value(
 export interface PriceProps extends TextProps {
   /** P&L tone. Green and red mean profit and loss — nothing else ever sets this. */
   tone?: PriceTone;
+  /**
+   * How this figure hides while balances are hidden (FEATURES.md #47, `mask.ts`). Unsaid, the dollar figures in it are
+   * masked; `true` masks all of it, for money written without a dollar sign; `false` masks none of it.
+   */
+  mask?: boolean;
 }
 
 /**
@@ -147,6 +159,11 @@ export function pnlTone(value: number): PriceTone {
   return 'neutral';
 }
 
+/** Whether balances are hidden — for a figure drawn outside `Price` that has to hide along with it. */
+export function useBalancesHidden(): boolean {
+  return useStore((s) => s.balancesHidden);
+}
+
 /**
  * A price or a P&L figure. `tone` is the only sanctioned way to colour text green or red.
  *
@@ -154,18 +171,31 @@ export function pnlTone(value: number): PriceTone {
  * explicit fraction digits, and U+2212 rather than a hyphen for negatives. This component
  * does not format — it would have to guess the fraction digits, and a guess in a price
  * column is worse than no help at all.
+ *
+ * While balances are hidden its dollar figures are masked, and a screen reader hears "hidden"
+ * where they were (FEATURES.md #47). Children with an element among them are drawn as they
+ * came: there is no figure in them to read.
  */
 export const Price = React.forwardRef<RNText, PriceProps>(function Price(
-  { variant = 'rowPrimary', tone = 'neutral', color, style, ...rest },
+  { variant = 'rowPrimary', tone = 'neutral', color, style, mask, children, accessibilityLabel, ...rest },
   ref,
 ) {
+  const hidden = useBalancesHidden();
+  const mode = maskMode(hidden, variant, mask);
+  const text = mode === 'none' ? undefined : figureText(children);
+  const shown = text === undefined ? undefined : maskFigure(text, mode);
+  /* Only what the mask changed. Anything else is drawn exactly as it was passed. */
+  const masked = shown !== text ? shown : undefined;
   return (
     <Text
       ref={ref}
       variant={variant}
       color={color ?? toneColor[tone]}
+      accessibilityLabel={accessibilityLabel ?? (masked === undefined ? undefined : spokenFigure(masked))}
       {...rest}
       style={[style, lockTabular]}
-    />
+    >
+      {masked ?? children}
+    </Text>
   );
 });

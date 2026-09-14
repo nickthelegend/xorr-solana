@@ -71,3 +71,27 @@ describe('forgetAccount', () => {
     expect(typeof after.forgetAccount).toBe('function');
   });
 });
+
+/*
+ * Hidden balances belong to the device (FEATURES.md #47): who can see this phone, not whose wallet is on it. A sign-out
+ * that showed them again would put someone's amounts back on screen the moment they handed the phone over.
+ */
+describe('balancesHidden', () => {
+  it('starts shown, stays hidden through a sign-out, and is written down for the next launch', async () => {
+    expect(useStore.getInitialState().balancesHidden).toBe(false);
+    useStore.getState().toggleBalancesHidden();
+
+    useStore.getState().forgetAccount();
+
+    expect(useStore.getState().balancesHidden).toBe(true);
+    // What the next launch reads back before it draws a figure.
+    const { default: storage } = await import('@react-native-async-storage/async-storage');
+    const saved = JSON.parse((await storage.getItem('xorr-store')) ?? '{}') as {
+      state?: { balancesHidden?: boolean };
+    };
+    expect(saved.state?.balancesHidden).toBe(true);
+
+    useStore.getState().toggleBalancesHidden();
+    expect(useStore.getState().balancesHidden).toBe(false);
+  });
+});

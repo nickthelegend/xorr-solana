@@ -36,11 +36,13 @@ export {
   Value,
   Price,
   pnlTone,
+  useBalancesHidden,
   type TextProps,
   type ValueProps,
   type PriceProps,
   type PriceTone,
 } from './Text';
+export { MASK, figureText, maskFigure, maskMode, spokenFigure, type MaskMode } from './mask';
 export { Press, hitSlopFor, PRESSED_OPACITY, type PressProps } from './Press';
 export { easing, timing, useReducedMotion } from './motion';
 
