@@ -3,7 +3,8 @@
  *
  * A state chip, a title and one line, all from the chain's answer; the two parties to the permission; the approvals
  * that outlive a stop; the rows that guard the wallet; one button. PLAN.md 6.10 / 12.5: the button SIGNS AN ON-CHAIN
- * REVOKE from the user's own wallet, so a stop needs no server to reach every device.
+ * REVOKE from the user's own wallet, so a stop needs no server to reach every device. The stop is held, not tapped
+ * (FEATURES.md #3).
  */
 import React, { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -15,6 +16,7 @@ import {
   Button,
   Eyebrow,
   Fill,
+  HoldButton,
   NoteStrip,
   Placeholder,
   Press,
@@ -476,13 +478,28 @@ export default function Safety() {
       {/* No permission, no kill switch: the card above offers the one action that makes sense. */}
       {granted && !unreadable ? (
         <>
-          <Button
-            label={killCta(killed, unusable, granted, expired)}
-            variant={killed || unusable || expired ? 'primary' : 'destructive'}
-            height={size.buttonLg}
-            loading={busy}
-            onPress={toggle}
-          />
+          {/*
+            The stop is held, not tapped (FEATURES.md #3): it signs a revoke, and a stray touch should not. A screen
+            reader, a key or a switch still commits with one activation, and the biometric prompt guards every way in.
+            A resume, a reconnect and a new grant stay taps.
+          */}
+          {killed || unusable || expired ? (
+            <Button
+              label={killCta(killed, unusable, granted, expired)}
+              variant="primary"
+              height={size.buttonLg}
+              loading={busy}
+              onPress={toggle}
+            />
+          ) : (
+            <HoldButton
+              label={killCta(killed, unusable, granted, expired)}
+              accessibilityHint="Hold to stop"
+              height={size.buttonLg}
+              loading={busy}
+              onCommit={toggle}
+            />
+          )}
           <Text variant="footnote" color={colors.ink55} align="center" style={{ marginTop: space.s12 }}>
             {killed || unusable || expired
               ? 'You’ll sign to confirm.'

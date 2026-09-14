@@ -73,6 +73,7 @@ export {
   type ButtonRowProps,
   type ButtonVariant,
 } from './Button';
+export { HoldButton, type HoldButtonProps } from './HoldButton';
 export { Eyebrow, type EyebrowProps } from './Eyebrow';
 export { BackButton, CloseButton, IconButton, HeaderBar, type IconButtonProps } from './IconButton';
 export { Progress, type ProgressProps } from './Progress';

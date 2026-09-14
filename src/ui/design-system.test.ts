@@ -123,6 +123,7 @@ describe('motion — animations.md', () => {
   });
 
   // The whole animated inventory:
+  //   HoldButton      the stop's fill while it is held    600ms  (linear: the hold's clock, 2026-09-14)
   //   Switch          knob transform + track background   180ms
   //   Segmented       thumb background                    150ms
   //   Progress        track width                         250ms  ("reads as progress")
@@ -139,6 +140,7 @@ describe('motion — animations.md', () => {
       .map(({ rel }) => rel)
       .sort();
     expect(animated).toEqual([
+      'HoldButton.tsx',
       'Progress.tsx',
       'Rise.tsx',
       'RollingNumber.tsx',

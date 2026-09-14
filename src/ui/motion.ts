@@ -12,6 +12,14 @@
  *   so the eye reads top to bottom. Screens get it from `<Rise>` and `<RollingNumber>`, never from
  *   reanimated's builders directly.
  *
+ * And, since 2026-09-14, one gesture with a motion of its own:
+ *
+ *   HOLD — the stop filling while a finger stays on it (FEATURES.md #3). Linear over `HOLD_MS`,
+ *   because the fill is the hold's clock drawn and has to reach the end at the moment the commit
+ *   happens: an eased fill looks nearly done a third of the way in, and teaches a thumb to let go
+ *   early. Off the interaction scale for the reason arrival is — it answers a finger kept down, not a
+ *   tap. `<HoldButton>` is the one place it is made.
+ *
  * What did not change: no spring, bounce or overshoot anywhere; every animation collapses to an
  * instant state change under reduced motion; and no figure ever shows a value it does not have.
  * Digits roll in AT their true value — nothing counts through numbers the market never printed.
@@ -19,6 +27,7 @@
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo } from 'react-native';
 import { Easing, ReduceMotion, withDelay, withTiming, type WithTimingConfig } from 'react-native-reanimated';
+import { HOLD_MS } from './holdToCommit';
 import { duration } from './tokens';
 
 /**
@@ -69,6 +78,16 @@ export function riseTo(index: number, reduced: boolean) {
     withTiming(1, { ...arrival(duration.enter, reduced), reduceMotion: ReduceMotion.System }),
     ReduceMotion.System,
   );
+}
+
+/**
+ * The hold's fill, on `<HoldButton>`: linear over the whole hold, so the fill and the commit arrive together.
+ *
+ * Under reduced motion the fill is simply there once the press lands. The press is still held for the commit, so the
+ * state shows without the movement. `ReduceMotion.System` as well, for the first mount `riseTo` describes.
+ */
+export function holdFill(reduced: boolean): WithTimingConfig {
+  return { duration: reduced ? 0 : HOLD_MS, easing: Easing.linear, reduceMotion: ReduceMotion.System };
 }
 
 export { duration };
