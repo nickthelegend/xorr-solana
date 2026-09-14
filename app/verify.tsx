@@ -25,6 +25,7 @@
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   EmptyState,
@@ -32,6 +33,7 @@ import {
   Fill,
   HeaderBar,
   LoadingRows,
+  Press,
   Screen,
   SheetCard,
   Text,
@@ -44,6 +46,8 @@ import { useAuth } from '@/auth/useAuth';
 import { useAsync } from '@/data/useAsync';
 import { useHasHydrated, useStore } from '@/state/store';
 import { system, type VerifyCheck, type VerifyReport } from '@/data/system';
+import { linkedOwner } from '@/export/proofLink';
+import { linkTo, useShareLink } from '@/export/shareLink';
 
 const DOT = 8;
 
@@ -60,10 +64,15 @@ export default function Verify() {
    * `owner` is undefined for a signed-out reader, which keeps the anonymous behaviour the note
    * above describes — the wallet checks skip rather than fail. Signed in, it is the wallet on file,
    * or Privy's own address in a session that never ran onboarding.
+   *
+   * A link's owner comes before both (FEATURES.md #22): `/verify?owner=0x…` asks about that wallet,
+   * whoever is reading. An owner the executor would refuse is dropped without a word.
    */
+  const params = useLocalSearchParams<{ owner?: string }>();
+  const linked = linkedOwner(params.owner);
   const auth = useAuth();
   const storedOwner = useStore((s) => s.wallet?.address);
-  const owner = storedOwner ?? (auth.authenticated ? auth.address : undefined);
+  const owner = linked ?? storedOwner ?? (auth.authenticated ? auth.address : undefined);
   /*
    * Asked once the store has loaded, not before.
    *
@@ -71,19 +80,44 @@ export default function Verify() {
    * second one for the wallet a moment later — and kept the first on screen while the second ran:
    * seconds of rows about nobody, with nothing saying the real answer was still coming. Until the
    * store has loaded there is no question to ask yet, so the request waits rather than guessing.
+   *
+   * A link's owner is not in the store, so a linked report has nothing to wait for.
    */
   const hydrated = useHasHydrated();
+  const ready = hydrated || linked !== undefined;
   const { data, loading, error, reload } = useAsync(
-    () => (hydrated ? system.verifyReport(owner) : new Promise<VerifyReport>(() => undefined)),
-    [owner, hydrated],
+    () => (ready ? system.verifyReport(owner) : new Promise<VerifyReport>(() => undefined)),
+    [owner, ready],
   );
+  const link = linkTo('/verify', owner);
+  const shared = useShareLink(link);
 
   return (
     <Screen gutter="none">
       <View style={{ paddingHorizontal: space.gutter }}>
-        <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Verification</Text>} />
+        <HeaderBar
+          onBack={goBack}
+          title={<Text variant="screenTitle">Verification</Text>}
+          right={
+            link ? (
+              <Press
+                onPress={shared.share}
+                accessibilityRole="button"
+                accessibilityLabel="Share a link to these checks"
+                hitHeight={size.hit}
+              >
+                <Text variant="control" color={colors.ink}>
+                  {shared.label}
+                </Text>
+              </Press>
+            ) : null
+          }
+        />
+        {/* A linked report names its wallet. A reader who is signed in would otherwise take it for their own. */}
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Each claim, how it was tested, and what came back.
+          {linked
+            ? `For ${linked.slice(0, 6)}…${linked.slice(-4)}.`
+            : 'Each claim, how it was tested, and what came back.'}
         </Text>
       </View>
 

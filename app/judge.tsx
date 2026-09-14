@@ -16,9 +16,13 @@
  * Reachable without an account, like the endpoint behind it. Paste any address to run the
  * wallet-specific checks against it; they read public on-chain facts about an address anyone
  * could already look up on an explorer.
+ *
+ * Or open a link that names one: `/judge?owner=0x…` runs straight for that wallet, and Share hands
+ * the same link on (FEATURES.md #22).
  */
 import React, { useCallback, useState } from 'react';
 import { ScrollView, TextInput, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   BackButton,
@@ -42,6 +46,8 @@ import { api } from '@/data/api';
 import { ApiError, TimedOut, errorRef, errorText, isRetryable } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { useHasHydrated, useStore } from '@/state/store';
+import { linkedOwner } from '@/export/proofLink';
+import { linkTo, useShareLink } from '@/export/shareLink';
 
 type Check = {
   id: string;
@@ -103,30 +109,44 @@ export default function Judge() {
    * render, before the store had hydrated: the field started empty and the first run checked no wallet for a person who
    * has one. Both values now follow the stored address until the reader types or runs something else, and the first
    * run waits for the store, as Verify's does.
+   *
+   * A link's owner comes before the stored one (FEATURES.md #22). `/judge?owner=0x…` is someone saying "check this
+   * wallet", so it seeds the field and the first run, and that run does not wait for a store it does not read. An owner
+   * the executor would refuse is dropped without a word, and the screen opens as if the link had named no one.
    */
+  const params = useLocalSearchParams<{ owner?: string }>();
+  const linked = linkedOwner(params.owner);
   const hydrated = useHasHydrated();
   const stored = useStore((s) => s.wallet?.address) ?? '';
   const [typed, setTyped] = useState<string>();
-  const owner = typed ?? stored;
+  const owner = typed ?? linked ?? stored;
   // The address the last run used, so editing the field does not silently relabel the results
   // above it as being about an address they were never run against.
   const [asked, setAsked] = useState<string>();
-  const ranFor = asked ?? stored;
+  const ranFor = asked ?? linked ?? stored;
   const [nonce, setNonce] = useState(0);
+  const ready = hydrated || linked !== undefined;
 
   const report = useAsync(
     // No auth needed — the route is public on purpose, so this works signed out.
     () =>
-      hydrated
+      ready
         ? api.get<Report>(`/verify${ranFor ? `?owner=${encodeURIComponent(ranFor)}` : ''}`)
         : new Promise<Report>(() => undefined),
-    [ranFor, nonce, hydrated],
+    [ranFor, nonce, ready],
   );
 
   const rerun = useCallback(() => {
     setAsked(owner.trim());
     setNonce((n) => n + 1);
   }, [owner]);
+
+  /*
+   * The link is to the wallet the rows below were run for, not to whatever is in the field: an address typed and not yet
+   * run is not what the person opening the link would see. No link, no control — `linkOrigin` says when a build has none.
+   */
+  const link = linkTo('/judge', ranFor);
+  const shared = useShareLink(link);
 
   const d = report.data;
 
@@ -139,17 +159,31 @@ export default function Judge() {
             Check it yourself
           </Text>
         </View>
-        <Press
-          onPress={rerun}
-          disabled={report.loading}
-          accessibilityRole="button"
-          accessibilityLabel="Run the checks again"
-          hitHeight={size.hit}
-        >
-          <Text variant="control" color={report.loading ? colors.ink32 : colors.ink}>
-            {report.loading ? 'Running…' : 'Re-run'}
-          </Text>
-        </Press>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s16 }}>
+          {link ? (
+            <Press
+              onPress={shared.share}
+              accessibilityRole="button"
+              accessibilityLabel="Share a link to these checks"
+              hitHeight={size.hit}
+            >
+              <Text variant="control" color={colors.ink}>
+                {shared.label}
+              </Text>
+            </Press>
+          ) : null}
+          <Press
+            onPress={rerun}
+            disabled={report.loading}
+            accessibilityRole="button"
+            accessibilityLabel="Run the checks again"
+            hitHeight={size.hit}
+          >
+            <Text variant="control" color={report.loading ? colors.ink32 : colors.ink}>
+              {report.loading ? 'Running…' : 'Re-run'}
+            </Text>
+          </Press>
+        </View>
       </View>
 
       <Text variant="body" color={colors.ink55} style={{ marginTop: space.s10 }}>
