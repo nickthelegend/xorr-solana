@@ -105,6 +105,10 @@ export function setSubgraphTimeoutForTests(ms: number): void {
 }
 
 async function gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  const unreachable = (e: unknown) => {
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    return new SubgraphUnavailable(timedOut ? `no answer in ${timeoutMs}ms` : e instanceof Error ? e.message : String(e));
+  };
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -116,11 +120,18 @@ async function gql<T>(query: string, variables: Record<string, unknown> = {}): P
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(timeoutMs),
   }).catch((e: unknown) => {
-    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
-    throw new SubgraphUnavailable(timedOut ? `no answer in ${timeoutMs}ms` : e instanceof Error ? e.message : String(e));
+    throw unreachable(e);
   });
   if (!res.ok) throw new SubgraphUnavailable(`${res.status}`);
-  const json = (await res.json()) as { data?: T; errors?: { message: string }[] };
+  /*
+   * The deadline covers the body too, and says so in the same words.
+   *
+   * A gateway that sends its headers and then goes quiet aborted the body read with a bare `TimeoutError`, which is not
+   * `SubgraphUnavailable` — so `/graph/decision` answered the one outage this error exists to name with an unnamed 502.
+   */
+  const json = (await res.json().catch((e: unknown) => {
+    throw unreachable(e);
+  })) as { data?: T; errors?: { message: string }[] };
   if (json.errors?.length) throw new SubgraphUnavailable(json.errors[0]!.message);
   if (!json.data) throw new SubgraphUnavailable('no data');
   return json.data;

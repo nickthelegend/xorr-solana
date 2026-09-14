@@ -23,10 +23,17 @@ import { requireUser } from '../auth/middleware.js';
 import { currentWallet } from './wallet-context.js';
 import { armExits, money, placeOrder } from '../executor/order.js';
 import { readChain } from '../http/chain-read.js';
+import { screenPatience } from '../http/patience.js';
 import { readPolicy } from '../evm/delegation.js';
 import type { Address } from 'viem';
 import { decide } from '../graph/decide.js';
-import { health as graphHealth, dailySpendFor, indexDescription, spendsFor } from '../graph/client.js';
+import {
+  health as graphHealth,
+  dailySpendFor,
+  indexDescription,
+  spendsFor,
+  SubgraphUnavailable,
+} from '../graph/client.js';
 
 export const extra = new Hono();
 
@@ -676,9 +683,8 @@ extra.get('/graph/decision', async (c) => {
   if (!(Number.isFinite(wantUsd) && wantUsd > 0)) {
     return c.json({ error: 'invalid_usd', detail: 'usd is a dollar amount above zero.' }, 400);
   }
-  const id = await walletId(c);
-  if (!id) return c.json({ error: 'no_wallet' }, 400);
-  const w = await one<{ address: string }>(`SELECT address FROM wallets WHERE id=$1`, [id]);
+  // `currentWallet` already carries the address; reading the row a second time was one more wait before anything.
+  const w = await currentWallet(c);
   if (!w) return c.json({ error: 'no_wallet' }, 400);
   /*
    * The question a run asks, asked the same way (PLAN.md 3.5).
@@ -698,10 +704,21 @@ extra.get('/graph/decision', async (c) => {
         token: ADDRESSES.usdcBase,
         aquaApp: process.env.AQUA_BOOK_ADDRESS,
         tokenOut: outToken?.address,
-        amountOut: outToken ? await estimateOutUnits(wantUsd, symbol, outToken.decimals) : undefined,
+        /*
+         * Priced only when the decision reaches the depth check, beside the index reads, and with a screen's patience
+         * (`http/patience.ts`). This priced the size first, with no deadline, and gave no answer inside sixty seconds in the
+         * QA run against the hosted fork executor — whose index is for another contract, so the price was never used.
+         */
+        amountOut: outToken
+          ? () => estimateOutUnits(wantUsd, symbol, outToken.decimals, screenPatience().priceMs)
+          : undefined,
       }),
     );
   } catch (e) {
+    // The index did not answer: said by name, as a 502 the app retries, with the sentence where a sentence belongs.
+    if (e instanceof SubgraphUnavailable) {
+      return c.json({ error: 'subgraph_unavailable', message: e.message }, 502);
+    }
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
 });

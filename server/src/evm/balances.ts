@@ -15,6 +15,7 @@ import { ADDRESSES } from './chains.js';
 import { TOKENS, canonicalSymbol } from '../venues/oneinch.js';
 import { priceOf } from '../market/prices.js';
 import { aavePoolIsDeployedHere, usdcReserve } from '../market/yield.js';
+import { StillFetching, beforeDeadline } from '../http/deadline.js';
 
 export type Holding = {
   symbol: string;
@@ -32,6 +33,23 @@ export type Holding = {
    * Anything that closes a WHOLE position must use this. Percentages and displays can use `units`.
    */
   raw: bigint;
+};
+
+/** How a value is read, by who is waiting for it. */
+export type ReadOptions = {
+  /**
+   * For a value that will be KEPT (PLAN.md 2.10): anything unpriced or unread throws instead of counting as nothing (see
+   * `totalValueUsd`).
+   */
+  strict?: boolean;
+  /**
+   * A screen's patience for each price (`http/patience.ts`). Past it `priceOf` answers from the last price, or throws
+   * `StillFetching` — thrown on even when not strict, because a price that is late is not a price that is missing:
+   * counted as $0 it would put a total on the home screen short by the whole holding, for a price seconds away.
+   */
+  priceDeadlineMs?: number;
+  /** A screen's patience for the Aave reserve. Past it, nothing supplied, logged — as when the read fails. */
+  suppliedDeadlineMs?: number;
 };
 
 /** Spendable USDC, in dollars. */
@@ -96,7 +114,7 @@ export function clearReadableTokenCache(): void {
  * wallet screen that feels broken. Anything we cannot price is reported with `usd: 0` rather than
  * dropped, so the units still show and the missing price is visible instead of silent.
  */
-export async function holdings(owner: Address, opts: { strict?: boolean } = {}): Promise<Holding[]> {
+export async function holdings(owner: Address, opts: ReadOptions = {}): Promise<Holding[]> {
   const entries = await readableTokens();
 
   const balances = await publicClient.multicall({
@@ -120,8 +138,11 @@ export async function holdings(owner: Address, opts: { strict?: boolean } = {}):
 
   return Promise.all(
     held.map(async ({ symbol, units, raw }) => {
-      // Strict: an unpriced holding throws instead of counting as $0 (see `totalValueUsd`).
-      const price = opts.strict ? await priceOf(symbol) : await priceOf(symbol).catch(() => 0);
+      // Strict: an unpriced holding throws instead of counting as $0 (see `totalValueUsd`). A late price always throws.
+      const price = await priceOf(symbol, opts.priceDeadlineMs).catch((e: unknown) => {
+        if (opts.strict || e instanceof StillFetching) throw e;
+        return 0;
+      });
       return { symbol, units, usd: units * price, raw };
     }),
   );
@@ -219,8 +240,11 @@ export async function suppliedUsd(owner: Address): Promise<number> {
  * beside its units, or supplied cash as 0 after logging that Aave did not answer, and be corrected on
  * the next load. A stored snapshot cannot: it would record a dip that never happened, forever. Strict
  * throws instead, and the caller keeps nothing.
+ *
+ * A screen passes its patience (`ReadOptions`), so neither a price feed nor the Aave reserve can hold the number past
+ * the app's deadline.
  */
-export async function totalValueUsd(owner: Address, opts: { strict?: boolean } = {}): Promise<{
+export async function totalValueUsd(owner: Address, opts: ReadOptions = {}): Promise<{
   cash: number;
   holdings: Holding[];
   supplied: number;
@@ -231,8 +255,12 @@ export async function totalValueUsd(owner: Address, opts: { strict?: boolean } =
     holdings(owner, opts),
     // Aave is a mainnet deployment reached over a public RPC, and a lending pool being slow is not
     // a reason for the home screen to have no balance. Unlike the zeros above, this one degrades
-    // to "nothing supplied" only after saying so in the log.
-    suppliedUsd(owner).catch((e: unknown) => {
+    // to "nothing supplied" only after saying so in the log — and past a screen's patience for it, slow is the same.
+    beforeDeadline(
+      suppliedUsd(owner),
+      opts.suppliedDeadlineMs,
+      () => new Error(`no answer in ${opts.suppliedDeadlineMs}ms`),
+    ).catch((e: unknown) => {
       if (opts.strict) throw e;
       console.error('[balance] aToken read failed:', e instanceof Error ? e.message : e);
       return 0;

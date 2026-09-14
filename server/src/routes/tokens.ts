@@ -142,7 +142,7 @@ async function usdPrice(symbol: string): Promise<number | null> {
   try {
     const price = await Promise.race([
       priceOf(symbol, PRICE_DEADLINE_MS),
-      // `priceOf` keeps its deadline for a feed but not for an equity, which it prices with a 1inch quote instead.
+      // Raced here as well as inside `priceOf`, so a list is held to its own four seconds whatever a price lookup does.
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`no price for ${symbol} within ${PRICE_DEADLINE_MS}ms`)),

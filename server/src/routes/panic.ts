@@ -22,6 +22,8 @@ import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { Hono } from 'hono';
 import { log } from '../http/request-id.js';
+import { readChain } from '../http/chain-read.js';
+import { screenPatience } from '../http/patience.js';
 import { z } from 'zod';
 import { formatUnits, type Address } from 'viem';
 import { requireUser } from '../auth/middleware.js';
@@ -119,7 +121,19 @@ panic.get('/panic/preview', async (c) => {
   // wallet rows is the worst outcome any of these copies could produce.
   const w = await currentWallet(c);
   if (!w) return c.json({ legs: [], totalUsd: 0 });
-  const held = await holdings(w.address as Address);
+  /*
+   * Bounded as `/wallet/balance` is (`http/patience.ts`), and a read that failed is a failure.
+   *
+   * This waited on every held token's price with the scheduler's patience and gave no answer inside sixty seconds in
+   * the QA run against the hosted fork executor. And with no `readChain`, a balance read that threw reached the screen
+   * as a 500 carrying viem's own message.
+   */
+  const patience = screenPatience();
+  const held = await readChain(
+    'your holdings',
+    () => holdings(w.address as Address, { priceDeadlineMs: patience.priceMs }),
+    patience.chainReadMs,
+  );
   const legs = held.filter((h) => h.usd >= DUST_USD);
   return c.json({
     legs: legs.map((h) => ({ symbol: h.symbol, units: h.units, usd: h.usd })),

@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { log } from '../http/request-id.js';
 import { readChain } from '../http/chain-read.js';
+import { screenPatience } from '../http/patience.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { one, query, tx } from '../db/index.js';
@@ -294,11 +295,24 @@ routes.get('/wallet/balance', async (c) => {
    * that failed became "no cap". `readChain` turns either into a 502, which the client shows as a
    * dash rather than a number.
    */
+  /*
+   * Bounded, because the app stops waiting at 45 seconds and this had no bound of its own (`http/patience.ts`).
+   *
+   * In the QA run against the hosted fork executor it gave no answer inside sixty. Each read now answers within a
+   * screen's patience or says why it could not: a chain read as `chain_read_failed`, a price still on its way as
+   * `warming`, and an Aave reserve that does not answer as nothing supplied, as when it fails.
+   */
+  const patience = screenPatience();
   const [policy, value] = await Promise.all([
-    readChain('your permission', () => readPolicy(w.address as Address)),
+    readChain('your permission', () => readPolicy(w.address as Address), patience.chainReadMs),
     // Read the chain. This used to be a hardcoded 0, so the home screen said "$0.00" while the
     // wallet held a real position.
-    readChain('your balance', () => totalValueUsd(w.address as Address)),
+    readChain(
+      'your balance',
+      () =>
+        totalValueUsd(w.address as Address, { priceDeadlineMs: patience.priceMs, suppliedDeadlineMs: patience.aaveMs }),
+      patience.chainReadMs,
+    ),
   ]);
   // Balance is what the user holds; the policy tells us what the bot may touch of it.
   return c.json({

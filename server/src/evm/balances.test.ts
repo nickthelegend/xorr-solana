@@ -29,6 +29,7 @@ vi.mock('../venues/oneinch.js', () => ({
 }));
 
 const { priceOf } = await import('../market/prices.js');
+const { StillFetching } = await import('../http/deadline.js');
 const { chainUnitsOf, clearReadableTokenCache, suppliedUsd, totalValueUsd } = await import('./balances.js');
 
 const OWNER = '0x95A0b368588713011a15f4b1041423f31B08e615';
@@ -135,5 +136,34 @@ describe('supplied USDC', () => {
   it('a pool check that fails is an error, not "nothing supplied"', async () => {
     h.poolHere.mockRejectedValue(new Error('rpc down'));
     await expect(suppliedUsd(OWNER)).rejects.toThrow('rpc down');
+  });
+});
+
+describe('a screen’s patience (http/patience.ts)', () => {
+  const ok = (result: bigint) => ({ status: 'success', result });
+  beforeEach(() => {
+    h.readContract.mockResolvedValue(100_000_000n); // $100 of cash
+    h.getCode.mockResolvedValue('0x6080604052');
+    vi.mocked(priceOf).mockReset();
+  });
+
+  it('reaches the price lookup, and a price still being fetched is thrown — never counted as $0', async () => {
+    h.poolHere.mockResolvedValue(false);
+    h.multicall.mockResolvedValue([ok(10n ** 18n), ok(0n), ok(0n)]); // 1 WETH
+    vi.mocked(priceOf).mockRejectedValue(new StillFetching('the price of WETH'));
+    await expect(totalValueUsd(OWNER, { priceDeadlineMs: 4_000 })).rejects.toBeInstanceOf(StillFetching);
+    expect(vi.mocked(priceOf)).toHaveBeenCalledWith('WETH', 4_000);
+  });
+
+  it('an Aave reserve that does not answer in time is nothing supplied, as one that fails is — unless the value is kept', async () => {
+    h.multicall.mockResolvedValue([ok(0n), ok(0n), ok(0n)]);
+    h.poolHere.mockResolvedValue(true);
+    h.usdcReserve.mockImplementation(() => new Promise(() => {}));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const started = Date.now();
+    expect((await totalValueUsd(OWNER, { suppliedDeadlineMs: 50 })).total).toBe(100);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await expect(totalValueUsd(OWNER, { strict: true, suppliedDeadlineMs: 50 })).rejects.toThrow('no answer in 50ms');
   });
 });

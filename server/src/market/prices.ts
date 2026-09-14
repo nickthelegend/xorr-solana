@@ -3,6 +3,7 @@
  * user and a fill recorded by the executor come from the same place.
  */
 import { getJson, staleValue } from '../http/get.js';
+import { StillFetching, beforeDeadline } from '../http/deadline.js';
 import { COINGECKO_IDS, COINGECKO_PRICE_URL, type CoingeckoPrices } from './ids.js';
 import { isStock, stockPriceUsd } from '../venues/stocks.js';
 
@@ -29,8 +30,13 @@ const ALL_IDS_URL = COINGECKO_PRICE_URL;
  * The executor should wait: a scheduled buy that gives up because a price tier was busy is a
  * missed buy. A screen should not: the leaderboard blocked for sixty seconds on a cold cache while
  * the user looked at a spinner. Same function, different patience, stated at the call site.
+ *
+ * Past the deadline: the last price within `STALE_TOLERANCE_MS`, or `StillFetching`. That was a bare
+ * `price deadline for X`, which nothing could tell apart from a symbol with no feed at all, so a balance counted a price
+ * that was only late as $0.
  */
 export async function priceOf(symbol: string, deadlineMs?: number): Promise<number> {
+  const late = () => new StillFetching(`the price of ${symbol}`);
   /*
    * Tokenized equities are priced by the venue that would fill them, not by a market-data feed.
    *
@@ -39,9 +45,12 @@ export async function priceOf(symbol: string, deadlineMs?: number): Promise<numb
    * record an equity trade at all. The failure surfaced the first time tier 7 tried to open a real
    * position, which is the one strategy whose entire remit is equities. The UI had the number all
    * along, from `/market/stocks`; the executor could not reach it.
+   *
+   * Held to the caller's deadline too. The deadline raced only the CoinGecko fetch below, so an equity waited out the
+   * 1inch lane whatever its caller had said — which is why `/wallet/tokens` wraps every price in a race of its own.
    */
   if (isStock(symbol)) {
-    const px = await stockPriceUsd(symbol);
+    const px = await beforeDeadline(stockPriceUsd(symbol), deadlineMs, late);
     if (px && px > 0) return px;
     throw new Error(`No route for ${symbol} right now, so it has no price to trade against.`);
   }
@@ -55,30 +64,15 @@ export async function priceOf(symbol: string, deadlineMs?: number): Promise<numb
   if (warm?.[id]?.usd !== undefined) return warm[id]!.usd!;
 
   let json: CoingeckoPrices;
-  // Cleared in `finally`. An uncleared reject-timer holds the event loop for the whole deadline
-  // after the fetch has already won the race, which is a live handle per price call.
-  let timer: NodeJS.Timeout | undefined;
   try {
-    const fetching = getJson<CoingeckoPrices>(url, 30_000);
-    // Let a raced-past fetch finish in the background so the next caller is instant. Attached
-    // before the race, not after: if the deadline wins we never reach the line after `await`.
-    if (deadlineMs) void fetching.catch(() => undefined);
-    json = deadlineMs
-      ? await Promise.race([
-          fetching,
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`price deadline for ${symbol}`)), deadlineMs);
-          }),
-        ])
-      : await fetching;
+    // A fetch the deadline outruns keeps going in the background, so the next caller is instant (`beforeDeadline`).
+    json = await beforeDeadline(getJson<CoingeckoPrices>(url, 30_000), deadlineMs, late);
   } catch (e) {
-    // Every retry failed. Fall back to the last good value within a bounded window, rather than
-    // dropping a scheduled buy because a public price tier was busy.
+    // Every retry failed, or the caller stopped waiting. Fall back to the last good value within a bounded window, rather
+    // than dropping a scheduled buy because a public price tier was busy.
     const stale = staleValue<CoingeckoPrices>(url, STALE_TOLERANCE_MS);
     if (!stale) throw e;
     json = stale;
-  } finally {
-    clearTimeout(timer);
   }
   const price = json[id]?.usd;
   if (typeof price !== 'number') throw new Error(`No price returned for ${symbol}`);

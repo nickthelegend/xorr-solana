@@ -48,6 +48,7 @@ vi.mock('../graph/client.js', () => ({
   dailySpendFor: vi.fn(),
   indexDescription: vi.fn(),
   spendsFor: vi.fn(),
+  SubgraphUnavailable: class extends Error {},
 }));
 
 const { one, tx } = await import('../db/index.js');

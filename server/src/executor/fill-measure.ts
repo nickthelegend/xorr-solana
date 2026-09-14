@@ -48,14 +48,17 @@ export async function measuredDelta(params: {
  *
  * Approximate on purpose: it decides which venue to ASK, and the venue then quotes for real. A
  * price lookup that failed should not block the trade, so it falls back to no depth constraint.
+ *
+ * `deadlineMs` is a screen's patience for the price (`http/patience.ts`). A run leaves it out, and waits.
  */
 export async function estimateOutUnits(
   usd: number,
   symbol: string,
   decimals: number,
+  deadlineMs?: number,
 ): Promise<bigint | undefined> {
   try {
-    const px = await priceOf(symbol);
+    const px = await priceOf(symbol, deadlineMs);
     if (!(px > 0)) return undefined;
     return BigInt(Math.floor((usd / px) * 10 ** decimals));
   } catch {

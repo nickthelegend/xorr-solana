@@ -9,6 +9,7 @@ import { currentRequestId, log } from './request-id.js';
 import { WrongPrincipalError } from '../auth/middleware.js';
 import { NoWalletError } from '../routes/wallet-context.js';
 import { ChainReadFailed } from './chain-read.js';
+import { StillFetching } from './deadline.js';
 
 export function errorResponse(err: Error, c: Context): Response {
   // A malformed request is the CLIENT's fault, and saying 500 tells the caller to retry something
@@ -47,6 +48,17 @@ export function errorResponse(err: Error, c: Context): Response {
     const cause = err.underlying instanceof Error ? err.underlying.message : String(err.underlying);
     log.warn(`[chain] ${err.message} ${cause}`);
     return c.json({ error: 'chain_read_failed', message: err.message, requestId: currentRequestId() }, 502);
+  }
+  /*
+   * Still being fetched (`http/deadline.ts`).
+   *
+   * 503 with a `retry-after`, the answer `/market/quotes` and the backtests give a cold upstream: nothing about the
+   * request is wrong, the data is seconds away, and the fetch keeps going so the next attempt finds it. A 500 would say
+   * the server broke, and a $0 would say something false about the wallet.
+   */
+  if (err instanceof StillFetching) {
+    c.header('retry-after', String(err.retryAfterSec));
+    return c.json({ error: 'warming', detail: err.message, requestId: currentRequestId() }, 503);
   }
 
   // Everything else is ours. Surface the real message: a trading server that hides its errors is

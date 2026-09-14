@@ -39,8 +39,28 @@ export function aquaIndexConfigured(): boolean {
   return ENDPOINT.length > 0;
 }
 
+/**
+ * How long a book query may take, as a delegation-index query may (`client.ts`, PLAN.md 2.13).
+ *
+ * It had no deadline at all. The delegation index got one when a gateway that accepted the connection and never
+ * answered held a run open; this query, asked by the same decision straight afterwards, did not — so the same gateway
+ * could still hold `decide()`, the run that asked and `/graph/decision` for as long as the socket lived. A timeout is one
+ * more way the index is unreachable, and says so in the same error, which the decision already answers by routing to the
+ * aggregator.
+ */
+let timeoutMs = 5_000;
+
+/** Testing only. */
+export function setAquaTimeoutForTests(ms: number): void {
+  timeoutMs = ms;
+}
+
 async function gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
   if (!ENDPOINT) throw new AquaIndexUnavailable('AQUA_SUBGRAPH_URL is not set');
+  const unreachable = (e: unknown) => {
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    return new AquaIndexUnavailable(timedOut ? `no answer in ${timeoutMs}ms` : e instanceof Error ? e.message : String(e));
+  };
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -50,9 +70,15 @@ async function gql<T>(query: string, variables: Record<string, unknown> = {}): P
         : {}),
     },
     body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(timeoutMs),
+  }).catch((e: unknown) => {
+    throw unreachable(e);
   });
   if (!res.ok) throw new AquaIndexUnavailable(`${res.status}`);
-  const json = (await res.json()) as { data?: T; errors?: { message: string }[] };
+  // The deadline covers the body too: a gateway that sends its headers and then goes quiet is the same outage.
+  const json = (await res.json().catch((e: unknown) => {
+    throw unreachable(e);
+  })) as { data?: T; errors?: { message: string }[] };
   if (json.errors?.length) throw new AquaIndexUnavailable(json.errors[0]!.message);
   if (!json.data) throw new AquaIndexUnavailable('no data');
   return json.data;

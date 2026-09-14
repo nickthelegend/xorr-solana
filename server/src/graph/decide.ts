@@ -67,13 +67,27 @@ export function flowImbalance(spends: Spend[], token: string): number {
 async function chooseRoute(params: {
   app?: string;
   tokenOut?: string;
-  amountOut?: bigint;
+  /** How much of `tokenOut` the size buys — asked for only when there is an index to hold it to. */
+  amountOut?: Promise<bigint | undefined>;
 }): Promise<Route> {
-  if (!aquaIndexConfigured() || !params.app || !params.tokenOut || params.amountOut === undefined) {
+  if (!aquaIndexConfigured() || !params.app || !params.tokenOut || !params.amountOut) {
     return { venue: '1inch', why: 'No Aqua book index configured for this deployment.' };
   }
+  /*
+   * A size that could not be priced is its own reason.
+   *
+   * It read "No Aqua book index configured for this deployment" — on a deployment with an index, about a price that did
+   * not come back — which sent whoever read it to look at the configuration.
+   */
+  const amountOut = await params.amountOut;
+  if (amountOut === undefined) {
+    return {
+      venue: '1inch',
+      why: 'Could not price this size in the token it buys, so no Aqua book was checked for depth.',
+    };
+  }
   try {
-    const book = await bestBookFor(params.app, params.tokenOut, params.amountOut);
+    const book = await bestBookFor(params.app, params.tokenOut, amountOut);
     if (!book) {
       return { venue: '1inch', why: 'No open Aqua book is deep enough for this size.' };
     }
@@ -97,9 +111,17 @@ export async function decide(params: {
   token: string;
   /** The Aqua app to look for books under — our XorrAquaBook deployment. */
   aquaApp?: string;
-  /** The token the trade buys, and how many base units of it, for the depth check. */
+  /** The token the trade buys, for the depth check. */
   tokenOut?: string;
-  amountOut?: bigint;
+  /**
+   * How many base units of `tokenOut` the size buys — or how to find out.
+   *
+   * A function is called only when the depth check will run, and at the start, beside the index reads.
+   * `/graph/decision` priced the size before it asked anything else, with no deadline, so a CoinGecko lane backed up
+   * behind the market warmer held the route for as long as the lane did — on the fork executor, whose index is for
+   * another contract, where the decision never reaches the depth check at all.
+   */
+  amountOut?: bigint | (() => Promise<bigint | undefined>);
 }): Promise<Decision> {
   // 0. Is the index even about this contract? On a fork it is not, and a decision drawn from a
   //    different deployment's history would be worse than no decision. The contract itself is
@@ -114,8 +136,31 @@ export async function decide(params: {
     };
   }
 
+  const depthChecked = aquaIndexConfigured() && Boolean(params.aquaApp) && Boolean(params.tokenOut);
+  const sizing = !depthChecked
+    ? undefined
+    : typeof params.amountOut === 'function'
+      ? params.amountOut()
+      : Promise.resolve(params.amountOut);
+  // A decision that stops before the depth check leaves this unread, and its failure must not surface unhandled.
+  void sizing?.catch(() => undefined);
+
+  /*
+   * The three delegation-index reads, asked together and used in order.
+   *
+   * They were asked one after another, each allowed five seconds, so an index that answered slowly cost a decision up to
+   * fifteen before the venue index was even asked. None depends on another's answer. Each is still read in the order
+   * below, so a decision stops at the same step for the same reason as it did — only sooner — and the reads a stop
+   * leaves unused are caught, so their failures are not unhandled rejections.
+   */
+  const policyRead = policyFor(params.owner);
+  const daysRead = dailySpendFor(params.owner, 1);
+  const recentRead = spendsFor(params.owner, 20);
+  void daysRead.catch(() => undefined);
+  void recentRead.catch(() => undefined);
+
   // 1. The permission, as the CHAIN records it. Our database is not consulted.
-  const policy = await policyFor(params.owner);
+  const policy = await policyRead;
   if (!policy) {
     return { act: false, reason: 'no_policy_onchain', rationale: 'No permission exists on-chain.' };
   }
@@ -127,7 +172,7 @@ export async function decide(params: {
   }
 
   // 2. Today's spend, from indexed events rather than from our own bookkeeping.
-  const days = await dailySpendFor(params.owner, 1);
+  const days = await daysRead;
   const today = Math.floor(Date.now() / 86_400_000).toString();
   const spentToday = days.find((d) => d.day === today);
   const capUsd = unitsToUsd(policy.dailyCap);
@@ -143,7 +188,7 @@ export async function decide(params: {
   }
 
   // 3. Realised flow. One-sided flow is what being picked off looks like from the outside.
-  const recent = await spendsFor(params.owner, 20);
+  const recent = await recentRead;
   const imbalance = flowImbalance(recent, params.token);
   if (recent.length >= ONE_SIDED_MIN_SAMPLES && imbalance >= ONE_SIDED_THRESHOLD) {
     return {
@@ -167,7 +212,7 @@ export async function decide(params: {
   const route = await chooseRoute({
     app: params.aquaApp,
     tokenOut: params.tokenOut,
-    amountOut: params.amountOut,
+    amountOut: sizing,
   });
 
   return {
