@@ -53,9 +53,14 @@ export interface Projection {
  * The padding is relative (2026-09-12): a fifth of the series' own range, or a tenth of a percent of
  * the price when the range is flat, capped at `chart.candle.tightPad`. The prototype's ±120 is still
  * exactly what a $66k series gets; a $126 coin now fills the box instead of drawing as one line.
+ *
+ * `alsoPrices` are kept in frame too: the prices of the fills marked on the chart (FEATURES.md #9). A fill is
+ * nearly always inside its candle's range, but a sale is recorded at what it measured after fees, and a fork's
+ * pools can lag the feed the candles come from. Rather than draw that mark off the chart, or leave it off, the
+ * candles make room for it — on the one projection both are drawn with.
  */
-export function tightProjection(series: readonly Candle[]): Projection {
-  const { maxHigh, minLow } = extent(series);
+export function tightProjection(series: readonly Candle[], alsoPrices: readonly number[] = []): Projection {
+  const { maxHigh, minLow } = extent(series, alsoPrices);
   const pad = Math.min(
     chart.candle.tightPad,
     Math.max(
@@ -82,13 +87,20 @@ export function wideProjection(
   };
 }
 
-function extent(series: readonly Candle[]): { maxHigh: number; minLow: number } {
-  if (series.length === 0) return { maxHigh: 1, minLow: 0 };
+function extent(
+  series: readonly Candle[],
+  alsoPrices: readonly number[] = [],
+): { maxHigh: number; minLow: number } {
+  if (series.length === 0 && alsoPrices.length === 0) return { maxHigh: 1, minLow: 0 };
   let maxHigh = -Infinity;
   let minLow = Infinity;
   for (const c of series) {
     if (c.high > maxHigh) maxHigh = c.high;
     if (c.low < minLow) minLow = c.low;
+  }
+  for (const p of alsoPrices) {
+    if (p > maxHigh) maxHigh = p;
+    if (p < minLow) minLow = p;
   }
   return { maxHigh, minLow };
 }

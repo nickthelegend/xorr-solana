@@ -2,15 +2,15 @@
  * Screen 13 — Asset detail. screens.md Group B.
  *
  * Back / mark + name. Price at `priceLg` with a delta chip that names its window. A chart — candles by
- * default, tapping switches to the line — over the real series for the selected range. Range
- * pills. The position rows, from the real book. Sell / Buy.
+ * default, or the line, chosen above it — over the real series for the selected range, with the user's own
+ * fills marked on it. Range pills. The position rows, from the real book. Sell / Buy.
  *
  * Rebuilt on `src/ui`. Everything that used to be invented is gone: the position rows were
  * hardcoded (1,750.30 SOL, avg cost $81.14, +$12,566), and the chart fell back to
  * `areaSeries.SOL`, drawing Solana's shape under whatever symbol you had opened.
  *
- * The price and the history are read through `src/markets`, where a failed read throws. Through the
- * repository both failures came back as "no feed", so the error state this screen carried could never show.
+ * The price and the history are read through `src/markets` and `src/data/marketData`, where a failed read throws.
+ * Through the repository both failures came back as "no feed", so the error state this screen carried could never show.
  */
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -35,7 +35,10 @@ import {
   Row,
   Screen,
   Text,
+  candleMarks,
+  closeLine,
   colors,
+  lineMarks,
   money,
   percent,
   pnlTone,
@@ -46,20 +49,21 @@ import {
   space,
   tightProjection,
   toCandles,
+  typeScale,
 } from '@/ui';
 import { RollingNumber } from '@/ui/RollingNumber';
 import { signedMoney } from '@/format';
 import { repos } from '@/data';
 import { api } from '@/data/api';
 import { NotSignedIn } from '@/data/apiError';
-import type { HistoryRange } from '@/data/marketData';
+import { fetchTimedHistory, fillsOf, type HistoryRange } from '@/data/marketData';
+import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
 import { rangeChange } from '@/state/derived';
 import { settlementSymbol } from '@/data/tradable';
 import { useSettleable } from '@/data/useSettleable';
 import { quoteOf } from '@/markets/quote';
-import { historySeries, stillWarming } from '@/markets/series';
 import { DUST_USD } from '@/markets/ticket';
 import { useLiveRead } from '@/markets/useLiveRead';
 
@@ -89,6 +93,14 @@ const CHART_VIEW_W = CHART_VIEW_SEGMENT * 2 + space.s4 + size.segPad * 2;
 
 const CHART_H = 170;
 const ROW_H = 52;
+/**
+ * The line under the price is the change chip, "Loading…" or "No price feed.", as the reads come in. It is held at the
+ * taller of a chip and a line of body text, so trading one for another — which a range switch does twice — moves
+ * nothing below it.
+ */
+const CHANGE_LINE_H = Math.max(typeScale.body.lineHeight, typeScale.chipDelta.lineHeight + space.s2 * 2);
+/** The most runs `/runs` answers with, and so the reach of the marks: a fill older than the oldest of them is not drawn. */
+const RUNS_WINDOW = 200;
 
 export default function AssetDetail() {
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
@@ -111,15 +123,35 @@ export default function AssetDetail() {
   // Tokenized equities have a real spot price and no history: they are priced off the route
   // that would fill them, not a candle feed. A real price with no chart is a true state to show.
   const spotRead = useLiveRead(() => quoteOf(symbol!), [symbol]);
-  const history = useLiveRead(() => historySeries(symbol!, range), [symbol, range], stillWarming);
+  /*
+   * The history, with the stretch of time each candle covers — what a fill is placed by and what the scrub reads
+   * out. A feed still warming throws `StillWarming`, which `useLiveRead` treats as a wait and asks again; null is a
+   * symbol nothing prices.
+   */
+  const history = useLiveRead(
+    async () => ({ symbol: symbol!, range, candles: await fetchTimedHistory(symbol!, range) }),
+    [symbol, range],
+  );
 
-  // The answer for this symbol and range — not the last range's candles under the new label while this one loads.
-  const shown = history.data?.symbol === symbol && history.data.window === range ? history.data : undefined;
-  const series = useMemo(() => toCandles(shown?.bars ?? []), [shown]);
-  const closes = series.map((c) => c.close);
-  const hasSeries = closes.length > 1;
+  /*
+   * The answer for this symbol and range — never the last range's candles under the new label as if they were it.
+   *
+   * While the next range loads, the last one stays in its box, stepped back and not scrubbable (FEATURES.md #83), and
+   * crossfades into the answer when it lands. It used to drop to a skeleton of a different height, lose the
+   * Candles/Line control above it, and draw the new range in from the left, so every tap on a pill shook the screen.
+   * Nothing else here reads the kept range: the change line waits for the real answer.
+   */
+  const answer = history.data;
+  const current = answer?.symbol === symbol && answer.range === range ? answer : undefined;
+  const drawn = current ?? (history.loading && answer?.symbol === symbol ? answer : undefined);
+  const pending = drawn !== undefined && current === undefined;
+  const series = useMemo(() => toCandles((drawn?.candles ?? []).map((c) => c.bar)), [drawn]);
+  const spans = useMemo(() => (drawn?.candles ?? []).map(({ start, end }) => ({ start, end })), [drawn]);
+  // The line from the window's first open, so it covers the range its pill names and a fill anywhere in it has a place.
+  const line = useMemo(() => closeLine(series, spans), [series, spans]);
+  const hasSeries = series.length > 1;
   // From the window's first open, so the change covers the whole range its label names.
-  const seriesPct = hasSeries ? ((closes.at(-1)! - series[0]!.open) / series[0]!.open) * 100 : 0;
+  const seriesPct = hasSeries ? ((series.at(-1)!.close - series[0]!.open) / series[0]!.open) * 100 : 0;
 
   const quote = spotRead.data ?? undefined;
 
@@ -134,6 +166,18 @@ export default function AssetDetail() {
    */
   const { pct: changePct, label: changeLabel } = rangeChange(range, seriesPct, quote?.change24h);
   const up = changePct >= 0;
+  // The line keeps the colour of the range it draws, the kept one included.
+  const lineUp = drawn ? rangeChange(drawn.range, seriesPct, quote?.change24h).pct >= 0 : up;
+
+  /*
+   * Your fills of this token, marked where they happened (FEATURES.md #9), from the executor's record of every run —
+   * manual buys and sales included. Signed out there are none to ask for. A read that fails leaves the chart unmarked
+   * and says nothing: an unmarked chart is not a claim that nothing filled, and the price is still worth showing.
+   */
+  const runs = useAsync(() => system.runs(RUNS_WINDOW), []);
+  const fills = useMemo(() => fillsOf(runs.data ?? [], settlementSymbol(symbol ?? '')), [runs.data, symbol]);
+  const onLine = useMemo(() => lineMarks(fills, line.times), [fills, line]);
+  const inCandles = useMemo(() => candleMarks(fills, spans), [fills, spans]);
 
   /*
    * The same asset, priced a second way.
@@ -164,7 +208,7 @@ export default function AssetDetail() {
    * states and only the last one is news; a warming answer is asked again by `useLiveRead`.
    */
   const priceLoading = spotRead.loading && spotRead.data === undefined;
-  const historyLoading = history.loading && !shown;
+  const historyLoading = history.loading && !current;
 
   /*
    * Asked of the executor, like the order ticket. A Buy button that leads to a ticket the chain
@@ -234,22 +278,24 @@ export default function AssetDetail() {
                 —
               </Price>
             )}
-            {hasSeries ? (
-              <DeltaChip
-                label={`${up ? 'up' : 'down'} ${percent(Math.abs(changePct)).replace('+', '')} ${changeLabel}`}
-                tone={pnlTone(changePct)}
-                style={{ alignSelf: 'center' }}
-              />
-            ) : priceLoading || historyLoading ? (
-              <Text variant="body" color={colors.ink55}>
-                Loading…
-              </Text>
-            ) : spot === undefined ? (
-              // One quiet line, not a warning tag beside it saying the same thing again.
-              <Text variant="body" color={colors.ink55}>
-                No price feed.
-              </Text>
-            ) : null}
+            <View style={{ minHeight: CHANGE_LINE_H, alignItems: 'center', justifyContent: 'center' }}>
+              {current && hasSeries ? (
+                <DeltaChip
+                  label={`${up ? 'up' : 'down'} ${percent(Math.abs(changePct)).replace('+', '')} ${changeLabel}`}
+                  tone={pnlTone(changePct)}
+                  style={{ alignSelf: 'center' }}
+                />
+              ) : priceLoading || historyLoading ? (
+                <Text variant="body" color={colors.ink55}>
+                  Loading…
+                </Text>
+              ) : spot === undefined ? (
+                // One quiet line, not a warning tag beside it saying the same thing again.
+                <Text variant="body" color={colors.ink55}>
+                  No price feed.
+                </Text>
+              ) : null}
+            </View>
           </>
         )}
 
@@ -274,18 +320,21 @@ export default function AssetDetail() {
       </View>
 
       {/*
-        The chart type, visibly.
+        The chart type, visibly — and now the only way to change it.
 
         Both charts have been here since the beginning and the only way to swap them was to tap the
-        chart itself — an affordance with nothing on screen to suggest it existed, so the line view
-        may as well not have shipped. The tap still works; this is what says so.
+        chart itself — an affordance with nothing on screen to suggest it existed. That tap is gone:
+        a finger on the line scrubs it (FEATURES.md #45), and a chart that turned itself into candles
+        when someone touched it to read a price would take the reading away.
 
         Above the chart rather than beside the range pills, which is where it went first: the range
         pills and a two-word control do not fit one 402pt row, and what that shipped was "All"
         sliced in half by the control's left edge. They also answer different questions — the pills
         pick a period, this picks a rendering — and the one that belongs to the chart sits with it.
+
+        It stays while a series is on its way, so the chart below does not jump when it lands.
       */}
-      {hasSeries ? (
+      {hasSeries || history.loading ? (
         <View
           style={{
             flexDirection: 'row',
@@ -310,52 +359,52 @@ export default function AssetDetail() {
         </View>
       ) : null}
 
-      {hasSeries ? (
-        <Press
-          onPress={() => setCandleView((v) => !v)}
-          accessibilityRole="button"
-          accessibilityLabel={`${inst.data?.name ?? symbol} ${candleView ? 'candlestick' : 'price'} chart, ${range}. Switch to the ${candleView ? 'line' : 'candle'} view.`}
-          style={{ marginTop: space.s10, paddingHorizontal: space.gutter }}
-        >
-          {candleView ? (
+      {/* One box for every state the chart can be in, so none of them moves the pills below. */}
+      <View
+        style={{
+          minHeight: CHART_H,
+          marginTop: space.s10,
+          paddingHorizontal: space.gutter,
+          justifyContent: 'center',
+        }}
+      >
+        {hasSeries && drawn ? (
+          candleView ? (
             <Candlestick
               series={series}
-              projection={tightProjection(series)}
+              projection={tightProjection(series, inCandles.map((m) => m.price))}
+              marks={inCandles}
+              seriesKey={`${symbol}:${drawn.range}`}
+              pending={pending}
               height={CHART_H}
-              lastPrice={{ value: closes.at(-1)!, label: fmtPrice(closes.at(-1)!) }}
+              lastPrice={{ value: series.at(-1)!.close, label: fmtPrice(series.at(-1)!.close) }}
               drawIn
             />
           ) : (
             <AreaChart
-              data={closes}
+              data={line.values}
+              times={line.times}
+              formatValue={fmtPrice}
+              marks={onLine}
+              seriesKey={`${symbol}:${drawn.range}`}
+              pending={pending}
               height={CHART_H}
-              color={up ? colors.up : colors.down}
+              color={lineUp ? colors.up : colors.down}
               endDot
               drawIn
             />
-          )}
-        </Press>
-      ) : (
-        <View
-          style={{
-            height: CHART_H,
-            marginTop: space.s18,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {history.error ? (
-            // The pills stay below it, so another range is still one tap away.
-            <ErrorState error={history.error} onRetry={history.reload} />
-          ) : historyLoading ? (
-            <Placeholder height={CHART_H} style={{ borderRadius: radius.tile }} />
-          ) : spot !== undefined ? (
-            <Text variant="body" color={colors.ink55}>
-              No chart yet.
-            </Text>
-          ) : null}
-        </View>
-      )}
+          )
+        ) : history.error ? (
+          // The pills stay below it, so another range is still one tap away.
+          <ErrorState error={history.error} onRetry={history.reload} />
+        ) : history.loading ? (
+          <Placeholder height={CHART_H} style={{ borderRadius: radius.tile }} />
+        ) : spot !== undefined ? (
+          <Text variant="body" color={colors.ink55} align="center">
+            No chart yet.
+          </Text>
+        ) : null}
+      </View>
 
       <PillRow style={{ marginTop: space.s16 }} contentPadding={space.gutter}>
         {RANGES.map((r) => (

@@ -19,18 +19,28 @@
  * chart appears, the way the reference video's chart draws itself. Never grown from a baseline and
  * never interpolated — every candle is complete and in place from the first frame, only uncovered.
  * A live update still mutates the last candle in place.
+ *
+ * Marks (FEATURES.md #9): `marks` are the user's own fills, each a triangle at the centre of the candle it happened in
+ * and at its price, on the same projection as the candles — so build that projection with their prices in it.
+ *
+ * A range switch (FEATURES.md #83): with a `seriesKey`, a new key crossfades the old candles into the new ones while
+ * the box, the grid and the axis gutter hold still, and `pending` steps the candles back while the next ones load.
+ * The axis labels and the last-price chip are prices, and a price never animates: they change with the answer, at once.
  */
 import React, { useEffect } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
-import Svg, { ClipPath, Defs, FeDropShadow, Filter, G, Line, Rect } from 'react-native-svg';
-import { arrival, useReducedMotion } from '../motion';
+import Svg, { ClipPath, Defs, FeDropShadow, Filter, G, Line, Path, Rect } from 'react-native-svg';
+import { arrival, timing, useReducedMotion } from '../motion';
 import { Value } from '../Text';
 import { type as typeScale } from '../type';
 import { chart, colors, duration, radius, space } from '../tokens';
 import { Press } from '../Press';
+import { describeSeries } from './describeSeries';
+import { describeMarks, markPath, type CandleMark } from './marks';
 import { columns, useMeasuredBox } from './useMeasuredBox';
 import { axisLabels, projectSeries, toPct, type Candle, type Projection } from './projection';
+import { PENDING_OPACITY, sameItems, useSeriesLayers } from './useSeriesLayers';
 
 /** CSS `blur(N)` in a box-shadow is twice the Gaussian σ. */
 const BLUR_TO_STD_DEVIATION = 0.5;
@@ -44,11 +54,15 @@ const FILTER_SPAN = '200%';
 const AXIS_WIDTH = chart.axisWidth;
 
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
+const AnimatedG = Animated.createAnimatedComponent(G);
 
 /** How far an unselected candle steps back. Enough to recede, not enough to vanish. */
 const DIMMED = 0.35;
 /** The last-price chip's own height, derived from its variant rather than measured. */
 const CHIP_HEIGHT = typeScale.chip.lineHeight + space.s2 * 2;
+
+/** One empty list, so a chart with no marks does not hand its layers a new array on every render. */
+const NO_MARKS: readonly CandleMark[] = [];
 
 export interface CandlestickProps {
   series: readonly Candle[];
@@ -83,10 +97,50 @@ export interface CandlestickProps {
    */
   selected?: number | null;
   onSelect?: (index: number | null) => void;
-  /** Reveal the candles left to right when the chart appears, and again when the series changes. */
+  /**
+   * Reveal the candles left to right when the chart appears — and, without a `seriesKey`, again when the series
+   * changes.
+   */
   drawIn?: boolean;
+  /**
+   * The user's fills, each in the candle it happened in (`candleMarks`). Pass their prices to `tightProjection` too,
+   * so a fill priced outside every candle is still in frame.
+   */
+  marks?: readonly CandleMark[];
+  /**
+   * What the series answers, such as a symbol and a range. A new key crossfades the old candles into the new ones;
+   * the same key with new values changes in place. Without one, a new series is simply drawn, as it always was.
+   */
+  seriesKey?: string;
+  /** The candles are the last answer, kept while the next ones load: stepped back, and none can be chosen. */
+  pending?: boolean;
+  /**
+   * What a screen reader hears when the chart is one picture — that is, when no candle can be chosen. Defaults to the
+   * move over its range. With `onSelect` every candle is its own button, and the chart does not fold them into an image.
+   */
+  accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+}
+
+/** What one layer draws. */
+interface Drawn {
+  series: readonly Candle[];
+  projection: Projection;
+  marks: readonly CandleMark[];
+}
+
+const sameCandle = (a: Candle, b: Candle) =>
+  a.open === b.open && a.high === b.high && a.low === b.low && a.close === b.close;
+const sameMark = (a: CandleMark, b: CandleMark) => a.index === b.index && a.price === b.price && a.side === b.side;
+
+function sameDrawn(a: Drawn, b: Drawn): boolean {
+  return (
+    a.projection.hi === b.projection.hi &&
+    a.projection.lo === b.projection.lo &&
+    sameItems(a.series, b.series, sameCandle) &&
+    sameItems(a.marks, b.marks, sameMark)
+  );
 }
 
 export function Candlestick({
@@ -102,6 +156,10 @@ export function Candlestick({
   selected = null,
   onSelect,
   drawIn = false,
+  marks,
+  seriesKey,
+  pending = false,
+  accessibilityLabel,
   style,
   testID,
 }: CandlestickProps) {
@@ -113,18 +171,40 @@ export function Candlestick({
   const bloomDown = `candle-down-${uid}`;
   const clipId = `candle-reveal-${uid}`;
 
-  /* The reveal: a clip whose width runs 0 → the full box, restarted when the series changes. */
+  /* What is on screen, and what is leaving it — see AreaChart, which does the same for a line. */
+  const layers = useSeriesLayers<Drawn>(seriesKey ?? '', { series, projection, marks: marks ?? NO_MARKS }, sameDrawn);
+
+  /*
+   * The reveal: a clip whose width runs 0 → the full box. Without a `seriesKey` it restarts when the series changes;
+   * with one it runs once, and a later series crossfades in instead.
+   */
   const reduced = useReducedMotion();
   const reveal = useSharedValue(drawIn ? 0 : 1);
   const measured = box.width > 0;
-  const seriesKey = `${series.length}:${series[0]?.close ?? ''}:${series[series.length - 1]?.close ?? ''}`;
+  const revealFor =
+    seriesKey === undefined
+      ? `${series.length}:${series[0]?.close ?? ''}:${series[series.length - 1]?.close ?? ''}`
+      : series.length > 0;
   useEffect(() => {
     if (!drawIn || !measured) return;
     reveal.value = 0;
     reveal.value = withTiming(1, arrival(duration.draw, reduced));
-  }, [drawIn, measured, seriesKey, reduced, reveal]);
+  }, [drawIn, measured, revealFor, reduced, reveal]);
   const revealWidth = box.width;
   const clipProps = useAnimatedProps(() => ({ width: reveal.value * revealWidth }));
+
+  /* The crossfade, on the interaction scale: a range switch answers a tap. Instant under reduced motion. */
+  const fade0 = useSharedValue(1);
+  const fade1 = useSharedValue(0);
+  const { front, generation } = layers;
+  useEffect(() => {
+    const cfg = timing(duration.slow, reduced);
+    const lit = pending ? PENDING_OPACITY : 1;
+    fade0.value = withTiming(front === 0 ? lit : 0, cfg);
+    fade1.value = withTiming(front === 1 ? lit : 0, cfg);
+  }, [front, generation, pending, reduced, fade0, fade1]);
+  const slot0 = useAnimatedProps(() => ({ opacity: fade0.value }));
+  const slot1 = useAnimatedProps(() => ({ opacity: fade1.value }));
 
   /* With no data there is nothing to project. Drawing an axis anyway would put a price
      scale on the screen that no price produced — on a trading surface an invented axis is
@@ -133,16 +213,85 @@ export function Candlestick({
   const plotWidth = Math.max(0, box.width - (showAxis ? AXIS_WIDTH : 0));
   /** Everything except the chosen candle steps back, so the selection is unmistakable. */
   const dimmed = (i: number) => selected !== null && selected !== i;
-  const geometry = projectSeries(projection, series);
   const { columnWidth, xOf } = columns(plotWidth, series.length, chart.candle.gap);
   const pxOf = (pct: number) => (pct / 100) * height;
 
   const lastTop = lastPrice ? pxOf(toPct(projection, lastPrice.value)) : 0;
   const ruleInk = light ? chart.candle.markInkSheet : chart.candle.markInk;
   const wickOpacity = light ? chart.candle.wickOpacitySheet : chart.candle.wickOpacity;
+  /* The last price belongs to the candles in front, so it steps back with them while they wait. Not animated. */
+  const lastOpacity = pending ? PENDING_OPACITY : 1;
+
+  const drawLayer = (slot: 0 | 1) => {
+    const layer = layers.slots[slot];
+    if (layer === null || layer.series.length === 0) return null;
+    /* A selection is an index into the series in front; a series on its way out is drawn whole. */
+    const inFront = slot === layers.front;
+    const cols = columns(plotWidth, layer.series.length, chart.candle.gap);
+    return (
+      <>
+        {projectSeries(layer.projection, layer.series).map((g, i) => {
+          const colour = g.up ? colors.candleUp : colors.candleDown;
+          const x = cols.xOf(i);
+          const centre = x + cols.columnWidth / 2;
+
+          return (
+            <G key={i} opacity={inFront && dimmed(i) ? DIMMED : 1}>
+              <Rect
+                x={centre - chart.candle.wickWidth / 2}
+                y={pxOf(g.wickTopPct)}
+                width={chart.candle.wickWidth}
+                height={Math.max(0, pxOf(g.wickHeightPct))}
+                rx={chart.candle.wickRadius}
+                fill={colour}
+                opacity={wickOpacity}
+              />
+              <Rect
+                x={x}
+                y={pxOf(g.bodyTopPct)}
+                width={cols.columnWidth}
+                height={pxOf(g.bodyHeightPct)}
+                rx={chart.candle.bodyRadius}
+                fill={colour}
+                filter={g.up ? `url(#${bloomUp})` : `url(#${bloomDown})`}
+              />
+            </G>
+          );
+        })}
+        {/* In ink with a keyline, never a candle's green or red: a buy is not a profit. The triangle's direction is the side. */}
+        {layer.marks.map((m, i) =>
+          m.index < layer.series.length ? (
+            <Path
+              key={`mark-${i}`}
+              d={markPath(cols.xOf(m.index) + cols.columnWidth / 2, pxOf(toPct(layer.projection, m.price)), m.side)}
+              fill={light ? colors.sheet.ink : colors.ink}
+              stroke={light ? colors.sheet.bg : colors.bg}
+              strokeWidth={chart.candle.markStroke}
+              strokeLinejoin="round"
+            />
+          ) : null,
+        )}
+      </>
+    );
+  };
+
+  /* The move from the window's first open to its last close — the same span the line and the change chip measure. */
+  const summary = [
+    accessibilityLabel ?? describeSeries(hasData ? [series[0]!.open, ...series.map((c) => c.close)] : []),
+    describeMarks(marks ?? NO_MARKS),
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
-    <View testID={testID} style={[{ height }, style]} onLayout={onLayout}>
+    <View
+      testID={testID}
+      style={[{ height }, style]}
+      onLayout={onLayout}
+      accessible={!onSelect}
+      accessibilityRole={onSelect ? undefined : 'image'}
+      accessibilityLabel={onSelect ? undefined : summary}
+    >
       {/*
         The touch layer sits ABOVE the SVG rather than inside it: react-native-svg's press
         handling differs between native and web, and a chart the user cannot tap on the web
@@ -203,34 +352,8 @@ export function Candlestick({
               : null}
 
             <G clipPath={`url(#${clipId})`}>
-            {geometry.map((g, i) => {
-              const colour = g.up ? colors.candleUp : colors.candleDown;
-              const x = xOf(i);
-              const centre = x + columnWidth / 2;
-
-              return (
-                <G key={i} opacity={dimmed(i) ? DIMMED : 1}>
-                  <Rect
-                    x={centre - chart.candle.wickWidth / 2}
-                    y={pxOf(g.wickTopPct)}
-                    width={chart.candle.wickWidth}
-                    height={Math.max(0, pxOf(g.wickHeightPct))}
-                    rx={chart.candle.wickRadius}
-                    fill={colour}
-                    opacity={wickOpacity}
-                  />
-                  <Rect
-                    x={x}
-                    y={pxOf(g.bodyTopPct)}
-                    width={columnWidth}
-                    height={pxOf(g.bodyHeightPct)}
-                    rx={chart.candle.bodyRadius}
-                    fill={colour}
-                    filter={g.up ? `url(#${bloomUp})` : `url(#${bloomDown})`}
-                  />
-                </G>
-              );
-            })}
+              <AnimatedG animatedProps={slot0}>{drawLayer(0)}</AnimatedG>
+              <AnimatedG animatedProps={slot1}>{drawLayer(1)}</AnimatedG>
             </G>
 
             {lastPrice && (
@@ -242,17 +365,18 @@ export function Candlestick({
                 stroke={ruleInk}
                 strokeWidth={chart.candle.markStroke}
                 strokeDasharray={[...chart.candle.markDash]}
+                opacity={lastOpacity}
               />
             )}
           </Svg>
 
-          {onSelect && box.width > 0 && hasData ? (
+          {onSelect && box.width > 0 && hasData && !pending ? (
             <View style={[StyleSheet.absoluteFill, { pointerEvents: 'box-none' }]}>
-              {geometry.map((_, i) => (
+              {series.map((_, i) => (
                 <Press
                   key={`hit-${i}`}
                   accessibilityRole="button"
-                  accessibilityLabel={`Candle ${i + 1} of ${geometry.length}`}
+                  accessibilityLabel={`Candle ${i + 1} of ${series.length}`}
                   accessibilityState={{ selected: selected === i }}
                   onPress={() => onSelect(selected === i ? null : i)}
                   style={{
@@ -307,6 +431,7 @@ export function Candlestick({
                 borderRadius: light ? radius.square : radius.glyph,
                 paddingVertical: space.s2,
                 paddingHorizontal: space.s6,
+                opacity: lastOpacity,
                 pointerEvents: 'none',
               }}
             >

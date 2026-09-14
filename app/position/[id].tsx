@@ -2,6 +2,7 @@
  * Screen 22 — Position & close. screens.md Group B.
  *
  * Mark + "{symbol} {side}" + leverage chip. Eyebrow + P&L 46/700, "{pct} on {notional} held".
+ * The held token's price over a range, with the user's own buys and sells marked where they filled.
  * Stat card: Entry / Mark / Size / Liquidation (down) / Funding paid (U+2212).
  * Close card: percentage + a 6pt fill bar + 25/50/75/100 pills + "Realises X and frees Y."
  * Edit TP/SL (flex:1) / "Close {n}%" (flex:1.3, white).
@@ -10,13 +11,14 @@
  * entire job is closing a position did nothing. It now calls the executor, which picks the
  * price, splits the cost basis and signs the transfer — see `POST /positions/:id/close`.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { assetGradient } from '@/design/gradients';
 import {
+  AreaChart,
   AssetMark,
   BackButton,
   Button,
@@ -27,14 +29,18 @@ import {
   LoadingRows,
   NoteStrip,
   Pill,
+  PillRow,
+  Placeholder,
   Price,
   Row,
   Screen,
   SheetCard,
   Tag,
   Text,
+  closeLine,
   colors,
   duration,
+  lineMarks,
   money,
   percent,
   pnlTone,
@@ -44,19 +50,30 @@ import {
   size,
   space,
   timing,
+  toCandles,
   useReducedMotion,
 } from '@/ui';
 import { signedMoney } from '@/format';
 import { CLOSE_STEPS, closeCta, driftSentence, holdingDrift } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
+import { fetchTimedHistory, fillsOf, type HistoryRange } from '@/data/marketData';
+import { system } from '@/data/system';
+import { settlementSymbol } from '@/data/tradable';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
 import { errorText } from '@/data/apiError';
+import { useLiveRead } from '@/markets/useLiveRead';
 
 /** The close bar. 6pt — a readout, not a control; the pills below it do the setting. */
 const BAR_H = 6;
 const STAT_ROW = 46;
+/** The ranges the asset screen offers, each as long as its label. */
+const RANGES: readonly HistoryRange[] = ['1D', '1W', '1M', '1Y'];
+/** Shorter than the asset screen's chart: here the price is context for the position, not the subject. */
+const CHART_H = 132;
+/** The most runs `/runs` answers with, and so the reach of the marks: a fill older than the oldest of them is not drawn. */
+const RUNS_WINDOW = 200;
 
 export default function PositionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -69,12 +86,41 @@ export default function PositionScreen() {
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string>();
   const [closed, setClosed] = useState<{ proceeds: number; units: number } | undefined>();
+  // A week, not a day: a position is held for longer than one, and the fills that built it are what the marks are for.
+  const [range, setRange] = useState<HistoryRange>('1W');
 
   // Every figure below comes from the position book, valued at the live mark. The handoff's
   // entry $63,880 / mark $66,560 / liquidation $58,110 were design values with nothing
   // behind them.
   const { data: p, loading, error, reload } = useAsync(() => repos.portfolio.position(id!), [id]);
   const logo = useLogo(p?.symbol);
+
+  /*
+   * The price of what is held, over the chosen range, and your fills of it (FEATURES.md #9). Asked once the position
+   * has said what it holds. As on the asset screen: a feed still warming is a wait `useLiveRead` asks again, null is
+   * a token nothing prices, and the last range stays in its box, stepped back, while the next one loads (#83).
+   */
+  const symbol = p?.symbol;
+  const history = useLiveRead(
+    async () => ({ symbol, range, candles: symbol ? await fetchTimedHistory(symbol, range) : null }),
+    [symbol, range],
+  );
+  const answer = history.data;
+  const current = answer !== undefined && answer.symbol === symbol && answer.range === range ? answer : undefined;
+  const drawn = current ?? (history.loading && answer !== undefined && answer.symbol === symbol ? answer : undefined);
+  const pending = drawn !== undefined && current === undefined;
+  const series = useMemo(() => toCandles((drawn?.candles ?? []).map((c) => c.bar)), [drawn]);
+  const spans = useMemo(() => (drawn?.candles ?? []).map(({ start, end }) => ({ start, end })), [drawn]);
+  const line = useMemo(() => closeLine(series, spans), [series, spans]);
+  const chartMove = series.length > 1 ? series.at(-1)!.close - series[0]!.open : 0;
+
+  // A failed read leaves the line unmarked and says nothing — see the asset screen, which reads the same record.
+  const runs = useAsync(() => system.runs(RUNS_WINDOW), []);
+  const fills = useMemo(
+    () => (symbol ? fillsOf(runs.data ?? [], settlementSymbol(symbol)) : []),
+    [runs.data, symbol],
+  );
+  const onLine = useMemo(() => lineMarks(fills, line.times), [fills, line]);
 
   const realise = p ? (p.unrealised * closePct) / 100 : 0;
   const free = p ? (p.margin * closePct) / 100 : 0;
@@ -177,6 +223,44 @@ export default function PositionScreen() {
 
       <Fill style={{ marginTop: space.s20 }}>
         <ScrollView showsVerticalScrollIndicator={false}>
+          {/*
+            The price with your fills on it — drag across it for a moment's price. Left out only for a token nothing
+            prices, which has no chart to draw; a read that failed says so, and the range pills stay to try another.
+          */}
+          {current?.candles === null ? null : (
+            <View style={{ marginBottom: space.s14 }}>
+              <View style={{ minHeight: CHART_H, justifyContent: 'center' }}>
+                {series.length > 1 && drawn ? (
+                  <AreaChart
+                    data={line.values}
+                    times={line.times}
+                    formatValue={fmtPrice}
+                    marks={onLine}
+                    seriesKey={`${p.symbol}:${drawn.range}`}
+                    pending={pending}
+                    height={CHART_H}
+                    color={chartMove < 0 ? colors.down : colors.up}
+                    endDot
+                    drawIn
+                  />
+                ) : history.error ? (
+                  <ErrorState error={history.error} onRetry={history.reload} />
+                ) : history.loading ? (
+                  <Placeholder height={CHART_H} style={{ borderRadius: radius.tile }} />
+                ) : (
+                  <Text variant="body" color={colors.ink55} align="center">
+                    No chart yet.
+                  </Text>
+                )}
+              </View>
+              <PillRow style={{ marginTop: space.s12 }}>
+                {RANGES.map((r) => (
+                  <Pill key={r} label={r} selected={r === range} onPress={() => setRange(r)} />
+                ))}
+              </PillRow>
+            </View>
+          )}
+
           <SheetCard borderRadius={radius.panel} padding={space.s16}>
             <Row title="Entry" value={fmtPrice(p.entry)} height={STAT_ROW} />
             <Row title="Mark" value={fmtPrice(p.mark)} height={STAT_ROW} />

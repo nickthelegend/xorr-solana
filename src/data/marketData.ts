@@ -377,6 +377,86 @@ export async function fetchHistory(symbol: string, range: HistoryRange): Promise
   return rows ? foldWindow(rows.map(toBar)) : null;
 }
 
+/**
+ * A candle of a range, and the stretch of time it covers: after `start`, up to and including `end`.
+ *
+ * The feed stamps each row with the moment its period CLOSES. CoinGecko documents it that way, and it was measured
+ * through the executor on 2026-09-14: ETH's four-hour row stamped 00:00 UTC is exactly the eight thirty-minute rows
+ * stamped 20:30 to 00:00 — the open of the 20:30 row (2505.45), the close of the 00:00 one (2476.32), and the high and
+ * low of all eight. So a row stamped `t` is the price from one row's length before `t` up to `t`.
+ */
+export type TimedBar = { bar: Bar; start: number; end: number };
+
+/**
+ * `foldWindow`, keeping the time each candle covers — the same candles bar for bar, so a chart that places a fill or
+ * names the moment under a finger draws exactly what the untimed fold drew.
+ *
+ * A candle ends at its last row's stamp and starts where the candle before it ended, so the candles tile the window
+ * with no gap for a fill to fall through, across a missing row too. The oldest starts one row before its first stamp.
+ */
+export function foldWindowTimed(rows: readonly OhlcRow[], count = CANDLE_COUNT): TimedBar[] {
+  if (rows.length === 0) return [];
+  const step = rowStep(rows);
+  const size = rows.length <= count ? 1 : Math.ceil(rows.length / count);
+  const groups: OhlcRow[][] = [];
+  for (let end = rows.length; end > 0; end -= size) {
+    groups.unshift(rows.slice(Math.max(0, end - size), end));
+  }
+  const out: TimedBar[] = [];
+  for (const group of groups) {
+    const start = out.length === 0 ? group[0]![0] - step : out[out.length - 1]!.end;
+    out.push({ bar: fold(group.map(toBar)), start, end: group[group.length - 1]![0] });
+  }
+  return out;
+}
+
+/** A whole range with each candle's time: `fetchHistory` for a chart that marks fills or can be scrubbed. */
+export async function fetchTimedHistory(symbol: string, range: HistoryRange): Promise<TimedBar[] | null> {
+  const rows = await fetchRows(symbol, HISTORY_DAYS[range]);
+  return rows ? foldWindowTimed(rows) : null;
+}
+
+/** One of this wallet's fills as a chart marks it: when it settled, which way it went, and the price recorded for it. */
+export type RecordedFill = { at: number; side: 'buy' | 'sell'; price: number };
+
+/**
+ * The fields of a `/runs` row a fill is read from.
+ *
+ * `side` is optional because `StrategyRunRow` in src/data/system.ts does not declare it, though the executor sends it
+ * with every run (PLAN.md 3.1): `buy`, `sell`, or `supply` for cash put to work, which is not a trade in the asset.
+ */
+export type FillRun = {
+  symbol: string;
+  status: string;
+  side?: string | null;
+  price: number | null;
+  finishedAt: string | null;
+};
+
+/**
+ * This wallet's buys and sells of one token, oldest first, from its runs (FEATURES.md #9).
+ *
+ * Filled runs only, a buy or a sell only, and only with a price and the time the fill settled: without any one of
+ * those there is nothing true to place, and a mark put somewhere near is a guess drawn on a price chart. `symbol` is
+ * the token a market settles as — ETH's fills are WETH's — matched without case, since the registry spells cbBTC
+ * `CBBTC`. Manual buys and sales are here as well: the executor records each as a one-off strategy's run.
+ *
+ * A rebalance's legs are not. Its runs carry the strategy's own symbol, `PORTFOLIO`, rather than the token each leg
+ * traded, so no asset's chart can claim them.
+ */
+export function fillsOf(runs: readonly FillRun[], symbol: string): RecordedFill[] {
+  const token = symbol.toUpperCase();
+  const out: RecordedFill[] = [];
+  for (const r of runs) {
+    if (r.status !== 'filled' || r.symbol.toUpperCase() !== token) continue;
+    if (r.side !== 'buy' && r.side !== 'sell') continue;
+    const at = r.finishedAt === null ? Number.NaN : Date.parse(r.finishedAt);
+    if (!Number.isFinite(at) || r.price === null || !(r.price > 0)) continue;
+    out.push({ at, side: r.side, price: r.price });
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
 export type StockQuote = {
   symbol: string;
   name: string;

@@ -20,3 +20,14 @@ export {
   type Ohlc,
 } from './projection';
 export { columns, useMeasuredBox, type Box } from './useMeasuredBox';
+export {
+  candleMarks,
+  closeLine,
+  describeMarks,
+  lineMarks,
+  type CandleMark,
+  type LineMark,
+  type MarkSide,
+  type Span,
+  type TimedFill,
+} from './marks';
