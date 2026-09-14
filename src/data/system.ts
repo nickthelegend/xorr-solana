@@ -13,6 +13,7 @@
  */
 import { api, ApiError } from './api';
 import type { AnchorReport, RouteComparison } from './types';
+import type { TrailRow } from '@/audit/anchorCheck';
 
 /* ─────────────────────────────────────────────────────────── trust and proof */
 
@@ -66,6 +67,14 @@ export type ChainVerification = {
   brokenAtSeq?: string;
   kind?: 'link' | 'content';
 };
+
+/**
+ * `GET /activity/export?format=json`: `exportTrail` in server/src/audit/log.ts, as `{ walletId, verified, rows }`.
+ *
+ * `verified` is the executor's verdict on its own chain. The device check (`src/audit/anchorCheck.ts`) reads the rows and
+ * nothing else, because that verdict is the thing it exists not to need.
+ */
+export type AuditTrailExport = { walletId: string; verified: ChainVerification; rows: TrailRow[] };
 
 
 export type Limits = {
@@ -549,6 +558,11 @@ export const system = {
     ),
   /* What Base holds about this trail, and whether we still agree with it. */
   auditAnchor: () => api.get<AnchorReport>('/audit/anchor'),
+  /*
+   * The trail itself, for re-hashing on the device (FEATURES.md #12). The JSON export, because every row's hash commits
+   * to its `wallet_id` and `payload`, and the CSV carries neither.
+   */
+  auditTrail: () => api.get<AuditTrailExport>('/activity/export?format=json'),
   anchorNow: () =>
     api.post<
       | { anchored: true; txHash: string; head: string; entryCount: number }

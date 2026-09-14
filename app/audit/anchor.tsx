@@ -18,9 +18,15 @@
  *             the server re-hashes the row at the anchored position before it says this.
  *   DIVERGED  the trail changed underneath a commitment. The alarm, and the reason to build this.
  *   NONE      nothing committed yet, which is a claim of nothing rather than a claim of safety.
+ *
+ * Those four are still the executor's verdict, and a sceptic has no more reason to accept this one than the last. So the
+ * screen asks again without it (FEATURES.md #12): the trail's export re-hashed on this device, against the head read from
+ * the contract through the build's own RPC. One line comes back — matches, does not match, or could not check — with the
+ * block the head was anchored at. There is no repair, here or anywhere.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
+import { isAddress } from 'viem';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   Button,
@@ -39,6 +45,10 @@ import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import { system } from '@/data/system';
 import type { AnchorReport, AuditAnchor } from '@/data/types';
+import { checkTrail, checkWords, type TrailCheck } from '@/audit/anchorCheck';
+import { useAuth } from '@/auth/useAuth';
+import { useHasHydrated, useStore } from '@/state/store';
+import { readLatestAnchor } from '@/wallet/chainAccess';
 
 /** The head is 32 bytes; a reader compares the ends, so show the ends. */
 const shortHash = (h: string) => `${h.slice(0, 10)}…${h.slice(-8)}`;
@@ -80,9 +90,65 @@ const STATE: Record<
   },
 };
 
+/**
+ * Why the device could not check, in the words its card shows. The reads' own errors are for a log: viem's spell out the
+ * ABI and the calldata, and the transport's carry a status line.
+ */
+class Unchecked extends Error {}
+
+/**
+ * The trail, checked here: the export re-hashed on this device, against `latest()` read from the contract.
+ *
+ * The executor still names where to read — the contract and its key, both printed in full below for anyone who would
+ * rather not take that either — and says nothing about what is there.
+ */
+async function checkOnDevice(report: AnchorReport, subject: string | undefined): Promise<TrailCheck> {
+  // A deployment with no contract has anchored nothing; there is no head to hold the trail to.
+  if (!report.configured) return { result: 'unchecked', reason: 'not-anchored' };
+  const { contract, anchoredBy } = report;
+  if (!subject || !isAddress(subject)) throw new Unchecked('No wallet address on this device.');
+  if (!isAddress(contract) || !isAddress(anchoredBy)) throw new Unchecked('The anchor’s address did not read.');
+  const [trail, anchor] = await Promise.all([
+    system.auditTrail().catch(() => {
+      throw new Unchecked('The trail did not load.');
+    }),
+    readLatestAnchor(contract, anchoredBy, subject).catch(() => {
+      throw new Unchecked('The chain did not answer.');
+    }),
+  ]);
+  return checkTrail(trail.rows, anchor);
+}
+
+/** The device's result is a verdict of its own, so it takes the verdict colours the state above uses. */
+const DEVICE_TONE = { up: colors.up, down: colors.down, quiet: colors.ink40 } as const;
+
 export default function AuditAnchorScreen() {
   const goBack = useGoBack();
-  const { data, loading, error, reload } = useAsync(() => system.auditAnchor(), []);
+  const { data, loading, error, reload, settledAt } = useAsync(() => system.auditAnchor(), []);
+  /*
+   * The wallet the anchor is about, as this device knows it: the one on file, or Privy's own address in a session that
+   * never ran onboarding — the owner `/verify` asks about. Not the executor's say-so, which is what is being checked.
+   */
+  const auth = useAuth();
+  const stored = useStore((s) => s.wallet?.address);
+  const subject = stored ?? (auth.authenticated ? auth.address : undefined);
+  const hydrated = useHasHydrated();
+  const onDevice = useAsync(
+    () => (data && hydrated ? checkOnDevice(data, subject) : new Promise<TrailCheck>(() => undefined)),
+    // Again whenever the report is read again — after an anchor above all, which moves the head.
+    [settledAt, subject, hydrated],
+  );
+  const deviceWords = onDevice.loading
+    ? undefined
+    : onDevice.error
+      ? {
+          title: 'Couldn’t check',
+          line: onDevice.error instanceof Unchecked ? onDevice.error.message : 'Something went wrong.',
+          tone: 'quiet' as const,
+        }
+      : onDevice.data
+        ? checkWords(onDevice.data)
+        : undefined;
   const [busy, setBusy] = React.useState(false);
   const [note, setNote] = React.useState<{ text: string; failed: boolean }>();
 
@@ -134,6 +200,36 @@ export default function AuditAnchorScreen() {
               <Text variant="secondarySm" color={colors.ink65} style={{ marginTop: space.s8 }}>
                 {STATE[data.state].line(data)}
               </Text>
+            </SheetCard>
+
+            {/*
+              The same question without the executor. "Checking…" until the trail is hashed, then one line — and a way to
+              ask again only where a read failed. A result is not something to retry until it says something else.
+            */}
+            <SheetCard bordered borderRadius={radius.panel} padding={space.s18}>
+              <Text variant="footnote" color={colors.ink55}>
+                ON THIS DEVICE
+              </Text>
+              <Text
+                variant="screenTitle"
+                color={deviceWords ? DEVICE_TONE[deviceWords.tone] : colors.ink40}
+                style={{ marginTop: space.s6 }}
+              >
+                {deviceWords?.title ?? 'Checking…'}
+              </Text>
+              {deviceWords ? (
+                <Text variant="secondarySm" color={colors.ink65} style={{ marginTop: space.s8 }}>
+                  {deviceWords.line}
+                </Text>
+              ) : null}
+              {onDevice.error ? (
+                <Button
+                  label="Check again"
+                  variant="ghost"
+                  onPress={onDevice.reload}
+                  style={{ marginTop: space.s12 }}
+                />
+              ) : null}
             </SheetCard>
 
             {data.latest ? (
