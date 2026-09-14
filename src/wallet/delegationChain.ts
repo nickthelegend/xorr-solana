@@ -12,6 +12,8 @@
  *   - a stop goes to the contract that holds this wallet's live policy, found by reading `policyOf` on each candidate,
  *     so a stale or wrong address is never "revoked" by a transaction that lands and does nothing;
  *   - and a stop is confirmed from the chain after it lands, not from a server's record of it.
+ *
+ * And where the executor cannot be asked at all, a screen reads the permission here itself (`standingOnChain`).
  */
 import { isAddressEqual, type Address, type Hex, type PublicClient } from 'viem';
 
@@ -71,6 +73,43 @@ export async function readPolicy(reader: ChainReader, contract: Address, owner: 
   })) as readonly [Address, bigint, bigint, boolean];
   if (isAddressEqual(delegate, NO_ADDRESS)) return null;
   return { delegate, dailyCap, expiresAt, revoked };
+}
+
+/**
+ * This wallet's permission at one contract, as the chain holds it — for a screen whose executor did not answer
+ * (FEATURES.md #1).
+ *
+ * Safety read the permission from the executor alone, so with the executor down it said "Couldn’t read your permission"
+ * and hid the stop: the one control built to need no server, unreachable exactly when there was none. The chain can be
+ * asked the same question directly.
+ *
+ * `live` is a policy the contract would spend under now — not revoked and, by the contract's own test
+ * (`block.timestamp >= expiresAt` refuses), not expired. `none` is no contract to ask, no code there, or no grant there.
+ * A read that fails is `unreadable` and never `none`: a permission nobody could look at is not an absent one.
+ */
+export type ChainStanding =
+  | { kind: 'live' | 'revoked' | 'expired'; contract: Address; policy: OnChainPolicy }
+  | { kind: 'none' }
+  | { kind: 'unreadable' };
+
+export async function standingOnChain(
+  reader: ChainReader,
+  owner: Address,
+  contract: Address | undefined,
+  now: number,
+): Promise<ChainStanding> {
+  if (!contract) return { kind: 'none' };
+  let policy: OnChainPolicy | null;
+  try {
+    policy = await readPolicy(reader, contract, owner);
+  } catch {
+    return { kind: 'unreadable' };
+  }
+  if (!policy) return { kind: 'none' };
+  // Revoked before expired, in the contract's own order: a stopped permission is stopped whatever its clock says.
+  if (policy.revoked) return { kind: 'revoked', contract, policy };
+  if (BigInt(Math.floor(now / 1000)) >= policy.expiresAt) return { kind: 'expired', contract, policy };
+  return { kind: 'live', contract, policy };
 }
 
 /**

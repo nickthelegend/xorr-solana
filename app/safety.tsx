@@ -3,12 +3,14 @@
  *
  * A state chip, a title and one line, all from the chain's answer; the two parties to the permission; the approvals
  * that outlive a stop; the rows that guard the wallet; one button. PLAN.md 6.10 / 12.5: the button SIGNS AN ON-CHAIN
- * REVOKE from the user's own wallet, so a stop needs no server to reach every device. The stop is held, not tapped
+ * REVOKE from the user's own wallet, so a stop needs no server to reach every device — and, since FEATURES.md #1, none
+ * to be offered: when the executor cannot be read, the chain is asked directly. The stop is held, not tapped
  * (FEATURES.md #3).
  */
 import React, { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { isAddress } from 'viem';
 import { useGoBack } from '@/nav/useGoBack';
 import * as LocalAuthentication from 'expo-local-authentication';
 import {
@@ -34,6 +36,7 @@ import { shortAddress } from '@/format';
 import {
   delegateUnusable,
   delegationExpired,
+  permissionOnChain,
   permissionUnreadable,
   expiryNote,
   expiryState,
@@ -43,9 +46,13 @@ import {
 } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
+import { pinnedDelegation } from '@/chain';
 import { useAllowlist } from '@/wallet/allowlist';
 import { useApprovals, type ApprovalsView } from '@/wallet/useApprovals';
 import { planResume, type GrantOptions } from '@/wallet/grantPlan';
+import { chainAccess } from '@/wallet/chainAccess';
+import { standingOnChain, type ChainStanding } from '@/wallet/delegationChain';
+import { useAuth } from '@/auth/useAuth';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { repos } from '@/data';
 import { api } from '@/data/api';
@@ -96,48 +103,6 @@ export default function Safety() {
   const now = useNow();
 
   /*
-   * Stopped, according to the chain — not according to a flag we kept.
-   *
-   * `killed` was a persisted store boolean, set when the user pressed the button in THIS browser. The chain already
-   * carries the answer as `revoked`, and the two drift the moment anything happens outside the session: a revoke from
-   * another device, a reload after site data is cleared, or simply the store not being written. Measured on the
-   * deployed build: the kill switch was pressed and confirmed, /verify read `revoked=true` off the contract, and this
-   * screen still showed a green LIVE badge. The chain governs whenever there is a permission to read; the stored flag
-   * survives only as the answer before the first fetch lands, and for the case where there is no permission at all.
-   */
-  const killed = delegation ? delegation.revoked : storedKilled;
-
-  /*
-   * A granted permission the bot cannot actually use: not revoked, not expired, cap intact — and inert, because it
-   * names a delegate key the executor is not. The screen reported LIVE through exactly this, so it gets its own state.
-   */
-  const unusable = delegateUnusable(delegation, killed);
-  /** Is there a permission at all? Distinct from "is it revoked" — a wallet that never granted has nothing to stop. */
-  const granted = delegation !== null && delegation !== undefined;
-
-  /*
-   * A permission that ran out. An expired policy showed a green dot reading **Live** over "Agents are live" — seen on
-   * the hosted deployment thirteen hours after a grant lapsed, while `/limits` reported `$0 left today`.
-   */
-  const expired = delegationExpired(delegation, killed, now);
-
-  // The allowlist is real and the executor holds it; read it.
-  const { addresses, loading: allowlistLoading, error: allowlistError } = useAllowlist();
-
-  /*
-   * The second lock, read from the party that enforces it. `XorrDelegation` bounds the BOT; the wallet's own policy
-   * bounds what this wallet may be asked to sign. It has its own screen; here it is one row that says whether it is on
-   * — or that it could not be read, rather than the row quietly not being there.
-   */
-  const privy = useAsync(() => repos.wallet.privyPolicy(), []);
-
-  /*
-   * The standing allowances, which survive a revoke. Stopping the agents revokes the DELEGATION; the ERC-20 approvals
-   * are a separate grant to the same contract and are untouched by it, so they are shown where someone disengages.
-   */
-  const { approvals, revoke: revokeApproval, revoking } = useApprovals();
-
-  /*
    * The permission, loaded when the screen opens, with the failure KEPT rather than swallowed: an unreachable executor
    * once left `delegation` null and this screen announced "No permission has been granted" over a live on-chain grant.
    */
@@ -145,7 +110,7 @@ export default function Safety() {
   /** No session, so the chain was never asked. Distinct from asked-and-absent. */
   const [signedOut, setSignedOut] = useState(false);
   /**
-   * Whether the chain has answered on this visit, either way.
+   * Whether the executor has answered on this visit, either way.
    *
    * The store's `delegation` is null both before the first read and after a read that found nothing, so a cold open
    * showed NOT GRANTED · "No agents can trade" until the answer arrived — a claim made before anything was asked.
@@ -174,12 +139,103 @@ export default function Safety() {
     };
   }, [setDelegation]);
 
-  /** Could not be read — distinct from read and absent. Outranks every other state below. */
-  const unreadable = permissionUnreadable(delegationError, delegation);
+  /*
+   * The chain's own answer, for when the executor's could not be had (FEATURES.md #1).
+   *
+   * With the executor unreachable this screen said "Couldn’t read your permission" and hid the stop — the one control
+   * built to need no server, gone exactly when the server was. So a failed read is followed by the chain's: the policy
+   * the build's pinned contract holds for the wallet that would sign the stop. Kept beside the failure that asked for
+   * it, so a later failure is never answered by an earlier read.
+   */
+  const { address } = useAuth();
+  const owner = address && isAddress(address, { strict: false }) ? address : undefined;
+  const [chainRead, setChainRead] = useState<{ after: unknown; owner: string; standing: ChainStanding }>();
+  useEffect(() => {
+    if (delegationError === undefined || !owner) return;
+    let alive = true;
+    const after = delegationError;
+    void standingOnChain(chainAccess, owner, pinnedDelegation, Date.now()).then((standing) => {
+      if (alive) setChainRead({ after, owner, standing });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [delegationError, owner]);
+  /** What this screen last changed on the permission: a stop it sent, or a grant. */
+  const [sent, setSent] = useState<'stop' | 'grant'>();
+
+  /*
+   * Whose account of the permission governs.
+   *
+   * The executor's record, read on this visit or held from earlier — until this screen changes the permission and the
+   * executor cannot be asked afterwards. The record from before the change no longer describes it; the chain, which the
+   * change was confirmed on, does.
+   */
+  const record = delegation && !(sent && delegationError !== undefined) ? delegation : null;
+  /** The chain's answer to the executor's latest failure, for the wallet signed in now. */
+  const standing =
+    chainRead && chainRead.after === delegationError && chainRead.owner === owner ? chainRead.standing : undefined;
+  /** What the chain lets this screen show in the executor's place: a live permission, or the stop sent from here. */
+  const fromChain =
+    !record && delegationError !== undefined && !signedOut ? permissionOnChain(standing, sent === 'stop') : undefined;
+  /** The policy behind it, for the parties and the expiry. */
+  const chainPolicy =
+    fromChain && standing && (standing.kind === 'live' || standing.kind === 'revoked') ? standing.policy : undefined;
+
+  /*
+   * Stopped, according to the chain — not according to a flag we kept.
+   *
+   * `killed` was a persisted store boolean, set when the user pressed the button in THIS browser. The chain already
+   * carries the answer as `revoked`, and the two drift the moment anything happens outside the session: a revoke from
+   * another device, a reload after site data is cleared, or simply the store not being written. Measured on the
+   * deployed build: the kill switch was pressed and confirmed, /verify read `revoked=true` off the contract, and this
+   * screen still showed a green LIVE badge. The chain governs whenever there is a permission to read; the stored flag
+   * survives only as the answer before the first fetch lands, and for the case where there is no permission at all.
+   */
+  const killed = record ? record.revoked : fromChain ? fromChain === 'stopped' : storedKilled;
+
+  /*
+   * A granted permission the bot cannot actually use: not revoked, not expired, cap intact — and inert, because it
+   * names a delegate key the executor is not. The screen reported LIVE through exactly this, so it gets its own state.
+   */
+  const unusable = delegateUnusable(record, killed);
+  /** Is there a permission at all? Distinct from "is it revoked" — a wallet that never granted has nothing to stop. */
+  const granted = record !== null || fromChain !== undefined;
+  /** When it ends, from whichever read governs. The chain keeps seconds. */
+  const expiresAt = record ? record.expiresAt : chainPolicy ? Number(chainPolicy.expiresAt) * 1000 : undefined;
+
+  /*
+   * A permission that ran out. An expired policy showed a green dot reading **Live** over "Agents are live" — seen on
+   * the hosted deployment thirteen hours after a grant lapsed, while `/limits` reported `$0 left today`.
+   */
+  const expired = delegationExpired({ expiresAt }, killed, now);
+
+  // The allowlist is real and the executor holds it; read it.
+  const { addresses, loading: allowlistLoading, error: allowlistError } = useAllowlist();
+
+  /*
+   * The second lock, read from the party that enforces it. `XorrDelegation` bounds the BOT; the wallet's own policy
+   * bounds what this wallet may be asked to sign. It has its own screen; here it is one row that says whether it is on
+   * — or that it could not be read, rather than the row quietly not being there.
+   */
+  const privy = useAsync(() => repos.wallet.privyPolicy(), []);
+
+  /*
+   * The standing allowances, which survive a revoke. Stopping the agents revokes the DELEGATION; the ERC-20 approvals
+   * are a separate grant to the same contract and are untouched by it, so they are shown where someone disengages.
+   */
+  const { approvals, revoke: revokeApproval, revoking } = useApprovals();
+
+  /** Could not be read — distinct from read and absent, and from read on the chain. Outranks every other state below. */
+  const unreadable = fromChain === undefined && permissionUnreadable(delegationError, record, signedOut);
+  /** The executor failed and the chain is being asked: still asking, not yet unknown. */
+  const askingChain =
+    !record && delegationError !== undefined && !signedOut && owner !== undefined && standing === undefined;
   /** Nothing read yet and nothing from earlier in the session to show meanwhile. */
-  const asking = !answered && !granted;
-  /** The one sentence that depends on the count: a live permission, read. */
-  const needsCount = !asking && !signedOut && !unreadable && granted && !killed && !unusable && !expired;
+  const asking = (!answered || askingChain) && !granted;
+  /** The one sentence that depends on the count: a live permission, as the executor reported it. */
+  const needsCount =
+    !asking && !signedOut && !unreadable && granted && !killed && !unusable && !expired && fromChain === undefined;
 
   // Signed by the user, on-chain: a stop reaches every device without any server needing to be reachable.
   const { grant: signGrant, revoke: signRevoke, busy, error: txError } = useGrantDelegation();
@@ -205,8 +261,10 @@ export default function Safety() {
 
   async function toggle() {
     setLocalError(undefined);
+    // The stop is what the held button commits; every other state here re-grants.
+    const stopping = !(killed || unusable || expired);
     try {
-      const plan = killed || unusable || expired ? await planFromChain() : undefined;
+      const plan = stopping ? undefined : await planFromChain();
       // Nothing on record to resume from: the limits are the user's to set, on the screen that sets them.
       if (plan?.kind === 'choose') {
         router.push('/delegate');
@@ -238,14 +296,29 @@ export default function Safety() {
        */
       if (plan) await grantWith(plan.dailyCapUsd, plan.durationMs, { approvals: plan.approvals });
       else await signRevoke();
-      setDelegation(await repos.wallet.delegation());
-      setKilled(unusable || expired ? false : !killed);
     } catch (e) {
       setLocalError(errorText(e));
+      return;
+    }
+    /*
+     * Done: the grant recorded, or the stop confirmed on the chain. What the screen shows next is read again, and a read
+     * that fails now is not an error about a change that happened — with the executor down, which is exactly when a stop
+     * goes out without it, the chain answers in its place (`permissionOnChain`).
+     */
+    setSent(stopping ? 'stop' : 'grant');
+    setKilled(unusable || expired ? false : !killed);
+    try {
+      setDelegation(await repos.wallet.delegation());
+      setDelegationError(undefined);
+    } catch (e) {
+      if (e instanceof NotSignedIn) setSignedOut(true);
+      else setDelegationError(e);
     }
   }
 
   const heldApprovals = approvals ? approvals.tokens.filter((t) => !t.none && !t.unread) : [];
+  const ownerShown = record ? record.ownerPubkey : owner;
+  const delegateShown = record ? record.delegatePubkey : chainPolicy?.delegate;
 
   return (
     <Screen>
@@ -330,7 +403,9 @@ export default function Safety() {
         <Text variant="body" color={colors.ink55} style={{ marginTop: space.s8 }}>
           {signedOut || unreadable
             ? 'Anything you granted stays in force.'
-            : killExplanation(killed, running, unusable, granted, expired)}
+            : fromChain === 'live'
+              ? 'Our server isn’t answering. Stopping still works.'
+              : killExplanation(killed, running, unusable, granted, expired)}
         </Text>
       )}
 
@@ -340,18 +415,21 @@ export default function Safety() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: space.s16, gap: space.s12 }}
         >
-          {/* Signed out, nobody's permission has been read: a sign-in, not a claim about a wallet nobody named. */}
+          {/*
+            Signed out, nobody's permission has been read: a sign-in, not a claim about a wallet nobody named. And a read
+            that failed is not "Nothing granted yet": that card is for a wallet something actually answered for.
+          */}
           {signedOut ? (
             <Button label="Sign in" onPress={() => router.push('/welcome')} />
           ) : asking ? (
             <Placeholder height={110} style={{ borderRadius: radius.panel }} />
-          ) : delegation ? (
+          ) : record || chainPolicy ? (
             <SheetCard borderRadius={radius.panel} padding={space.s16}>
               <Row
                 title="Your wallet"
                 value={
                   <Text variant="rowPrimary" color={colors.ink55} selectable>
-                    {delegation.ownerPubkey ? shortAddress(delegation.ownerPubkey) : '—'}
+                    {ownerShown ? shortAddress(ownerShown) : '—'}
                   </Text>
                 }
                 height={SETTING_ROW}
@@ -361,14 +439,14 @@ export default function Safety() {
                 secondary="Can’t withdraw"
                 value={
                   <Text variant="rowPrimary" color={colors.ink55} selectable>
-                    {delegation.delegatePubkey ? shortAddress(delegation.delegatePubkey) : '—'}
+                    {delegateShown ? shortAddress(delegateShown) : '—'}
                   </Text>
                 }
                 height={size.rowLg}
                 divider={false}
               />
             </SheetCard>
-          ) : (
+          ) : unreadable ? null : (
             <SheetCard borderRadius={radius.panel} padding={space.s16}>
               <Text variant="rowPrimary">Nothing granted yet</Text>
               <Button
@@ -381,9 +459,9 @@ export default function Safety() {
           )}
 
           {/* The deadline the contract enforces whether or not anyone is watching — only when it is close. */}
-          {expiryNote(delegation?.expiresAt, now) ? (
-            <NoteStrip kind={expiryState(delegation?.expiresAt, now) === 'expired' ? 'blocked' : 'risk'}>
-              {expiryNote(delegation?.expiresAt, now)!}
+          {expiryNote(expiresAt, now) ? (
+            <NoteStrip kind={expiryState(expiresAt, now) === 'expired' ? 'blocked' : 'risk'}>
+              {expiryNote(expiresAt, now)!}
             </NoteStrip>
           ) : null}
 

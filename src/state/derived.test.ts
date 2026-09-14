@@ -8,6 +8,7 @@ import { MINUS, money } from '../format';
 import { btcBars } from '../data/fixtures/series';
 import { agentFixtures } from '../data/fixtures/agents';
 import { activityFixtures } from '../data/fixtures/activity';
+import type { ChainStanding, OnChainPolicy } from '../wallet/delegationChain';
 
 describe('agent controls — screen 4', () => {
   it('capLabel and the marker position', () => {
@@ -784,5 +785,47 @@ describe('what approving the onboarding proposal creates — PLAN.md 3.7', () =>
 
   it('with nothing to trade or follow, targets nothing — which the screen refuses to create', () => {
     expect(d.proposalRebalance(sleeves, [], [])).toEqual({ state: 'watch', targets: {}, cashPct: 100 });
+  });
+});
+
+/*
+ * Safety with the executor down (FEATURES.md #1): a live policy read off the chain is shown with its stop. Anything else
+ * the pinned contract says keeps the unknown state — except the stop this screen sent, once the chain reads it revoked.
+ */
+describe('what Safety shows from the chain', () => {
+  const contract = '0xc32dd8aeed3035d46c7c82a351fc5522c9d463f4' as const;
+  const policy: OnChainPolicy = {
+    delegate: '0xc38f00000000000000000000000000000000c8a5',
+    dailyCap: 1_600_000_000n,
+    expiresAt: 1_999_999_999n,
+    revoked: false,
+  };
+  const at = (kind: 'live' | 'revoked' | 'expired'): ChainStanding => ({
+    kind,
+    contract,
+    policy: { ...policy, revoked: kind === 'revoked' },
+  });
+
+  it('shows a live policy, and so its stop', () => {
+    expect(d.permissionOnChain(at('live'), false)).toBe('live');
+    expect(d.permissionOnChain(at('live'), true)).toBe('live');
+  });
+
+  it('does not call a permission stopped, ended or ungranted on one contract’s word', () => {
+    const others: (ChainStanding | undefined)[] = [
+      at('revoked'),
+      at('expired'),
+      { kind: 'none' },
+      { kind: 'unreadable' },
+      undefined,
+    ];
+    for (const standing of others) expect(d.permissionOnChain(standing, false)).toBeUndefined();
+  });
+
+  it('says stopped for the stop this screen sent once the chain reads it revoked — and only then', () => {
+    expect(d.permissionOnChain(at('revoked'), true)).toBe('stopped');
+    expect(d.permissionOnChain(at('expired'), true)).toBeUndefined();
+    expect(d.permissionOnChain({ kind: 'unreadable' }, true)).toBeUndefined();
+    expect(d.permissionOnChain(undefined, true)).toBeUndefined();
   });
 });

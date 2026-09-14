@@ -8,6 +8,7 @@
 import { MINUS, money, percent, price, quantity, signedMoney } from '../format';
 import type { Bar } from '../data/types';
 import { DEFAULT_BUY } from '@/data/tradable';
+import type { ChainStanding } from '@/wallet/delegationChain';
 
 // ── Agent controls (screen 4) ────────────────────────────────────────────────
 
@@ -486,6 +487,28 @@ export function killCta(
   if (!granted) return 'Set the limits';
   if (expired) return 'Grant a new permission';
   return killed ? 'Resume trading' : 'Stop all trading';
+}
+
+/**
+ * What Safety may show from the chain when the executor's read failed (FEATURES.md #1).
+ *
+ * A live policy, as a rule. That is a positive fact — something can trade, and here is the stop — and showing it risks
+ * nothing. A revoked, expired or absent policy on the build's pinned contract is a different kind of answer: with the
+ * executor down there is no asking whether a permission stands anywhere else (a stop itself falls back to the contract
+ * the executor names, `useGrantDelegation`), so "Stopped" or "Not granted" on one contract's word could be the false
+ * negative this screen exists not to tell. Those keep the unknown state.
+ *
+ * Except the stop this screen sent. `revoke` returns only once the chain shows the policy revoked (`confirmStopped`), and
+ * that policy is the live one shown a moment before, so the chain reading it revoked is the answer to what was done here
+ * rather than a claim about a permission nobody looked at.
+ */
+export function permissionOnChain(
+  standing: ChainStanding | undefined,
+  stoppedHere: boolean,
+): 'live' | 'stopped' | undefined {
+  if (standing?.kind === 'live') return 'live';
+  if (standing?.kind === 'revoked' && stoppedHere) return 'stopped';
+  return undefined;
 }
 
 // ── Activity (screen 15) ─────────────────────────────────────────────────────
