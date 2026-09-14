@@ -720,6 +720,80 @@ export function nothingSettles(
   return Array.isArray(tradable) && tradable.length === 0 && (watchable?.length ?? 0) > 0;
 }
 
+// ── Setup progress (Home) ────────────────────────────────────────────────────
+
+/** A read a setup step is decided from, as a screen holds it: the answer, or the failure that came back instead. */
+export type SetupRead<T> = { data: T | undefined; error: unknown };
+
+/** What of a permission decides whether the bot can use it — the fields Safety decides that from. */
+export type SetupPermission = { revoked: boolean; expiresAt?: number; delegateIsCurrent?: boolean };
+
+export type SetupStepKey = 'fund' | 'permit' | 'strategy';
+
+/** `unknown` is a step whose read failed: never counted as done, and never as still to do. */
+export type SetupStepState = 'done' | 'todo' | 'unknown';
+
+export type SetupStep = {
+  key: SetupStepKey;
+  label: string;
+  /** Where the step is taken. */
+  href: '/deposit' | '/delegate' | '/strategies';
+  state: SetupStepState;
+};
+
+/**
+ * The three things a wallet needs before the bot can trade for it (FEATURES.md #14): money in, a permission, a strategy.
+ *
+ * `null` means Home shows nothing, and it stands for three different facts. Nobody is signed in, so there is no wallet to
+ * set up. A read is still out, and a step drawn before it answers is a guess — the card would flash "to do" at a wallet
+ * that has done it. Or every step is done. A read that FAILED keeps the card, with that one step unknown: a card that
+ * disappeared on a failure would be telling a new wallet it was ready to trade.
+ *
+ * The permission counts only while the bot can use it, by the helpers Safety decides that with: not revoked, not past its
+ * end, and granted to the key the executor signs with. A strategy counts in any state. The step is having made one, and
+ * where nothing settles every strategy is watched, so a step that waited for a live one could never be finished there.
+ */
+export function setupSteps(input: {
+  signedOut: boolean;
+  balance: SetupRead<{ total: number } | null>;
+  permission: SetupRead<SetupPermission | null>;
+  strategies: SetupRead<readonly unknown[]>;
+  now?: number;
+}): SetupStep[] | null {
+  const { signedOut, balance, permission, strategies, now = Date.now() } = input;
+  if (signedOut) return null;
+  if ([balance, permission, strategies].some((read) => read.data === undefined && !read.error)) return null;
+
+  const steps: SetupStep[] = [
+    { key: 'fund', label: 'Fund', href: '/deposit', state: fundState(balance) },
+    { key: 'permit', label: 'Permit', href: '/delegate', state: permitState(permission, now) },
+    { key: 'strategy', label: 'First strategy', href: '/strategies', state: strategyState(strategies) },
+  ];
+  return steps.every((step) => step.state === 'done') ? null : steps;
+}
+
+function fundState(read: SetupRead<{ total: number } | null>): SetupStepState {
+  // A balance the executor did not give is not a zero, whatever shape the absence took.
+  if (read.error || !read.data || !Number.isFinite(read.data.total)) return 'unknown';
+  return read.data.total > 0 ? 'done' : 'todo';
+}
+
+function permitState(read: SetupRead<SetupPermission | null>, now: number): SetupStepState {
+  if (read.error) return 'unknown';
+  // Null is the executor's own answer that nothing was ever granted.
+  if (!read.data) return 'todo';
+  const permission = read.data;
+  // `killed` is false because those helpers stand aside for a stop, and here a stop is simply `revoked`.
+  const usable =
+    !permission.revoked && !delegationExpired(permission, false, now) && !delegateUnusable(permission, false);
+  return usable ? 'done' : 'todo';
+}
+
+function strategyState(read: SetupRead<readonly unknown[]>): SetupStepState {
+  if (read.error || !Array.isArray(read.data)) return 'unknown';
+  return read.data.length > 0 ? 'done' : 'todo';
+}
+
 // ── Stored records as rows (/risk, /strategy/[id]) ───────────────────────────
 
 /** One row of a stored record: where it came from, what to call it, and the value as a person reads it. */

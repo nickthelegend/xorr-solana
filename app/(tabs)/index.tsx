@@ -2,16 +2,17 @@
  * Home — the reference video's layout, on this app's theme (2026-09-12).
  *
  * Top to bottom: who is signed in — the Privy wallet, tap for the profile; ONE balance — tap for the
- * portfolio, where your coins, positions, profit, cash and earnings live; and a sheet with the agents,
- * today's gainers, and — since 2026-09-13 — tokenized stocks and futures. A single figure on top is
- * deliberate: the breakdown belongs to the portfolio.
+ * portfolio, where your coins, positions, profit, cash and earnings live; for a wallet that cannot trade
+ * yet, the three steps it has left (FEATURES.md #14); and a sheet with the agents, today's gainers, and —
+ * since 2026-09-13 — tokenized stocks and futures. A single figure on top is deliberate: the breakdown
+ * belongs to the portfolio.
  *
  * Everything arrives the way the reference's screens do, through `<Rise>` and `<RollingNumber>`, so
  * reduced motion turns it off.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { agentGradient, assetGradient } from '@/design/gradients';
 import { Icon } from '@/design/Icon';
 import {
@@ -48,9 +49,11 @@ import { system, type Limits } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { usePrivyIdentity } from '@/auth/usePrivyIdentity';
+import { useSignedOut } from '@/auth/useSignedOut';
 import { useHasHydrated, useStore } from '@/state/store';
+import { useNow } from '@/state/useNow';
 import type { Agent, Instrument } from '@/data/types';
-import { nothingSettles } from '@/state/derived';
+import { nothingSettles, setupSteps, type SetupStep, type SetupStepKey, type SetupStepState } from '@/state/derived';
 
 type SheetTab = 'agents' | 'gainers' | 'stocks' | 'futures';
 
@@ -123,6 +126,86 @@ function TabFailed({ what, error, onRetry }: { what: string; error: Error; onRet
   );
 }
 
+/** The box a step's mark sits in. The tick, the ring and the dash share it, so the three names line up. */
+const STEP_MARK = 14;
+const STEP_RING = 1.5;
+
+/** What a screen reader hears after a step's name. */
+const STEP_SAID: Readonly<Record<SetupStepState, string>> = {
+  done: 'done',
+  todo: 'not done yet',
+  unknown: 'couldn’t check',
+};
+
+/** Where each step goes, said to a screen reader. */
+const STEP_OPENS: Readonly<Record<SetupStepKey, string>> = {
+  fund: 'Deposit',
+  permit: 'the limits',
+  strategy: 'Strategies',
+};
+
+/**
+ * What a new wallet has left before the bot can trade for it (FEATURES.md #14): three steps across, each opening the
+ * screen it is taken on.
+ *
+ * Done is a quiet tick, never green — green is profit, and a finished step is not a gain. Still to do is a ring, its name
+ * in full ink because it is the one to look at. A step whose read failed is a dash, as every unknown value is.
+ */
+function SetupCard({ steps, onOpen }: { steps: readonly SetupStep[]; onOpen: (href: SetupStep['href']) => void }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        borderRadius: radius.card,
+        borderWidth: 1,
+        borderColor: colors.cardBorder,
+        backgroundColor: colors.surface,
+      }}
+    >
+      {steps.map((step, i) => (
+        <Press
+          key={step.key}
+          onPress={() => onOpen(step.href)}
+          accessibilityRole="button"
+          accessibilityLabel={`${step.label}, ${STEP_SAID[step.state]}. Opens ${STEP_OPENS[step.key]}.`}
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            gap: space.s6,
+            paddingVertical: space.s12,
+            paddingHorizontal: space.s4,
+            borderLeftWidth: i > 0 ? 1 : 0,
+            borderLeftColor: colors.hairline,
+          }}
+        >
+          <View style={{ width: STEP_MARK, height: STEP_MARK, alignItems: 'center', justifyContent: 'center' }}>
+            {step.state === 'done' ? (
+              <Icon name="check" size={STEP_MARK} color={colors.ink55} />
+            ) : step.state === 'todo' ? (
+              <View
+                style={{
+                  width: STEP_MARK,
+                  height: STEP_MARK,
+                  borderRadius: STEP_MARK / 2,
+                  borderWidth: STEP_RING,
+                  borderColor: colors.ink40,
+                }}
+              />
+            ) : (
+              <Text variant="secondarySm" color={colors.ink55}>
+                —
+              </Text>
+            )}
+          </View>
+          <Text variant="secondarySm" color={step.state === 'todo' ? colors.ink : colors.ink55} numberOfLines={1}>
+            {step.label}
+          </Text>
+        </Press>
+      ))}
+    </View>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const hydrated = useHasHydrated();
@@ -190,6 +273,55 @@ export default function Home() {
   const total = balance.data?.total ?? null;
   const live = isLive(limits.data ?? undefined, killed);
   const fillsNothing = nothingSettles(tradable.data, watchable.data);
+
+  /*
+   * What a new wallet still has to do before the bot can trade for it (FEATURES.md #14): the balance above, the permission
+   * as the chain holds it, and the strategies. The permission is read here rather than taken from the store, which holds
+   * `null` both before its read and after one that found nothing, and keeps no failure at all.
+   */
+  const permission = useAsync(() => repos.wallet.delegation(), []);
+  const strategies = useAsync(() => repos.strategies.list(), []);
+  const signedOut = useSignedOut();
+  const now = useNow();
+  const setup = setupSteps({
+    // Refused for want of a session is not a failed read: nobody's wallet was asked about.
+    signedOut:
+      signedOut || [balance.error, permission.error, strategies.error].some((e) => e instanceof NotSignedIn),
+    balance,
+    permission,
+    strategies,
+    now,
+  });
+
+  /*
+   * Back from Deposit, the limits or Strategies, the steps are read again. Home is a tab and is not mounted afresh, so the
+   * step just taken would go on saying it is still to do. Only while the card shows, so a wallet that is set up is not
+   * re-read on every return; and not on the first focus, which is the mount and has its own reads. The limits come too,
+   * or the dot beside the tabs would go on saying "Not trading" beside a permission the card has just ticked.
+   */
+  const settingUp = setup !== null;
+  const setupShowing = useRef(settingUp);
+  useEffect(() => {
+    setupShowing.current = settingUp;
+  }, [settingUp]);
+  const firstFocus = useRef(true);
+  const { reload: reloadBalance } = balance;
+  const { reload: reloadLimits } = limits;
+  const { reload: reloadPermission } = permission;
+  const { reload: reloadStrategies } = strategies;
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocus.current) {
+        firstFocus.current = false;
+        return;
+      }
+      if (!setupShowing.current) return;
+      reloadBalance();
+      reloadLimits();
+      reloadPermission();
+      reloadStrategies();
+    }, [reloadBalance, reloadLimits, reloadPermission, reloadStrategies]),
+  );
 
   /* The Privy account, named by its email when Privy has one, and by its wallet otherwise. */
   const address = wallet?.address;
@@ -282,6 +414,16 @@ export default function Home() {
               Watch-only here: strategies are tracked, not traded.
             </NoteStrip>
           </View>
+        ) : null}
+
+        {/*
+          What is left before the bot can trade. Under the watch-only note, because Permit asks for a permission and PLAN.md
+          4.3 wants that note said first. Nothing until every read has answered; gone once the last step is done.
+        */}
+        {setup ? (
+          <Rise index={2} style={{ marginTop: space.s16, paddingHorizontal: space.gutter }}>
+            <SetupCard steps={setup} onOpen={(href) => router.push(href)} />
+          </Rise>
         ) : null}
 
         {/* The sheet: a grabber, a rounded top, and it runs to the bottom — the reference's watchlist. */}

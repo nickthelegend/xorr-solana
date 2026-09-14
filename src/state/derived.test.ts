@@ -786,3 +786,135 @@ describe('what approving the onboarding proposal creates — PLAN.md 3.7', () =>
     expect(d.proposalRebalance(sleeves, [], [])).toEqual({ state: 'watch', targets: {}, cashPct: 100 });
   });
 });
+
+/*
+ * The steps a new wallet has left, on Home (FEATURES.md #14).
+ *
+ * Every combination of the three reads is walked, signed in and out, because the rule that matters is the one a hand-picked
+ * case misses: a read that failed is unknown — never done and never still to do — and nothing is drawn while a read is out.
+ */
+describe('setup progress — FEATURES.md #14', () => {
+  const HOUR = 3_600_000;
+  const now = Date.UTC(2026, 8, 14, 12);
+  const failure = new Error('Failed to fetch');
+  const OUTCOMES = ['out', 'failed', 'done', 'todo'] as const;
+  type Outcome = (typeof OUTCOMES)[number];
+
+  const usable: d.SetupPermission = { revoked: false, expiresAt: now + 72 * HOUR, delegateIsCurrent: true };
+
+  function read<T>(outcome: Outcome, done: T, todo: T): d.SetupRead<T> {
+    if (outcome === 'out') return { data: undefined, error: undefined };
+    if (outcome === 'failed') return { data: undefined, error: failure };
+    return { data: outcome === 'done' ? done : todo, error: undefined };
+  }
+
+  const stepsFor = (balance: Outcome, permission: Outcome, strategies: Outcome, signedOut = false) =>
+    d.setupSteps({
+      signedOut,
+      balance: read(balance, { total: 250 }, { total: 0 }),
+      permission: read<d.SetupPermission | null>(permission, usable, null),
+      strategies: read<readonly unknown[]>(strategies, [{ id: 'dca-1' }], []),
+      now,
+    });
+
+  it('draws nothing while a read is out, nothing once all three are done, and otherwise each step as its read said', () => {
+    for (const balance of OUTCOMES) {
+      for (const permission of OUTCOMES) {
+        for (const strategies of OUTCOMES) {
+          const outcomes = [balance, permission, strategies];
+          const label = outcomes.join(' / ');
+          const steps = stepsFor(balance, permission, strategies);
+          if (outcomes.includes('out') || outcomes.every((o) => o === 'done')) {
+            expect(steps, label).toBeNull();
+            continue;
+          }
+          expect(
+            steps?.map((s) => s.state),
+            label,
+          ).toEqual(outcomes.map((o) => (o === 'failed' ? 'unknown' : o)));
+        }
+      }
+    }
+  });
+
+  it('draws nothing signed out, whatever the reads said', () => {
+    for (const balance of OUTCOMES) {
+      for (const permission of OUTCOMES) {
+        for (const strategies of OUTCOMES) {
+          expect(stepsFor(balance, permission, strategies, true), [balance, permission, strategies].join(' / ')).toBeNull();
+        }
+      }
+    }
+  });
+
+  it('keeps the card when the only step not done is one it could not read', () => {
+    // Hiding it would say the wallet is ready. A dash says what is known: that it could not be checked.
+    expect(stepsFor('done', 'done', 'failed')?.map((s) => s.state)).toEqual(['done', 'done', 'unknown']);
+    expect(stepsFor('failed', 'failed', 'failed')?.map((s) => s.state)).toEqual(['unknown', 'unknown', 'unknown']);
+  });
+
+  it('names the three steps in order, each opening the screen it is taken on', () => {
+    expect(stepsFor('todo', 'todo', 'todo')).toEqual([
+      { key: 'fund', label: 'Fund', href: '/deposit', state: 'todo' },
+      { key: 'permit', label: 'Permit', href: '/delegate', state: 'todo' },
+      { key: 'strategy', label: 'First strategy', href: '/strategies', state: 'todo' },
+    ]);
+  });
+
+  describe('a permission counts only while the bot can use it', () => {
+    const permitWith = (permission: d.SetupPermission | null) =>
+      d
+        .setupSteps({
+          signedOut: false,
+          balance: { data: { total: 0 }, error: undefined },
+          permission: { data: permission, error: undefined },
+          strategies: { data: [], error: undefined },
+          now,
+        })
+        ?.find((s) => s.key === 'permit')?.state;
+
+    it('is done when live, and to do when never granted', () => {
+      expect(permitWith(usable)).toBe('done');
+      expect(permitWith(null)).toBe('todo');
+    });
+
+    it('is to do once revoked, past its end, or granted to a key the executor does not sign with', () => {
+      expect(permitWith({ ...usable, revoked: true })).toBe('todo');
+      expect(permitWith({ ...usable, expiresAt: now - HOUR })).toBe('todo');
+      expect(permitWith({ ...usable, delegateIsCurrent: false })).toBe('todo');
+    });
+
+    it('is not failed for what an older executor cannot say', () => {
+      // Absent is not expired and not a moved key — the rule `delegationExpired` and `delegateUnusable` already keep.
+      expect(permitWith({ revoked: false })).toBe('done');
+    });
+  });
+
+  it('does not read a balance nobody gave as an empty one', () => {
+    const fundWith = (balance: d.SetupRead<{ total: number } | null>) =>
+      d
+        .setupSteps({
+          signedOut: false,
+          balance,
+          permission: { data: null, error: undefined },
+          strategies: { data: [], error: undefined },
+          now,
+        })
+        ?.find((s) => s.key === 'fund')?.state;
+    expect(fundWith({ data: null, error: undefined })).toBe('unknown');
+    expect(fundWith({ data: { total: Number.NaN }, error: undefined })).toBe('unknown');
+    expect(fundWith({ data: { total: 0 }, error: undefined })).toBe('todo');
+    expect(fundWith({ data: { total: 0.42 }, error: undefined })).toBe('done');
+  });
+
+  it('counts a strategy in any state, since a watched one is all a network that settles nothing can have', () => {
+    const steps = d.setupSteps({
+      signedOut: false,
+      balance: { data: { total: 250 }, error: undefined },
+      permission: { data: usable, error: undefined },
+      strategies: { data: [{ state: 'watch' }], error: undefined },
+      now,
+    });
+    expect(steps).toBeNull();
+  });
+});
