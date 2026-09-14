@@ -28,6 +28,7 @@ import {
   radius,
   size,
   space,
+  type FigureKind,
 } from '@/ui';
 import { money, quantity, signedMoney } from '@/format';
 import { useAsync } from '@/data/useAsync';
@@ -98,9 +99,9 @@ function DisposalRow({ disposal }: { disposal: Disposal }) {
       </Text>
 
       <View style={{ flexDirection: 'row', gap: space.s20, marginTop: space.s12 }}>
-        <Cell label="Sold" value={quantity(disposal.units)} />
-        <Cell label="Proceeds" value={money(disposal.proceeds)} />
-        <Cell label="Cost" value={disposal.basisKnown ? money(disposal.cost) : '—'} />
+        <Cell label="Sold" value={quantity(disposal.units)} figure="units" />
+        <Cell label="Proceeds" value={money(disposal.proceeds)} figure="own" />
+        <Cell label="Cost" value={disposal.basisKnown ? money(disposal.cost) : '—'} figure="own" />
       </View>
 
       {disposal.basisKnown ? null : (
@@ -117,13 +118,16 @@ function DisposalRow({ disposal }: { disposal: Disposal }) {
   );
 }
 
-function Cell({ label, value }: { label: string; value: string }) {
+/** One figure of a sale, which says what it is: each of them is the person's money, in units or in dollars. */
+function Cell({ label, value, figure }: { label: string; value: string; figure: FigureKind }) {
   return (
     <View style={{ gap: space.s2 }}>
       <Text variant="footnote" color={colors.ink55}>
         {label}
       </Text>
-      <Text variant="secondarySm">{value}</Text>
+      <Text variant="secondarySm" figure={figure}>
+        {value}
+      </Text>
     </View>
   );
 }

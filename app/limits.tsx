@@ -81,6 +81,7 @@ export default function Limits() {
                 variant="screenTitle"
                 color={data.revoked || expired ? colors.ink40 : colors.ink}
                 style={{ marginTop: space.s6 }}
+                figure="own"
               >
                 {data.granted === false
                   ? 'Nothing granted yet'
@@ -127,10 +128,10 @@ export default function Limits() {
                 }}
               >
                 {/* Where the two tallies differ there is no spend figure that adds up, so none is printed. */}
-                <Text variant="secondarySm" color={colors.ink55}>
+                <Text variant="secondarySm" color={colors.ink55} figure="own">
                   {view.agree ? `${money(view.spent)} spent` : ''}
                 </Text>
-                <Text variant="secondarySm" color={colors.ink55}>
+                <Text variant="secondarySm" color={colors.ink55} figure="own">
                   {money(data.dailyCapUsd)} cap
                 </Text>
               </View>

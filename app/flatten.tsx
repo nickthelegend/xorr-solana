@@ -175,7 +175,7 @@ export default function Flatten() {
                         grouping and the U+2212 minus are consistent everywhere — and the
                         audit test in src/qa enforces it, which is how this got caught.
                       */}
-                      <Text variant="footnote" color={colors.ink55}>
+                      <Text variant="footnote" color={colors.ink55} figure="units">
                         {quantity(l.units, 6)} {l.symbol}
                       </Text>
                     </View>
@@ -237,6 +237,7 @@ export default function Flatten() {
           ) : null}
           <Button
             label={p && p.legs.length > 0 ? `Sell ${money(p.totalUsd)} into USDC` : 'Sell everything'}
+            figure="own"
             variant="destructive"
             height={size.buttonLg}
             // Not on a failed preview: a sale nobody could show you first is the dare this screen exists to refuse.
@@ -295,7 +296,16 @@ function Outcome({ result }: { result: Result }) {
               tone={l.status === 'sold' ? 'up' : l.status === 'failed' ? 'down' : 'neutral'}
             />
           </View>
-          <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s4 }}>
+          {/*
+            A sale's detail is what it sold and for how much — "0.500000 WETH for $1,200.00." — so it hides while balances
+            are hidden. Any other detail is the executor's reason, drawn as it came.
+          */}
+          <Text
+            variant="secondarySm"
+            color={colors.ink55}
+            style={{ marginTop: space.s4 }}
+            figure={l.status === 'sold' ? 'units' : undefined}
+          >
             {l.detail}
           </Text>
           {l.explorer ? (

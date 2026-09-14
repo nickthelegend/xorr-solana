@@ -85,6 +85,7 @@ export default function Pnl() {
                 height={size.rowLg}
                 title={r.symbol}
                 secondary={`${quantity(r.unitsSold)} sold · ${money(r.proceeds)} back${r.basisIncomplete ? ' · cost incomplete' : ''}`}
+                secondaryFigure="units"
                 value={
                   <Price variant="rowPrimary" tone={pnlTone(r.realised)}>
                     {signedMoney(r.realised)}

@@ -21,11 +21,12 @@ import {
   colors,
   radius,
   space,
+  type FigureKind,
 } from '@/ui';
 import { money, price, quantity } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { system, type StrategyRunRow } from '@/data/system';
-import { kindLabel } from '@/strategies/ladder';
+import { kindLabel, labelFigure } from '@/strategies/ladder';
 
 function toneFor(status: StrategyRunRow['status']): string {
   if (status === 'filled') return colors.up;
@@ -67,7 +68,7 @@ export default function RunDetail() {
             contentContainerStyle={{ paddingBottom: space.s30, gap: space.s10 }}
           >
             <SheetCard bordered borderRadius={radius.panel} padding={space.s18}>
-              <Text variant="footnote" color={colors.ink55}>
+              <Text variant="footnote" color={colors.ink55} figure={labelFigure(run.kind)}>
                 {run.label.toUpperCase()}
               </Text>
               <Text variant="screenTitle" color={toneFor(run.status)} style={{ marginTop: space.s6 }}>
@@ -88,15 +89,16 @@ export default function RunDetail() {
                   Verbatim. "daily cap" and "no live market for WETH" need different responses from
                   the reader, and one friendly sentence for both would cost them that.
                 */}
-                <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s6 }}>
+                {/* A refusal can name the cap it met — "$1,600.00 cap" — which is the person's own, as on the list. */}
+                <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s6 }} figure="own">
                   {run.error}
                 </Text>
               </SheetCard>
             ) : null}
 
-            {run.usd !== null ? <Field label="Size" value={money(run.usd)} /> : null}
-            {run.units !== null ? <Field label="Units" value={quantity(run.units)} /> : null}
-            {run.price !== null ? <Field label="Price" value={price(run.price)} /> : null}
+            {run.usd !== null ? <Field label="Size" value={money(run.usd)} figure="own" /> : null}
+            {run.units !== null ? <Field label="Units" value={quantity(run.units)} figure="units" /> : null}
+            {run.price !== null ? <Field label="Price" value={price(run.price)} figure="market" /> : null}
 
             {run.signature ? (
               <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
@@ -116,13 +118,14 @@ export default function RunDetail() {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+/** One figure of the run, which says what it is: the size and units are the person's, the price is the market's. */
+function Field({ label, value, figure }: { label: string; value: string; figure: FigureKind }) {
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <Text variant="footnote" color={colors.ink55}>
         {label}
       </Text>
-      <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
+      <Text variant="rowPrimary" style={{ marginTop: space.s4 }} figure={figure}>
         {value}
       </Text>
     </SheetCard>

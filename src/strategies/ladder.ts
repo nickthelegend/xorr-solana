@@ -10,6 +10,7 @@
  * above it.
  */
 import type { StrategyKind } from '../data/types';
+import type { FigureKind } from '../ui/mask';
 
 type Rung = {
   tier: number;
@@ -134,6 +135,15 @@ export function setupFor(
 /** A kind as a person reads it — "Recurring buy", not `dca`. One the ladder does not know keeps its own name. */
 export function kindLabel(kind: string): string {
   return STRATEGY_LADDER.find((e) => e.kind === kind)?.label ?? kind;
+}
+
+/**
+ * What a strategy's label is while balances are hidden (FEATURES.md #47). A label is written when the strategy is made,
+ * and a recurring buy's carries its size — "$50 of WETH, weekly" — which is the person's money. A range's carries the
+ * prices it trades between, which say nothing of how much is held, so those stay.
+ */
+export function labelFigure(kind: string): FigureKind {
+  return kind === 'grid' ? 'market' : 'own';
 }
 
 /**

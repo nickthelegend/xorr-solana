@@ -32,8 +32,8 @@ import { money, quantity } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 import { system, type StrategyRunRow } from '@/data/system';
-import { recordEntries } from '@/state/derived';
-import { kindLabel } from '@/strategies/ladder';
+import { recordEntries, recordFigure } from '@/state/derived';
+import { kindLabel, labelFigure } from '@/strategies/ladder';
 
 /** The most `/runs` answers with. Fewer than this back, and it was every run the wallet has. */
 const RUNS_WINDOW = 200;
@@ -90,7 +90,7 @@ export default function StrategyDetail() {
               <Text variant="footnote" color={colors.ink55}>
                 {kindLabel(strategy.kind).toUpperCase()} · {strategy.state.toUpperCase()}
               </Text>
-              <Text variant="screenTitle" style={{ marginTop: space.s6 }}>
+              <Text variant="screenTitle" style={{ marginTop: space.s6 }} figure={labelFigure(strategy.kind)}>
                 {strategy.label}
               </Text>
               <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
@@ -125,7 +125,7 @@ export default function StrategyDetail() {
                     <Text variant="secondarySm" color={colors.ink65}>
                       {e.label}
                     </Text>
-                    <Text variant="secondarySm" style={{ flexShrink: 1, textAlign: 'right' }}>
+                    <Text variant="secondarySm" style={{ flexShrink: 1, textAlign: 'right' }} figure={recordFigure(e)}>
                       {e.value}
                     </Text>
                   </View>
@@ -150,7 +150,7 @@ export default function StrategyDetail() {
                   <Text variant="rowPrimary" style={{ marginTop: space.s6 }}>
                     {filled.length} filled · {mine.length - filled.length} did not
                   </Text>
-                  <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
+                  <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }} figure="own">
                     {windowFull
                       ? `${money(filledUsd)} across its fills, in your latest ${RUNS_WINDOW} runs.`
                       : `${money(filledUsd)} across its fills.`}
@@ -167,7 +167,7 @@ export default function StrategyDetail() {
                 title={new Date(r.at).toLocaleDateString('en-US')}
                 secondary={r.error ?? new Date(r.at).toLocaleTimeString('en-US')}
                 value={
-                  <Text variant="rowPrimary" color={toneFor(r.status)}>
+                  <Text variant="rowPrimary" color={toneFor(r.status)} figure="units">
                     {r.status === 'filled' && r.units !== null ? quantity(r.units) : r.status}
                   </Text>
                 }

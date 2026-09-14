@@ -31,7 +31,7 @@ import {
 import { agentGradient } from '@/design/gradients';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
-import { recordEntries } from '@/state/derived';
+import { recordEntries, recordFigure } from '@/state/derived';
 
 export default function Risk() {
   const goBack = useGoBack();
@@ -92,7 +92,8 @@ export default function Risk() {
                     <Text variant="secondarySm" color={colors.ink65}>
                       {e.label}
                     </Text>
-                    <Text variant="secondarySm" style={{ flexShrink: 1, textAlign: 'right' }}>
+                    {/* An agent's dollar limits are the person's money, and hide while balances are hidden. */}
+                    <Text variant="secondarySm" style={{ flexShrink: 1, textAlign: 'right' }} figure={recordFigure(e)}>
                       {e.value}
                     </Text>
                   </View>

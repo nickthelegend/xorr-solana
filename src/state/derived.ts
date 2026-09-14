@@ -7,6 +7,7 @@
  */
 import { MINUS, money, percent, price, quantity, signedMoney } from '../format';
 import type { Bar } from '../data/types';
+import type { FigureKind } from '../ui/mask';
 import { DEFAULT_BUY } from '@/data/tradable';
 import type { ChainStanding } from '@/wallet/delegationChain';
 
@@ -889,10 +890,21 @@ function strategyState(read: SetupRead<readonly unknown[]>): SetupStepState {
 
 // ── Stored records as rows (/risk, /strategy/[id]) ───────────────────────────
 
-/** One row of a stored record: where it came from, what to call it, and the value as a person reads it. */
-export type RecordEntry = { key: string; label: string; value: string };
+/**
+ * One row of a stored record: where it came from, what to call it, the value as a person reads it, and what the value
+ * is — so a screen can hide the money in it while balances are hidden and keep the prices (FEATURES.md #47).
+ */
+export type RecordEntry = { key: string; label: string; value: string; unit?: RecordUnit };
 
-type RecordUnit = 'money' | 'price' | 'percent';
+export type RecordUnit = 'money' | 'price' | 'percent';
+
+/**
+ * What a record's value is while balances are hidden (FEATURES.md #47): what it spends or allows is the person's money
+ * and hides; a range's bounds, an entry or a high are prices and stay. A count or a percentage is no amount either way.
+ */
+export function recordFigure(entry: RecordEntry): FigureKind | undefined {
+  return entry.unit === 'money' ? 'own' : entry.unit === 'price' ? 'market' : undefined;
+}
 
 /**
  * Names and units for the keys the app and the executor write, in the words the setup screens use.
@@ -982,7 +994,7 @@ export function recordEntries(
     if (Array.isArray(value)) {
       if (value.every((v) => v === null || typeof v !== 'object')) {
         const joined = value.map((v) => recordValue(v, unit)).join(', ');
-        rows.push({ key, label, value: value.length > 0 ? joined : '—' });
+        rows.push({ key, label, value: value.length > 0 ? joined : '—', unit });
       } else {
         value.forEach((v, i) => visit(`${key}.${i}`, `${label} ${i + 1}`, v, unit));
       }
@@ -998,7 +1010,7 @@ export function recordEntries(
       }
       return;
     }
-    rows.push({ key, label, value: recordValue(value, unit) });
+    rows.push({ key, label, value: recordValue(value, unit), unit });
   };
   for (const [k, v] of Object.entries(record ?? {})) {
     const field = recordField(k);

@@ -44,7 +44,7 @@ import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 import { errorText } from '@/data/apiError';
 import { winRate } from '@/state/derived';
-import { setupFor } from '@/strategies/ladder';
+import { labelFigure, setupFor } from '@/strategies/ladder';
 import type { StrategyKind } from '@/data/types';
 
 /** The strategy kind each agent's mandate covers. See the header comment. */
@@ -217,6 +217,7 @@ export default function AgentDetail() {
                   divider={i < mine.length - 1}
                   onPress={() => router.push(`/strategy/${s.id}`)}
                   title={s.label}
+                  titleFigure={labelFigure(s.kind)}
                   secondary={`${s.symbol} · ${money(s.dailyAllocationUsd)} a day`}
                   value={
                     <Text variant="secondarySm" color={s.state === 'live' ? colors.ink : colors.ink40}>

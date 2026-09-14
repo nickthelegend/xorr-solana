@@ -40,7 +40,7 @@ import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import { useGoBack } from '@/nav/useGoBack';
 import { useRefreshControl } from '@/ui/useRefreshControl';
-import { STRATEGY_LADDER } from '@/strategies/ladder';
+import { STRATEGY_LADDER, labelFigure } from '@/strategies/ladder';
 import type { Strategy } from '@/data/types';
 
 type Tab = 'running' | 'library';
@@ -251,6 +251,7 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
     <View>
       <Row
         title={s.label}
+        titleFigure={labelFigure(s.kind)}
         secondary={`${s.state === 'watch' ? 'Watching · ' : ''}Next run ${next}`}
         value={<Price>{money(s.dailyAllocationUsd, { decimals: 0 })}</Price>}
         delta={isPaused ? 'Paused' : s.state === 'live' ? 'Live' : 'Watch'}

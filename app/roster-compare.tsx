@@ -32,6 +32,7 @@ import {
   radius,
   size,
   space,
+  type FigureKind,
 } from '@/ui';
 import { agentGradient } from '@/design/gradients';
 import { signedPnl, winRate } from '@/state/derived';
@@ -87,7 +88,7 @@ export default function RosterCompare() {
                   </View>
 
                   <View style={{ flexDirection: 'row', gap: space.s20, marginTop: space.s14 }}>
-                    <Cell label="30d" value={signedPnl(a.pnl30d)} tone={pnlTone(a.pnl30d)} />
+                    <Cell label="30d" value={signedPnl(a.pnl30d)} tone={pnlTone(a.pnl30d)} figure="own" />
                     <Cell label="Won" value={winRate(a)} />
                     <Cell label="Trades" value={String(a.trades)} />
                   </View>
@@ -106,7 +107,18 @@ export default function RosterCompare() {
   );
 }
 
-function Cell({ label, value, tone }: { label: string; value: string; tone?: 'up' | 'down' | 'neutral' }) {
+/** One figure of an agent's record. Its 30-day P&L is money made in this wallet, and hides while balances are hidden. */
+function Cell({
+  label,
+  value,
+  tone,
+  figure,
+}: {
+  label: string;
+  value: string;
+  tone?: 'up' | 'down' | 'neutral';
+  figure?: FigureKind;
+}) {
   return (
     <View style={{ gap: space.s2 }}>
       <Text variant="footnote" color={colors.ink55}>
@@ -115,6 +127,7 @@ function Cell({ label, value, tone }: { label: string; value: string; tone?: 'up
       <Text
         variant="rowPrimary"
         color={tone === 'up' ? colors.up : tone === 'down' ? colors.down : colors.ink}
+        figure={figure}
       >
         {value}
       </Text>

@@ -23,6 +23,7 @@ import {
   colors,
   radius,
   space,
+  type FigureKind,
 } from '@/ui';
 import { money, shortAddress } from '@/format';
 import { useAsync } from '@/data/useAsync';
@@ -123,7 +124,7 @@ export default function DelegationDetail() {
               ) : null}
             </SheetCard>
 
-            <Field label="Daily cap" value={money(data.dailyCapUsd)} />
+            <Field label="Daily cap" value={money(data.dailyCapUsd)} figure="own" />
             <Field
               label="Expiry"
               value={expiryPhrase(data.expiresAt, now)}
@@ -163,13 +164,14 @@ export default function DelegationDetail() {
   );
 }
 
-function Field({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/** One fact of the grant. The cap is the person's money and hides while balances are hidden; the rest are not figures. */
+function Field({ label, value, sub, figure }: { label: string; value: string; sub?: string; figure?: FigureKind }) {
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <Text variant="footnote" color={colors.ink55}>
         {label}
       </Text>
-      <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
+      <Text variant="rowPrimary" style={{ marginTop: space.s4 }} figure={figure}>
         {value}
       </Text>
       {sub ? (

@@ -113,7 +113,7 @@ export default function GraphSpends() {
                       <Text variant="secondarySm" color={colors.ink65}>
                         {indexDay(d.day)}
                       </Text>
-                      <Text variant="secondarySm">
+                      <Text variant="secondarySm" figure="own">
                         {usd(d.total)} · {trades === 1 ? 'one trade' : `${d.tradeCount} trades`}
                       </Text>
                     </View>
@@ -136,7 +136,10 @@ function SpendRow({ spend }: { spend: GraphSpend }) {
   return (
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <Text variant="rowPrimary">{usd(spend.amount)}</Text>
+        {/* What the permission spent is the person's money, and hides while balances are hidden (FEATURES.md #47). */}
+        <Text variant="rowPrimary" figure="own">
+          {usd(spend.amount)}
+        </Text>
         <Text variant="footnote" color={colors.ink55}>
           {new Date(Number(spend.timestamp) * 1000).toLocaleString('en-US')}
         </Text>

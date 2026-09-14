@@ -29,7 +29,7 @@ import {
 import { useAsync } from '@/data/useAsync';
 import { useNow } from '@/state/useNow';
 import { repos } from '@/data';
-import { kindLabel } from '@/strategies/ladder';
+import { kindLabel, labelFigure } from '@/strategies/ladder';
 
 /** Relative time, in the coarsest unit that still says something useful. */
 function when(at: number, now: number): { label: string; overdue: boolean } {
@@ -86,6 +86,7 @@ export default function Schedule() {
                   height={size.rowLg}
                   onPress={() => router.push(`/strategy/${s.id}`)}
                   title={s.label}
+                  titleFigure={labelFigure(s.kind)}
                   // The kind as the library names it — "Recurring buy", not `dca`.
                   secondary={`${s.symbol} · ${kindLabel(s.kind)}`}
                   value={

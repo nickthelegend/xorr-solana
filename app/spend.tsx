@@ -91,7 +91,9 @@ export default function Spend() {
                 >
                   {/* A date, not the index's day number ("20345"). */}
                   <Text variant="rowPrimary">{indexDay(d.day)}</Text>
-                  <Text variant="rowPrimary">{money(d.usd)}</Text>
+                  <Text variant="rowPrimary" figure="own">
+                    {money(d.usd)}
+                  </Text>
                 </View>
                 <View
                   style={{

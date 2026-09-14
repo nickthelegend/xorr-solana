@@ -36,6 +36,7 @@ import {
   size,
   space,
   SignInPrompt,
+  type FigureKind,
   type TagTone,
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
@@ -120,6 +121,12 @@ export default function WithdrawEverything() {
         : aave.data.suppliedUsd > 0
           ? `${money(aave.data.suppliedUsd)} earning. You sign this step.`
           : 'Nothing supplied.';
+  /*
+   * The plan names the person's money — what would sell, what is earning — so those figures hide while balances are
+   * hidden (FEATURES.md #47). A read that failed is the executor's sentence instead, drawn as it came.
+   */
+  const sellsFigure: FigureKind | undefined = preview.error ? undefined : 'units';
+  const exitsFigure: FigureKind | undefined = aave.error ? undefined : 'own';
 
   const header = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8 }}>
@@ -199,8 +206,8 @@ export default function WithdrawEverything() {
                 In this order
               </Eyebrow>
               <SheetCard borderRadius={radius.note} padding={space.s16} style={{ marginTop: space.s10, gap: space.s12 }}>
-                <PlanLine n={1} title="Sell every position" detail={sells} />
-                <PlanLine n={2} title="Take your USDC out of savings" detail={exits} />
+                <PlanLine n={1} title="Sell every position" detail={sells} figure={sellsFigure} />
+                <PlanLine n={2} title="Take your USDC out of savings" detail={exits} figure={exitsFigure} />
                 <PlanLine
                   n={3}
                   title="Send your USDC"
@@ -274,13 +281,13 @@ export default function WithdrawEverything() {
   );
 }
 
-function PlanLine({ n, title, detail }: { n: number; title: string; detail: string }) {
+function PlanLine({ n, title, detail, figure }: { n: number; title: string; detail: string; figure?: FigureKind }) {
   return (
     <View>
       <Text variant="rowPrimary">
         {n}. {title}
       </Text>
-      <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s4 }}>
+      <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s4 }} figure={figure}>
         {detail}
       </Text>
     </View>
@@ -306,9 +313,14 @@ function Progress({ steps }: { steps: Step[] }) {
           </View>
           {step.lines.map((line, j) => (
             <View key={`${step.key}-${j}`} style={{ marginTop: space.s8 }}>
+              {/*
+                A finished line says what moved — "Sold 0.5000 WETH for $1,200.00" — which hides while balances are
+                hidden. A line left or failed is the reason, drawn as it came.
+              */}
               <Text
                 variant="secondarySm"
                 color={line.tone === 'failed' ? colors.down : line.tone === 'left' ? colors.ink45 : colors.ink}
+                figure={line.tone === 'done' ? 'units' : undefined}
               >
                 {line.text}
               </Text>

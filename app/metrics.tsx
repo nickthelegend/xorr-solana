@@ -269,7 +269,7 @@ export default function Metrics() {
               <Text variant="footnote" color={colors.ink55}>
                 SPENT TODAY
               </Text>
-              <Text variant="rowPrimary" style={{ marginTop: space.s6 }}>
+              <Text variant="rowPrimary" style={{ marginTop: space.s6 }} figure="own">
                 {money(data.spentTodayUsd)}
               </Text>
               <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s6 }}>

@@ -223,8 +223,15 @@ function Outcome({ outcome }: { outcome: FaucetOutcome | undefined }) {
   }
   // Gas that could not be topped up is the one detail that changes what the wallet can do next.
   const gasFailed = outcome.eth !== null && 'failed' in outcome.eth;
+  // What arrived is the person's money, in its units: it hides while balances are hidden (FEATURES.md #47).
   return (
-    <Text variant="footnote" color={gasFailed ? colors.down : colors.ink} align="center" style={{ marginTop: space.s10 }}>
+    <Text
+      variant="footnote"
+      color={gasFailed ? colors.down : colors.ink}
+      align="center"
+      style={{ marginTop: space.s10 }}
+      figure="units"
+    >
       {`Added ${quantity(outcome.usdc.amount, 2)} USDC.${gasFailed ? ' Gas top-up failed.' : ''}`}
     </Text>
   );

@@ -79,6 +79,7 @@ export default function SellEverything() {
                 height={size.rowLg}
                 title={l.symbol}
                 secondary={quantity(l.units)}
+                secondaryFigure="units"
                 value={<Price variant="rowPrimary">{money(l.usd)}</Price>}
               />
             ))}

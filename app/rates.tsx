@@ -107,10 +107,10 @@ export default function Rates() {
                 <Text variant="footnote" color={colors.ink55}>
                   YOURS
                 </Text>
-                <Text variant="rowPrimary" style={{ marginTop: space.s6 }}>
+                <Text variant="rowPrimary" style={{ marginTop: space.s6 }} figure="own">
                   {money(balance.data.supplied)} supplied · {money(balance.data.cash)} idle
                 </Text>
-                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
+                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }} figure="own">
                   {/*
                     What the rate would be worth on the idle balance — clearly framed as arithmetic on
                     a floating rate, not a projection of earnings.

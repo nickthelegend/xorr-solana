@@ -169,7 +169,7 @@ export default function Yield() {
                     ))}
                   </View>
 
-                  <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }}>
+                  <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }} figure="own">
                     {portion === 1
                       ? 'Withdraws all of it, with interest.'
                       : `Withdraws about ${money(amount)}, leaving ${money(supplied - amount)} earning.`}
@@ -212,6 +212,7 @@ export default function Yield() {
 
       <Button
         label={portion === 1 ? 'Withdraw all of it' : `Withdraw ${money(amount)}`}
+        figure="own"
         height={size.buttonLg}
         disabled={!p?.available || supplied <= 0}
         loading={busy}

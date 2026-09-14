@@ -26,11 +26,13 @@ import {
   colors,
   radius,
   space,
+  type FigureKind,
 } from '@/ui';
 import { money } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
 
+/** A size to ask about, the same three for everyone — a question, not a balance, so they stay while balances are hidden. */
 const SIZES = [100, 500, 2_500] as const;
 
 /** Values as sent, formatted only where the type is unambiguous. */
@@ -40,6 +42,15 @@ function render(value: unknown): string {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return value;
   return JSON.stringify(value);
+}
+
+/**
+ * The dollar amounts the router read off this wallet's own permission — what is left today, and the size it would send
+ * out of it — arrive as bare numbers under keys ending in `Usd`, so they hide as amounts while balances are hidden
+ * (FEATURES.md #47). Everything else is words, a flag or a route's hashes.
+ */
+function figureOf(key: string, value: unknown): FigureKind | undefined {
+  return typeof value === 'number' && /usd$/i.test(key) ? 'units' : undefined;
 }
 
 export default function GraphDecision() {
@@ -83,7 +94,7 @@ export default function GraphDecision() {
                 <Text variant="footnote" color={colors.ink55}>
                   {key}
                 </Text>
-                <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s6 }}>
+                <Text variant="secondary" color={colors.ink65} style={{ marginTop: space.s6 }} figure={figureOf(key, value)}>
                   {render(value)}
                 </Text>
               </SheetCard>

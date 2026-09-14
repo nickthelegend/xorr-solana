@@ -32,6 +32,7 @@ import {
 import { money, quantity } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { system, type StrategyRunRow } from '@/data/system';
+import { labelFigure } from '@/strategies/ladder';
 
 const FILTERS = ['All', 'Filled', 'Refused', 'Skipped', 'Failed'] as const;
 
@@ -100,8 +101,11 @@ export default function Runs() {
                 onPress={() => router.push(`/runs/${r.id}`)}
                 title={r.symbol}
                 secondary={`${r.label} · ${new Date(r.at).toLocaleString('en-US')}`}
+                // Hidden balances hide the units it filled, and the label's size; the date beside the label stays.
+                figure="units"
+                secondaryFigure={labelFigure(r.kind)}
                 value={
-                  <Text variant="rowPrimary" color={toneFor(r.status)}>
+                  <Text variant="rowPrimary" color={toneFor(r.status)} figure="own">
                     {/*
                       The number where there is one, the status where there is not. A refused run
                       showing "$0.00" would claim it traded nothing; it did not trade at all.

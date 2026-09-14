@@ -438,11 +438,13 @@ export default function AutoClose() {
         }
       />
 
+      {/* What the holding would make or lose is the person's money: both spans hide while balances are hidden. */}
       <Text
         variant="footnote"
         color={colors.sheet.dim}
         align="center"
         style={{ marginTop: space.s12 }}
+        figure="own"
       >
         Make{' '}
         <Text variant="footnote" color={colors.candleUp}>

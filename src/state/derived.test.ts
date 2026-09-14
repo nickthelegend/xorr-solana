@@ -569,8 +569,20 @@ describe('a stored record, as rows — /risk and /strategy/[id]', () => {
 
   it("names an agent's limits, in dollars", () => {
     expect(d.recordEntries({ maxUsdPerTrade: 50, maxUsdPerDay: 1200 })).toEqual([
-      { key: 'maxUsdPerTrade', label: 'Most per trade', value: '$50.00' },
-      { key: 'maxUsdPerDay', label: 'Most per day', value: '$1,200.00' },
+      { key: 'maxUsdPerTrade', label: 'Most per trade', value: '$50.00', unit: 'money' },
+      { key: 'maxUsdPerDay', label: 'Most per day', value: '$1,200.00', unit: 'money' },
+    ]);
+  });
+
+  it('says which values are money and which are prices, so hidden balances can tell them apart', () => {
+    // A range's bounds are prices and stay while balances are hidden; what each rung buys is the person's money.
+    const rows = d.recordEntries({ lower: 2400, upper: 2600, steps: 4, usdPerStep: 50, targets: { WETH: 55 } });
+    expect(rows.map((r) => [r.label, r.unit])).toEqual([
+      ['Bottom of range', 'price'],
+      ['Top of range', 'price'],
+      ['Rungs', undefined],
+      ['Each rung buys', 'money'],
+      ['Target · WETH', 'percent'],
     ]);
   });
 
