@@ -12,9 +12,9 @@
  */
 import React from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
-import { maskFigure, maskMode } from './mask';
+import type { FigureKind } from './mask';
 import { Press } from './Press';
-import { Text, Price, useBalancesHidden, type PriceTone } from './Text';
+import { Text, Price, type PriceTone } from './Text';
 import { colors, divider as dividerStyle, size, space } from './tokens';
 
 export interface RowProps {
@@ -22,7 +22,10 @@ export interface RowProps {
   left?: React.ReactNode;
   /** Row primary line. */
   title?: React.ReactNode;
-  /** Row secondary line, under the primary. */
+  /**
+   * Row secondary line, under the primary. A string, or a line in parts — a string beside a `FigureSpan` — which is
+   * drawn in the same ink.
+   */
   secondary?: React.ReactNode;
   /** Right-aligned value. */
   value?: React.ReactNode;
@@ -47,6 +50,16 @@ export interface RowProps {
   light?: boolean;
   /** Replaces the whole structured body — for a plain label/value pair. */
   children?: React.ReactNode;
+  /**
+   * What the row's figures are while balances are hidden (FEATURES.md #47, `mask.ts`): the value, the delta, and the
+   * secondary line unless `secondaryFigure` says otherwise. The person's own money unless said, as a `Price` is — so a
+   * row of market prices says `figure="market"`. A value or delta passed as an element says its own.
+   */
+  figure?: FigureKind;
+  /** The secondary line's kind where it is not the value's: a run's date and label beside the units it filled. */
+  secondaryFigure?: FigureKind;
+  /** A title that carries a figure — a strategy's label, "$50 of WETH, weekly". Unsaid, a title is words. */
+  titleFigure?: FigureKind;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -65,15 +78,12 @@ export function Row({
   onPress,
   light = false,
   children,
+  figure = 'own',
+  secondaryFigure,
+  titleFigure,
   style,
   testID,
 }: RowProps) {
-  /*
-   * A secondary line can carry money of its own — a holding's value, "avg $2,410.00" — so while balances are
-   * hidden (FEATURES.md #47) its dollar figures hide with the value column's, which `Price` masks.
-   */
-  const hidden = useBalancesHidden();
-  const dollars = maskMode(hidden, undefined, undefined);
   const body = children ?? (
     <>
       {left}
@@ -84,20 +94,26 @@ export function Row({
               variant="rowPrimary"
               color={light ? colors.sheet.ink : colors.ink}
               numberOfLines={1}
+              figure={titleFigure}
             >
               {title}
             </Text>
           ) : (
             title
           )}
-          {typeof secondary === 'string' ? (
+          {/*
+            A secondary line can carry money of its own — a holding's units, what a strategy spends a day — so it is a
+            figure like the value column, and hides with it while balances are hidden.
+          */}
+          {typeof secondary === 'string' || Array.isArray(secondary) ? (
             <Text
               variant="secondarySm"
               color={light ? colors.sheet.muted : colors.ink38}
               numberOfLines={1}
               style={{ marginTop: space.s2 }}
+              figure={secondaryFigure ?? figure}
             >
-              {maskFigure(secondary, dollars)}
+              {secondary}
             </Text>
           ) : (
             secondary
@@ -113,6 +129,7 @@ export function Row({
               variant="rowPrimary"
               color={light ? colors.sheet.ink : colors.ink}
               numberOfLines={1}
+              figure={figure}
             >
               {value}
             </Price>
@@ -125,6 +142,7 @@ export function Row({
               tone={deltaTone}
               numberOfLines={1}
               style={{ marginTop: space.s2 }}
+              figure={figure}
             >
               {delta}
             </Price>

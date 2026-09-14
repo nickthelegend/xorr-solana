@@ -114,7 +114,11 @@ export default function DcaSetup() {
       />
 
       <View style={{ alignItems: 'center', marginTop: space.s22, gap: space.s6 }}>
-        <Price variant="heroAmount" color={colors.sheet.ink}>
+        {/*
+          Being typed, so never masked while balances are hidden. What it commits to — the runs below and the sentence on
+          the button — is the person's money, and hides.
+        */}
+        <Price variant="heroAmount" color={colors.sheet.ink} figure="input">
           ${amount}
         </Price>
         <Text variant="body" color={colors.sheet.muted}>
@@ -203,6 +207,7 @@ export default function DcaSetup() {
       ) : (
         <Button
           label={`Buy ${sentence}`}
+          figure="own"
           backgroundColor={colors.candleUp}
           color={colors.ink}
           disabled={usd <= 0}

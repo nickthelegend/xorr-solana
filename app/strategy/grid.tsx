@@ -210,7 +210,9 @@ export default function GridSetup() {
           {symbol} right now
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s12 }}>
-          <Price color={colors.sheet.ink}>{mark === undefined ? '—' : money(mark)}</Price>
+          <Price color={colors.sheet.ink} figure="market">
+            {mark === undefined ? '—' : money(mark)}
+          </Price>
           {mark !== undefined ? (
             <Press
               onPress={suggest}
@@ -348,7 +350,7 @@ export default function GridSetup() {
                       {percent(Math.abs(back.data.ret), { explicitSign: false })} on what it put to work.
                     </Text>
                     {back.data.leftCost > 0 ? (
-                      <Text variant="secondarySm" color={colors.candleDown}>
+                      <Text variant="secondarySm" color={colors.candleDown} figure="own">
                         {/* What a broken range looks like, in its own numbers. */}
                         It would have ended holding {money(back.data.leftValue)} of {symbol} that
                         cost {money(back.data.leftCost)}.
@@ -369,7 +371,8 @@ export default function GridSetup() {
                 - outside the range it does nothing, and every lot bought on the way down is still held.
             */}
             <View style={{ marginTop: space.s16, gap: 8 }}>
-              <Text variant="secondarySm" color={colors.sheet.muted}>
+              {/* What it would commit is the person's money; the rungs and the price above are prices, and stay. */}
+              <Text variant="secondarySm" color={colors.sheet.muted} figure="own">
                 At most {money(maxCommitted)} at work, one buy per rung at a time.
               </Text>
               <Text variant="secondarySm" color={colors.sheet.muted}>

@@ -23,6 +23,7 @@
  */
 import React from 'react';
 import { ActivityIndicator, View, type StyleProp, type ViewStyle } from 'react-native';
+import type { FigureKind } from './mask';
 import { Press } from './Press';
 import { DOUBLE_TAP_MS, pressGuardFor } from './pressGuard';
 import { Text } from './Text';
@@ -75,6 +76,11 @@ export interface ButtonProps {
   /** Overrides the fill — the gold "Long gold" CTA takes the instrument's own colour. */
   backgroundColor?: string;
   color?: string;
+  /**
+   * A label that names the person's money — "Withdraw $1,200.00" — says which figure it is, and hides it while balances
+   * are hidden (FEATURES.md #47). Unsaid, a label is words.
+   */
+  figure?: FigureKind;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -160,6 +166,7 @@ export function Button({
   height,
   backgroundColor,
   color,
+  figure,
   style,
   testID,
 }: ButtonProps) {
@@ -192,7 +199,7 @@ export function Button({
       ]}
     >
       {loading ? <ActivityIndicator size="small" color={fg} /> : null}
-      <Text variant="button" color={fg} numberOfLines={1}>
+      <Text variant="button" color={fg} numberOfLines={1} figure={figure}>
         {label}
       </Text>
     </Press>

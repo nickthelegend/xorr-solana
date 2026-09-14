@@ -102,6 +102,7 @@ export default function Futures() {
                 title={m.symbol}
                 secondary={`${m.maxLeverage}x · OI ${compactMoney(m.openInterestUsd)}`}
                 value={fmtPrice(m.markPx)}
+                figure="market"
                 delta={m.change24hPct === null ? undefined : percent(m.change24hPct, { digits: 2, explicitSign: true })}
                 deltaTone={m.change24hPct === null || m.change24hPct === 0 ? 'neutral' : m.change24hPct > 0 ? 'up' : 'down'}
               />

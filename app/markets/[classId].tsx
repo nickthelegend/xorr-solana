@@ -112,7 +112,11 @@ export default function ClassList() {
                 title={item.sym}
                 secondary={`${item.name} · ${item.tag}`}
                 // Quiet where nothing prices it: the class note says so once, above.
-                value={<Price color={item.feed === 'unavailable' ? colors.ink55 : undefined}>{item.px}</Price>}
+                value={
+                  <Price color={item.feed === 'unavailable' ? colors.ink55 : undefined} figure="market">
+                    {item.px}
+                  </Price>
+                }
                 delta={item.chg}
                 deltaTone={item.up ? 'up' : 'down'}
                 onPress={() => router.push(`/asset/${item.sym}`)}

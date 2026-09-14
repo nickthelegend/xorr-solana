@@ -224,7 +224,7 @@ export default function PositionScreen() {
         <Price variant="pnlHero" tone={pnlTone(p.unrealised)}>
           {signedMoney(p.unrealised)}
         </Price>
-        <Text variant="body" color={colors.ink55}>
+        <Text variant="body" color={colors.ink55} figure="own">
           {percent(p.unrealisedPct)} on {money(p.notional)} held
         </Text>
       </View>
@@ -243,6 +243,7 @@ export default function PositionScreen() {
                     data={line.values}
                     times={line.times}
                     formatValue={fmtPrice}
+                    figure="market"
                     marks={onLine}
                     seriesKey={`${p.symbol}:${drawn.range}`}
                     pending={pending}
@@ -270,13 +271,18 @@ export default function PositionScreen() {
           )}
 
           <SheetCard borderRadius={radius.panel} padding={space.s16}>
-            <Row title="Entry" value={fmtPrice(p.entry)} height={STAT_ROW} />
-            <Row title="Mark" value={fmtPrice(p.mark)} height={STAT_ROW} />
-            <Row title="Size" value={`${quantity(p.units)} ${p.symbol}`} height={STAT_ROW} />
+            {/* Prices stay while balances are hidden; the size, and what funding has cost, are the person's. */}
+            <Row title="Entry" value={fmtPrice(p.entry)} figure="market" height={STAT_ROW} />
+            <Row title="Mark" value={fmtPrice(p.mark)} figure="market" height={STAT_ROW} />
+            <Row title="Size" value={`${quantity(p.units)} ${p.symbol}`} figure="units" height={STAT_ROW} />
             {p.liquidation > 0 ? (
               <Row
                 title="Liquidation"
-                value={<Price tone="down">{fmtPrice(p.liquidation)}</Price>}
+                value={
+                  <Price tone="down" figure="market">
+                    {fmtPrice(p.liquidation)}
+                  </Price>
+                }
                 height={STAT_ROW}
               />
             ) : null}
@@ -293,13 +299,13 @@ export default function PositionScreen() {
           </SheetCard>
 
           {drift ? (
-            <NoteStrip kind="risk" style={{ marginTop: space.s14 }}>
+            <NoteStrip kind="risk" style={{ marginTop: space.s14 }} figure="units">
               {driftSentence(p.symbol, drift)}
             </NoteStrip>
           ) : null}
 
           {closed ? (
-            <NoteStrip kind="acted" style={{ marginTop: space.s14 }}>
+            <NoteStrip kind="acted" style={{ marginTop: space.s14 }} figure="units">
               {`Sold ${quantity(closed.units)} ${p.symbol} for ${money(closed.proceeds)}.`}
             </NoteStrip>
           ) : null}
@@ -351,7 +357,8 @@ export default function PositionScreen() {
                 ))}
               </View>
 
-              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }}>
+              {/* One sentence to a screen reader, its two figures in their own ink: `figure` covers the spans in it. */}
+              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }} figure="own">
                 Realises{' '}
                 <Text variant="secondarySm" color={colors.ink}>
                   {signedMoney(realise)}

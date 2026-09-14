@@ -153,7 +153,7 @@ export default function MarketsScreen() {
                       Quiet, not flagged. The class note above already says nothing prices these,
                       and a yellow "No price feed" tag on every row said it eight more times.
                     */
-                    <Price variant="rowPrimary" color={colors.ink55}>
+                    <Price variant="rowPrimary" color={colors.ink55} figure="market">
                       {item.px}
                     </Price>
                   ) : (
@@ -166,7 +166,9 @@ export default function MarketsScreen() {
                       {(sparks.data?.[item.sym]?.length ?? 0) > 1 ? (
                         <Sparkline data={sparks.data![item.sym]!} />
                       ) : null}
-                      <Price variant="rowPrimary">{item.px}</Price>
+                      <Price variant="rowPrimary" figure="market">
+                        {item.px}
+                      </Price>
                     </View>
                   )
                 }

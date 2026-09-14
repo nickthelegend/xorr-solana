@@ -154,7 +154,10 @@ export default function CrosschainQuoteScreen() {
             <Eyebrow small>{origin ? `You send on ${origin}` : 'You send'}</Eyebrow>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.s12 }}>
               <View style={{ flexShrink: 1 }}>
-                <Price variant="amountLg">{amount}</Price>
+                {/* Being typed, so never masked; the dollars under it and the quotes below are for this size, not a balance. */}
+                <Price variant="amountLg" figure="input">
+                  {amount}
+                </Price>
                 <Text variant="secondarySm" style={{ marginTop: space.s4 }}>
                   {/* A price read that failed is unknown, a dash; "No price" is for a token nothing prices. */}
                   {price?.price !== undefined ? money((Number(amount) || 0) * price.price) : priceError ? '—' : 'No price'}
@@ -219,6 +222,7 @@ function PresetRow({ preset, token, last }: { preset: CrosschainPreset; token: C
       secondary={`${preset.recommended ? 'Recommended · ' : ''}Est. cost ${costText(preset, token)}`}
       value={`${quantity(preset.receiveMost, digits)} ${token}`}
       delta={`at least ${quantity(preset.receiveLeast, digits)}`}
+      figure="market"
       divider={!last}
     />
   );

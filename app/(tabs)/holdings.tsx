@@ -13,6 +13,7 @@ import {
   AssetMark,
   EmptyState,
   Eyebrow,
+  FigureSpan,
   LoadingRows,
   Price,
   Row,
@@ -228,7 +229,17 @@ export default function Assets() {
               key={h.id}
               left={<AssetMark gradient={assetGradient(h.symbol)} {...logoProps(logos, h.symbol)} size={32} />}
               title={h.symbol}
-              secondary={`${quantity(h.units)} · avg ${money(h.entry)}`}
+              /*
+                While balances are hidden (FEATURES.md #47) the units hide and the average beside them stays: what was
+                paid for one is a price, and says nothing of how much is held.
+              */
+              secondary={[
+                <FigureSpan key="units" figure="units">
+                  {quantity(h.units)}
+                </FigureSpan>,
+                ` · avg ${money(h.entry)}`,
+              ]}
+              secondaryFigure="market"
               value={<Price>{money(h.notional)}</Price>}
               delta={percent(h.unrealisedPct)}
               deltaTone={pnlTone(h.unrealised)}
@@ -270,7 +281,14 @@ export default function Assets() {
               key={t.address}
               left={<AssetMark gradient={assetGradient(t.symbol)} {...logoProps(tokenLogos, t.address)} size={32} />}
               title={t.symbol}
-              secondary={t.name ? `${tokenUnits(t.units)} · ${t.name}` : tokenUnits(t.units)}
+              // The units hide while balances are hidden; the token's name beside them is words.
+              secondary={[
+                <FigureSpan key="units" figure="units">
+                  {tokenUnits(t.units)}
+                </FigureSpan>,
+                t.name ? ` · ${t.name}` : null,
+              ]}
+              secondaryFigure="market"
               value={<Price>{t.usd === null ? '—' : tokenUsd(t.usd)}</Price>}
               height={size.rowLg}
             />
@@ -324,7 +342,7 @@ export default function Assets() {
                   marginTop: space.s10,
                 }}
               >
-                <Text variant="body" color={colors.ink55}>
+                <Text variant="body" color={colors.ink55} figure="units">
                   {r.symbol} · {quantity(r.unitsSold)} sold
                   {/* Said inline: a sale with no recorded cost counts as no gain or loss, so
                       this figure leaves it out, and a figure should say what it leaves out. */}

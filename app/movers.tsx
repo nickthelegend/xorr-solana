@@ -97,7 +97,11 @@ export default function Movers() {
             left={<AssetMark gradient={assetGradient(i.sym)} {...logoProps(logos, i.sym)} size={size.mark} />}
             title={i.sym}
             secondary={`${i.name} · ${i.tag}`}
-            value={<Price variant="rowPrimary">{i.px}</Price>}
+            value={
+              <Price variant="rowPrimary" figure="market">
+                {i.px}
+              </Price>
+            }
             delta={i.chg}
             deltaTone={i.up ? 'up' : 'down'}
           />

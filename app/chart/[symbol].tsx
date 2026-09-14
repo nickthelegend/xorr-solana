@@ -111,7 +111,9 @@ export default function ProChart() {
         {series.length ? (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s10 }}>
-              <Price variant="priceMd">{fmtPrice(last)}</Price>
+              <Price variant="priceMd" figure="market">
+                {fmtPrice(last)}
+              </Price>
               <DeltaChip label={percent(changePct, 2)} tone={pnlTone(changeAbs)} />
             </View>
             {/*
@@ -130,7 +132,7 @@ export default function ProChart() {
             )}
           </>
         ) : (
-          <Price variant="priceMd" color={colors.ink55}>
+          <Price variant="priceMd" color={colors.ink55} figure="market">
             —
           </Price>
         )}

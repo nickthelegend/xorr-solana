@@ -336,7 +336,7 @@ export default function Portfolio() {
                   ...exitLevels(strategies.data ?? [], p.symbol, p.entry),
                 ]}
                 stats={[
-                  { label: 'SIZE', value: quantity(p.units) },
+                  { label: 'SIZE', value: quantity(p.units), figure: 'units' },
                   { label: 'VALUE', value: money(p.notional) },
                   { label: 'P&L', value: signedMoney(p.unrealised), value2: p.unrealised },
                 ]}

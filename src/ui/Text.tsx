@@ -11,6 +11,9 @@
  *
  * Two accessibility defaults live here for the same reason (FEATURES.md #74, #86, PLAN.md 5.11): a screen's title is
  * announced as a heading, and each role has a ceiling on how far the phone's text size may grow it.
+ *
+ * And hidden balances (FEATURES.md #47) are applied here, where every figure is drawn: a text that says what figure it is
+ * (`figure`, `mask.ts`) hides the person's money while balances are hidden, and is heard as "hidden" where it was.
  */
 import React from 'react';
 import {
@@ -21,7 +24,7 @@ import {
 } from 'react-native';
 import { type as typeScale, variantColor, type TypeVariant } from './type';
 import { colors } from './tokens';
-import { figureText, maskFigure, maskMode, spokenFigure } from './mask';
+import { maskFigure, maskLine, maskMode, spokenFigure, type FigureKind } from './mask';
 /*
  * App state, read by the design system in this one place: whether balances are hidden (FEATURES.md #47). A tap on Home
  * has to reach every figure on every screen at once, and figures are drawn here. A provider would need the root layout,
@@ -100,9 +103,20 @@ export interface TextProps extends Omit<RNTextProps, 'style'> {
   align?: TextStyle['textAlign'];
   style?: StyleProp<TextStyle>;
   children?: React.ReactNode;
+  /**
+   * What figure this text is, for hidden balances (`FigureKind` in mask.ts): the person's money (`own`, `units`), or a
+   * figure that never hides (`market`, `input`). It covers the whole line, spans inside it included, except a span that
+   * gives its own. Unsaid, a text is words and is never masked; `null` is a figure already masked, drawn as it came.
+   */
+  figure?: FigureKind | null;
 }
 
-export const Text = React.forwardRef<RNText, TextProps>(function Text(
+export const Text = React.forwardRef<RNText, TextProps>(function Text({ figure, ...rest }, ref) {
+  // Only a figure asks the store, so the words on every screen do not each subscribe to it.
+  return figure ? <FigureText ref={ref} figure={figure} {...rest} /> : <PlainText ref={ref} {...rest} />;
+});
+
+const PlainText = React.forwardRef<RNText, Omit<TextProps, 'figure'>>(function PlainText(
   { variant = 'body', color, align, style, accessibilityRole, maxFontSizeMultiplier, ...rest },
   ref,
 ) {
@@ -122,6 +136,29 @@ export const Text = React.forwardRef<RNText, TextProps>(function Text(
   );
 });
 
+/**
+ * A text that is a figure. Shown balances draw it exactly as `PlainText` would; hidden, its money is masked, and a
+ * screen reader hears "hidden" where the money was — in the text's own label too, where it was given one.
+ */
+const FigureText = React.forwardRef<RNText, Omit<TextProps, 'figure'> & { figure: FigureKind }>(function FigureText(
+  { figure, children, accessibilityLabel, ...rest },
+  ref,
+) {
+  const hidden = useBalancesHidden();
+  const line = maskLine(children, figure, hidden);
+  const label =
+    accessibilityLabel === undefined
+      ? line?.spoken
+      : hidden
+        ? spokenFigure(maskFigure(accessibilityLabel, maskMode(hidden, figure)))
+        : accessibilityLabel;
+  return (
+    <PlainText ref={ref} accessibilityLabel={label} {...rest}>
+      {line ? line.children : children}
+    </PlainText>
+  );
+});
+
 export type ValueProps = TextProps;
 
 /**
@@ -138,11 +175,6 @@ export const Value = React.forwardRef<RNText, ValueProps>(function Value(
 export interface PriceProps extends TextProps {
   /** P&L tone. Green and red mean profit and loss — nothing else ever sets this. */
   tone?: PriceTone;
-  /**
-   * How this figure hides while balances are hidden (FEATURES.md #47, `mask.ts`). Unsaid, the dollar figures in it are
-   * masked; `true` masks all of it, for money written without a dollar sign; `false` masks none of it.
-   */
-  mask?: boolean;
 }
 
 /**
@@ -165,6 +197,25 @@ export function useBalancesHidden(): boolean {
 }
 
 /**
+ * A label as a screen reader should hear it while balances are hidden, for text no `<Text>` draws: a control's own
+ * `accessibilityLabel`, which carries the figures it names. Shown balances hear it as written.
+ */
+export function useSpokenFigure(): (text: string, figure: FigureKind) => string {
+  const hidden = useBalancesHidden();
+  return (text, figure) => spokenFigure(maskFigure(text, maskMode(hidden, figure)));
+}
+
+/**
+ * A span of a line that is a different figure from the rest of it, drawn in the line's own ink — the units in
+ * "0.4890 · avg $2,410.00", where the quantity is the person's and the average is a price. Only inside a `<Text>` that
+ * says what the rest of its line is, which is what reads the whole line out while balances are hidden.
+ */
+export function FigureSpan({ figure, children }: { figure: FigureKind; children: string }) {
+  const hidden = useBalancesHidden();
+  return maskFigure(children, maskMode(hidden, figure));
+}
+
+/**
  * A price or a P&L figure. `tone` is the only sanctioned way to colour text green or red.
  *
  * Pass an already-formatted string: state.md requires `toLocaleString('en-US')` with
@@ -172,30 +223,23 @@ export function useBalancesHidden(): boolean {
  * does not format — it would have to guess the fraction digits, and a guess in a price
  * column is worse than no help at all.
  *
- * While balances are hidden its dollar figures are masked, and a screen reader hears "hidden"
- * where they were (FEATURES.md #47). Children with an element among them are drawn as they
- * came: there is no figure in them to read.
+ * Its `figure` is `own` unless it says otherwise, so while balances are hidden its dollar
+ * figures are masked (FEATURES.md #47). That is the safe way round: a figure that forgot to
+ * say shows dots, where a balance left showing is the one failure a privacy switch cannot
+ * have. A price on a market screen says `figure="market"` and is never masked.
  */
 export const Price = React.forwardRef<RNText, PriceProps>(function Price(
-  { variant = 'rowPrimary', tone = 'neutral', color, style, mask, children, accessibilityLabel, ...rest },
+  { variant = 'rowPrimary', tone = 'neutral', color, style, figure = 'own', ...rest },
   ref,
 ) {
-  const hidden = useBalancesHidden();
-  const mode = maskMode(hidden, variant, mask);
-  const text = mode === 'none' ? undefined : figureText(children);
-  const shown = text === undefined ? undefined : maskFigure(text, mode);
-  /* Only what the mask changed. Anything else is drawn exactly as it was passed. */
-  const masked = shown !== text ? shown : undefined;
   return (
     <Text
       ref={ref}
       variant={variant}
       color={color ?? toneColor[tone]}
-      accessibilityLabel={accessibilityLabel ?? (masked === undefined ? undefined : spokenFigure(masked))}
+      figure={figure}
       {...rest}
       style={[style, lockTabular]}
-    >
-      {masked ?? children}
-    </Text>
+    />
   );
 });

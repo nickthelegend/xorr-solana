@@ -638,7 +638,9 @@ export default function Home() {
                             ) : sparks.loading && !sparks.data ? (
                               <Placeholder width={SPARK_W} height={SPARK_H} />
                             ) : null}
-                            <Price variant="rowPrimary">{g.px}</Price>
+                            <Price variant="rowPrimary" figure="market">
+                              {g.px}
+                            </Price>
                           </View>
                         }
                         delta={g.chg}
@@ -678,6 +680,7 @@ export default function Home() {
                           fmtPrice(s.price)
                         )
                       }
+                      figure="market"
                     />
                   </Rise>
                 ))
@@ -704,6 +707,7 @@ export default function Home() {
                       title={m.symbol}
                       secondary={`Up to ${m.maxLeverage}x`}
                       value={fmtPrice(m.markPx)}
+                      figure="market"
                       delta={m.change24hPct === null ? undefined : percent(m.change24hPct, 2)}
                       deltaTone={
                         m.change24hPct === null || m.change24hPct === 0 ? 'neutral' : m.change24hPct > 0 ? 'up' : 'down'

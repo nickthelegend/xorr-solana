@@ -112,7 +112,10 @@ function HistoryRow({ item }: { item: HistoryItem }) {
         <Receipt explorer={item.explorer} />
       </View>
       <View style={{ alignItems: 'flex-end', gap: space.s2 }}>
-        <Price variant="rowPrimary">{amountOf(item)}</Price>
+        {/* What moved, in its token's units, hides while balances are hidden (FEATURES.md #47); so does its worth. */}
+        <Price variant="rowPrimary" figure="units">
+          {amountOf(item)}
+        </Price>
         {usd !== null ? (
           <Price variant="delta" color={colors.ink55}>
             {measured ? `${money(usd)} measured` : money(usd)}

@@ -20,7 +20,9 @@
  *
  *   The scrub (FEATURES.md #45). With `formatValue`, a finger dragged across the chart gets a hairline, a dot on the
  *   line and a label with the value and, given `times`, the moment it was read. Lifting the finger clears it. The
- *   drag begins only once it is plainly sideways, so the screen still scrolls when a thumb starts on the chart.
+ *   drag begins only once it is plainly sideways, so the screen still scrolls when a thumb starts on the chart. The
+ *   label is the person's own money unless `figure` says otherwise, so a wallet's line hides its values while balances
+ *   are hidden (FEATURES.md #47) and a price's line says `figure="market"`.
  *
  *   Marks (FEATURES.md #9). `marks` are the user's own fills, each drawn at its place along the line and its price,
  *   on the line's own projection.
@@ -34,6 +36,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, ClipPath, Defs, G, LinearGradient, Line, Path, Rect, Stop } from 'react-native-svg';
 import { selectionTick } from '../haptics';
+import type { FigureKind } from '../mask';
 import { arrival, timing, useReducedMotion } from '../motion';
 import { Text, Value } from '../Text';
 import { chart, colors, duration, radius, space } from '../tokens';
@@ -89,6 +92,8 @@ export interface AreaChartProps {
    * same line, so a screen that wants the crosshair has to say what a number on it means.
    */
   formatValue?: (value: number) => string;
+  /** What the scrub's value is while balances are hidden: the person's own unless said — a price's line is `market`. */
+  figure?: FigureKind;
   /** The user's fills, placed on this line (`lineMarks`). They belong to the series and fade with it. */
   marks?: readonly LineMark[];
   /**
@@ -136,6 +141,7 @@ export function AreaChart({
   drawIn = false,
   times,
   formatValue,
+  figure = 'own',
   marks,
   seriesKey,
   pending = false,
@@ -370,7 +376,7 @@ export function AreaChart({
             pointerEvents: 'none',
           }}
         >
-          <Value variant="chip" color={colors.ink}>
+          <Value variant="chip" color={colors.ink} figure={figure}>
             {formatValue(shown.data[point]!)}
           </Value>
           {pointAt !== undefined ? (

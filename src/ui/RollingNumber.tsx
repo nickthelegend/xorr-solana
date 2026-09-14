@@ -24,7 +24,9 @@
  * and is simply there.
  *
  * While balances are hidden (FEATURES.md #47) the figure is masked whole before it is split, and the mask
- * is what rolls. Masked a character at a time, no character would hold a dollar figure to mask.
+ * is what rolls. Masked a character at a time, no character would hold a dollar figure to mask — and a
+ * figure in units would mask the digits of a percentage one by one. Like `Price`, it is the person's own
+ * money unless it says otherwise: a live price says `figure="market"`.
  */
 import React, { useEffect, useState } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
@@ -58,7 +60,7 @@ export interface RollingNumberProps extends Omit<PriceProps, 'children'> {
 export function RollingNumber({ value, delay = 0, containerStyle, ...price }: RollingNumberProps) {
   const reduced = useReducedMotion();
   const hidden = useBalancesHidden();
-  const shown = maskFigure(value, maskMode(hidden, price.variant, price.mask));
+  const shown = maskFigure(value, maskMode(hidden, price.figure === undefined ? 'own' : price.figure));
   /* The ripple's length is set by the figure first shown; `slot` covers a wider one later. */
   const [last] = useState(() => Math.max(0, Array.from(shown).length - 1));
   const span = duration.enter + last * DIGIT_STAGGER;
@@ -119,7 +121,7 @@ function RollChar({
   return (
     <Animated.View style={style}>
       {/* Masked with the whole figure already, if it is to be: one character on its own is never masked again. */}
-      <Price {...price} mask={false} accessible={false}>
+      <Price {...price} figure={null} accessible={false}>
         {children}
       </Price>
     </Animated.View>

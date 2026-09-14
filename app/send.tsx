@@ -285,7 +285,7 @@ export default function Send() {
               could not": measured at twenty-five seconds on the simulator before $24,207.43
               appeared where a dash had been.
             */}
-            <Price variant="footnote">
+            <Price variant="footnote" figure="units">
               {held !== undefined ? `${quantity(held)} ${symbol}` : balance.loading ? '· · ·' : '—'}
             </Price>
           </View>
@@ -294,7 +294,8 @@ export default function Send() {
               Network fee
             </Text>
             {/* A dash for a fee nobody could estimate. U+2212 is a minus, and a fee is never negative. */}
-            <Price variant="footnote">
+            {/* The network's price for sending, not the person's money: it stays while balances are hidden. */}
+            <Price variant="footnote" figure="market">
               {feeUsd !== undefined ? `≈ ${money(feeUsd)}` : fee.loading ? '· · ·' : '—'}
             </Price>
           </View>

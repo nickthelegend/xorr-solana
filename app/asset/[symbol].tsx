@@ -270,11 +270,11 @@ export default function AssetDetail() {
           <>
             {/* The price rolls in when it first arrives; live ticks after that change in place. */}
             {spot !== undefined ? (
-              <RollingNumber value={fmtPrice(spot)} variant="priceLg" />
+              <RollingNumber value={fmtPrice(spot)} variant="priceLg" figure="market" />
             ) : priceLoading ? (
               <Placeholder width={150} height={34} style={{ borderRadius: radius.tile }} />
             ) : (
-              <Price variant="priceLg" color={colors.ink55}>
+              <Price variant="priceLg" color={colors.ink55} figure="market">
                 —
               </Price>
             )}
@@ -385,6 +385,7 @@ export default function AssetDetail() {
               data={line.values}
               times={line.times}
               formatValue={fmtPrice}
+              figure="market"
               marks={onLine}
               seriesKey={`${symbol}:${drawn.range}`}
               pending={pending}
@@ -417,11 +418,12 @@ export default function AssetDetail() {
           <>
             <Row
               title="Your position"
-              value={<Price>{`${quantity(held.units)} ${symbol}`}</Price>}
+              value={<Price figure="units">{`${quantity(held.units)} ${symbol}`}</Price>}
               secondary={money(held.notional)}
               height={ROW_H}
             />
-            <Row title="Avg cost" value={<Price>{fmtPrice(held.entry)}</Price>} height={ROW_H} />
+            {/* What was paid for one unit is a price, and says nothing of how much is held: it stays while hidden. */}
+            <Row title="Avg cost" value={<Price figure="market">{fmtPrice(held.entry)}</Price>} height={ROW_H} />
             <Row
               title="Unrealised"
               value={<Price tone={pnlTone(held.unrealised)}>{signedMoney(held.unrealised)}</Price>}

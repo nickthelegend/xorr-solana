@@ -131,7 +131,7 @@ export default function PerpContract() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: space.s30 }} showsVerticalScrollIndicator={false}>
           <View style={{ alignItems: 'center', marginTop: space.s22, gap: space.s6 }}>
             {m ? (
-              <RollingNumber value={fmtPrice(m.markPx)} variant="priceLg" />
+              <RollingNumber value={fmtPrice(m.markPx)} variant="priceLg" figure="market" />
             ) : (
               <Placeholder width={150} height={34} style={{ borderRadius: radius.tile }} />
             )}
@@ -246,10 +246,15 @@ function ContractStats({ m }: { m: PerpMetrics }) {
   return (
     <StatGrid
       items={[
-        { label: `Funding / ${intervalWords(m.fundingIntervalHours).unit}`, value: percent(m.fundingRate * 100, 4) },
+        // The venue's figures, public to anyone: none of them hides while balances are hidden.
+        {
+          label: `Funding / ${intervalWords(m.fundingIntervalHours).unit}`,
+          value: percent(m.fundingRate * 100, 4),
+          figure: 'market',
+        },
         { label: 'Next funding', value: countdown(fundingIn) },
-        { label: 'Open interest', value: compactMoney(m.openInterestUsd) },
-        { label: '24h volume', value: compactMoney(m.dayVolumeUsd) },
+        { label: 'Open interest', value: compactMoney(m.openInterestUsd), figure: 'market' },
+        { label: '24h volume', value: compactMoney(m.dayVolumeUsd), figure: 'market' },
       ]}
     />
   );

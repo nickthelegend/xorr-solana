@@ -30,6 +30,7 @@ import {
   SheetCard,
   Tag,
   Text,
+  FigureSpan,
   colors,
   money,
   quantity,
@@ -180,7 +181,10 @@ function OrderCard({
     <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.s10 }}>
         <View style={{ flexShrink: 1 }}>
-          <Price variant="priceMd">{money(order.price)}</Price>
+          {/* A maker's published order: its price, size and cost are public, and stay while balances are hidden. */}
+          <Price variant="priceMd" figure="market">
+            {money(order.price)}
+          </Price>
           <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s2 }}>
             per {order.sells}, paid in {order.pays}
           </Text>
@@ -189,8 +193,8 @@ function OrderCard({
       </View>
 
       <View style={{ marginTop: space.s10 }}>
-        <Row title="Size" value={<Price>{sizeLabel}</Price>} height={40} />
-        <Row title="Costs" value={<Price>{costLabel}</Price>} height={40} />
+        <Row title="Size" value={<Price figure="market">{sizeLabel}</Price>} height={40} />
+        <Row title="Costs" value={<Price figure="market">{costLabel}</Price>} height={40} />
         <Row
           title="Maker"
           value={
@@ -243,18 +247,24 @@ function OrderCard({
 /** What taking the order did: what arrived and in which transaction, or the executor's reason nothing moved. */
 function Outcome({ outcome, pays }: { outcome: LimitFillOutcome | undefined; pays: string }) {
   if (!outcome) return null;
-  const note =
-    outcome.status === 'filled'
-      ? {
-          text: `${outcome.measured ? 'Bought' : 'Bought at least'} ${quantity(outcome.received)} ${outcome.bought} for ${quantity(outcome.paid, 2)} ${pays} · ${shortAddress(outcome.txHash, 10, 4)}`,
-          color: colors.ink,
-        }
-      : outcome.status === 'blocked'
-        ? { text: outcome.detail, color: colors.down }
-        : { text: outcome.error, color: colors.down };
+  if (outcome.status === 'filled') {
+    /*
+     * What arrived and what it cost are the person's money, and hide while balances are hidden (FEATURES.md #47). The
+     * words and the transaction beside them are not figures, so the line is `market` and the two amounts are spans.
+     */
+    return (
+      <Text variant="footnote" color={colors.ink} style={{ marginTop: space.s10 }} figure="market">
+        {`${outcome.measured ? 'Bought' : 'Bought at least'} `}
+        <FigureSpan figure="units">{quantity(outcome.received)}</FigureSpan>
+        {` ${outcome.bought} for `}
+        <FigureSpan figure="units">{quantity(outcome.paid, 2)}</FigureSpan>
+        {` ${pays} · ${shortAddress(outcome.txHash, 10, 4)}`}
+      </Text>
+    );
+  }
   return (
-    <Text variant="footnote" color={note.color} style={{ marginTop: space.s10 }}>
-      {note.text}
+    <Text variant="footnote" color={colors.down} style={{ marginTop: space.s10 }}>
+      {outcome.status === 'blocked' ? outcome.detail : outcome.error}
     </Text>
   );
 }

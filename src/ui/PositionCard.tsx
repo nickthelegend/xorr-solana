@@ -12,8 +12,8 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { Press } from './Press';
 import { Placeholder } from './States';
-import { Price, Text, pnlTone, useBalancesHidden } from './Text';
-import { maskFigure, maskMode, spokenFigure } from './mask';
+import { Price, Text, pnlTone, useSpokenFigure } from './Text';
+import type { FigureKind } from './mask';
 import { AreaChart } from './charts/AreaChart';
 import { chart, colors, radius, space } from './tokens';
 
@@ -27,7 +27,8 @@ export type PositionLevel = {
   tone: LevelTone;
 };
 
-export type PositionStat = { label: string; value: string; value2?: number };
+/** One figure under the chart. The person's own money unless `figure` says otherwise — a size in units, say. */
+export type PositionStat = { label: string; value: string; value2?: number; figure?: FigureKind };
 
 export interface PositionCardProps {
   symbol: string;
@@ -84,9 +85,12 @@ export function PositionCard({
 }: PositionCardProps) {
   const [open, setOpen] = useState(false);
   const tone = pnlTone(pnlValue);
-  /* While balances are hidden, the card's own words hide with its figures: its label, and the levels on the chart. */
-  const hidden = useBalancesHidden();
-  const dollars = maskMode(hidden, undefined, undefined);
+  /*
+   * While balances are hidden (FEATURES.md #47) the card hides what is the person's — its P&L and the figures under the
+   * chart — and keeps what is a price: the live price, and the entry, target and stop on the chart, which say where the
+   * market is and nothing of how much is held. Its label is said the same way.
+   */
+  const say = useSpokenFigure();
 
   /*
    * One vertical scale for the line AND the levels, so a stop drawn under the chart really is below
@@ -108,7 +112,7 @@ export function PositionCard({
     <Press
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={spokenFigure(maskFigure(`${symbol} ${side}. ${price}. ${pnl}, ${pnlPct}.`, dollars))}
+      accessibilityLabel={`${symbol} ${side}. ${price}. ${say(pnl, 'own')}, ${pnlPct}.`}
       style={{ borderRadius: radius.panel, backgroundColor: colors.surfaceAlt, padding: space.s16, gap: space.s14 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -118,7 +122,9 @@ export function PositionCard({
           <Pill label={status} bg={statusBg} ink={statusInk} />
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Price variant="rowPrimary">{price}</Price>
+          <Price variant="rowPrimary" figure="market">
+            {price}
+          </Price>
           <Price variant="footnote" tone={tone}>
             {`${pnl} · ${pnlPct}`}
           </Price>
@@ -173,7 +179,7 @@ export function PositionCard({
                   }}
                 >
                   <Text variant="chipSm" color={LEVEL_TONE[level.tone]} numberOfLines={1}>
-                    {maskFigure(`${level.label} ${level.formatted}`, dollars)}
+                    {`${level.label} ${level.formatted}`}
                   </Text>
                 </View>
               </React.Fragment>
@@ -191,6 +197,7 @@ export function PositionCard({
               tone={s.value2 !== undefined ? pnlTone(s.value2) : 'neutral'}
               style={{ marginTop: space.s4 }}
               numberOfLines={1}
+              figure={s.figure}
             >
               {s.value}
             </Price>

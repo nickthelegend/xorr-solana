@@ -108,7 +108,9 @@ export default function Stocks() {
                       No route
                     </Text>
                   ) : (
-                    <Price variant="rowPrimary">{fmtPrice(s.price)}</Price>
+                    <Price variant="rowPrimary" figure="market">
+                      {fmtPrice(s.price)}
+                    </Price>
                   )
                 }
               />

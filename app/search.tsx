@@ -121,7 +121,9 @@ export default function Search() {
                 secondary={`${i.name} · ${i.tag}`}
                 value={
                   state === 'ready' ? (
-                    <Price color={i.feed === 'unavailable' ? colors.ink55 : undefined}>{i.px}</Price>
+                    <Price color={i.feed === 'unavailable' ? colors.ink55 : undefined} figure="market">
+                      {i.px}
+                    </Price>
                   ) : state === 'loading' ? (
                     <Placeholder height={12} width={56} />
                   ) : undefined

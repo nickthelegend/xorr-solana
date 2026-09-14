@@ -84,8 +84,9 @@ export default function Funding() {
                 onPress={() => router.push(`/perp/${m.symbol}`)}
                 title={m.symbol}
                 secondary={fmtPrice(m.markPx)}
+                figure="market"
                 value={
-                  <Price variant="rowPrimary">
+                  <Price variant="rowPrimary" figure="market">
                     {`${percent(m.fundingRate * 100, { digits: 4, explicitSign: true })}${words ? ` / ${words.short}` : ''}`}
                   </Price>
                 }

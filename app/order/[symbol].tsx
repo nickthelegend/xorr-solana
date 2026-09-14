@@ -242,7 +242,8 @@ export default function OrderTicket() {
       />
 
       <View style={{ alignItems: 'center', marginTop: space.s26, gap: space.s6 }}>
-        <Price variant="heroAmount" color={colors.sheet.ink}>
+        {/* Being typed, so never masked: an order its author cannot read is not private, it is unusable. */}
+        <Price variant="heroAmount" color={colors.sheet.ink} figure="input">
           ${orderAmt}
         </Price>
         <Text variant="body" color={colors.sheet.muted}>
@@ -306,7 +307,8 @@ export default function OrderTicket() {
         <Text variant="secondary" color={colors.sheet.muted}>
           Minimum received
         </Text>
-        <Price variant="secondary" color={colors.sheet.ink}>
+        {/* The route's quote for the amount typed, not a holding: it stays while balances are hidden. */}
+        <Price variant="secondary" color={colors.sheet.ink} figure="market">
           {routeQuote.loading
             ? '…'
             : routeQuote.data
@@ -319,7 +321,7 @@ export default function OrderTicket() {
         <Text variant="secondary" color={colors.sheet.muted}>
           Network fee
         </Text>
-        <Price variant="secondary" color={colors.sheet.ink}>
+        <Price variant="secondary" color={colors.sheet.ink} figure="market">
           {routeQuote.loading
             ? '…'
             : typeof routeQuote.data?.gas?.feeUsd === 'number'
@@ -341,6 +343,8 @@ export default function OrderTicket() {
               ? `${side === 'buy' ? 'Bought' : 'Sold'} ${quantity(filled.units)} ${symbol}`
               : orderCta(side, orderAmt, symbol)
           }
+          // What filled is the person's money and hides while balances are hidden; the order being typed does not.
+          figure={filled ? 'units' : undefined}
           backgroundColor={side === 'buy' ? colors.candleUp : colors.candleDown}
           color={colors.ink}
           disabled={
@@ -369,11 +373,13 @@ export default function OrderTicket() {
       ) : null}
       {/* Why the order cannot go, on the ticket: nothing held, more than is held, more than the cash. */}
       {limit.state === 'refused' && tradable && !signedOut && filled === undefined ? (
+        // "You have $1,234.00." is the person's cash, and hides while balances are hidden (FEATURES.md #47).
         <Text
           variant="footnote"
           color={colors.down}
           align="center"
           style={{ marginTop: space.s10 }}
+          figure="own"
         >
           {limit.reason}
         </Text>

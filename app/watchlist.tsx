@@ -134,11 +134,12 @@ export default function Watchlist() {
                     ) : q ? (
                       fmtPrice(q.price)
                     ) : (
-                      <Price variant="rowPrimary" color={colors.ink55}>
+                      <Price variant="rowPrimary" color={colors.ink55} figure="market">
                         —
                       </Price>
                     )
                   }
+                  figure="market"
                   delta={q?.change24h !== undefined ? percent(q.change24h, 2) : undefined}
                   deltaTone={q?.change24h !== undefined ? pnlTone(q.change24h) : 'neutral'}
                   height={ROW_H}

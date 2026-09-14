@@ -215,7 +215,10 @@ export default function Activity() {
                     {r.explorer ? <ExplorerLink explorer={r.explorer} /> : null}
                   </View>
                   {r.amount ? (
-                    <Price color={credit ? colors.up : colors.ink55}>{r.amount}</Price>
+                    // What moved, in dollars or in a token's units — "$1,234.56 USDC" — hides while balances are hidden.
+                    <Price color={credit ? colors.up : colors.ink55} figure="units">
+                      {r.amount}
+                    </Price>
                   ) : null}
                 </View>
               );

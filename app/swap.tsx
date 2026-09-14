@@ -39,6 +39,8 @@ import {
   size,
   space,
   SignInButton,
+  useSpokenFigure,
+  type FigureKind,
   type KeypadKey,
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
@@ -96,6 +98,11 @@ export default function Swap() {
   const spendable = swapSpendable(balance.data, pay);
   // A read that failed for someone signed in. Signed out there is no balance to show, and the button already asks for a sign-in.
   const balanceUnread = !signedOut && balance.data === undefined && balance.error !== undefined;
+  /*
+   * While balances are hidden (FEATURES.md #47) what the wallet holds hides: the balance over the amount, what each
+   * token in the picker holds, and a swap once it has filled. What is typed, and the quote for it, stay.
+   */
+  const say = useSpokenFigure();
 
   const typed = Number(amount) || 0;
   const quote = useSwapQuote(pay, receive, typed, slippagePct);
@@ -211,7 +218,7 @@ export default function Swap() {
                   accessibilityRole={balanceUnread ? 'button' : undefined}
                   accessibilityLabel={balanceUnread ? `Retry reading your ${pay} balance` : undefined}
                 >
-                  <Text variant="footnote" color={colors.ink55}>
+                  <Text variant="footnote" color={colors.ink55} figure="units">
                     {/* A dash while the balance loads, never a zero: see the note on `swapSpendable`. An em dash, not a minus sign, which read as a negative balance. */}
                     {balanceUnread
                       ? 'Balance — · tap to retry'
@@ -222,7 +229,9 @@ export default function Swap() {
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flexShrink: 1 }}>
-                <Price variant="amountLg">{amount}</Price>
+                <Price variant="amountLg" figure="input">
+                  {amount}
+                </Price>
                 <Text variant="secondarySm" style={{ marginTop: space.s4 }}>
                   {/* A price read that failed is unknown, a dash; "No price" is for a token nothing prices. */}
                   {payPrice?.price !== undefined ? money(typed * payPrice.price) : payPriceError ? '—' : 'No price'}
@@ -256,7 +265,9 @@ export default function Swap() {
             <Eyebrow small>You receive</Eyebrow>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <View style={{ flexShrink: 1 }}>
-                <Price variant="amountLg">{q ? quantity(q.outAmount) : '—'}</Price>
+                <Price variant="amountLg" figure="market">
+                  {q ? quantity(q.outAmount) : '—'}
+                </Price>
                 <Text variant="secondarySm" numberOfLines={2} style={{ marginTop: space.s4 }}>
                   {q
                     ? `Min ${quantity(q.minimumOut)}`
@@ -285,7 +296,7 @@ export default function Swap() {
                     key={symbol}
                     onPress={() => choose(symbol)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${symbol}${held === undefined ? '' : `, ${quantity(held)} held`}`}
+                    accessibilityLabel={say(`${symbol}${held === undefined ? '' : `, ${quantity(held)} held`}`, 'units')}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
@@ -299,7 +310,7 @@ export default function Swap() {
                     <Text variant="rowPrimary" style={{ flex: 1 }}>
                       {symbol}
                     </Text>
-                    <Text variant="footnote" color={colors.ink55}>
+                    <Text variant="footnote" color={colors.ink55} figure="units">
                       {held === undefined ? '—' : `${units(held)} held`}
                     </Text>
                   </Press>
@@ -314,13 +325,13 @@ export default function Swap() {
                   <Row
                     title="Minimum received"
                     // The floor, not a fee: xorr charges none, and this is the number the fill is held to on chain.
-                    value={<Price>{`${quantity(q.minimumOut)} ${receive}`}</Price>}
+                    value={<Price figure="market">{`${quantity(q.minimumOut)} ${receive}`}</Price>}
                     height={46}
                   />
                   <Row
                     title="Price impact"
                     value={
-                      <Price>
+                      <Price figure="market">
                         {q.priceImpactPct !== null ? percent(q.priceImpactPct, { digits: 3, explicitSign: false }) : '—'}
                       </Price>
                     }
@@ -329,12 +340,12 @@ export default function Swap() {
                   <Row
                     title="Network fee"
                     // What sending it costs, and who pays: the executor that sends the swap does (PLAN.md 3.13).
-                    value={<Price>{networkFee(q?.gas)}</Price>}
+                    value={<Price figure="market">{networkFee(q?.gas)}</Price>}
                     height={46}
                   />
                   <Row
                     title="Max slippage"
-                    value={<Price>{percent(slippagePct, { digits: 1, explicitSign: false })}</Price>}
+                    value={<Price figure="input">{percent(slippagePct, { digits: 1, explicitSign: false })}</Price>}
                     height={46}
                     divider={false}
                   />
@@ -353,6 +364,7 @@ export default function Swap() {
       ) : !nothingSettles && !tradable.error ? (
         <Button
           label={cta}
+          figure="units"
           variant={outcome?.status === 'filled' ? 'success' : 'primary'}
           style={{ marginTop: space.s14 }}
           loading={placing}
@@ -403,19 +415,24 @@ function SwapNote({
   /** The pair on screen is not in what this executor lists, so the button stays off; this says why. */
   unlisted: boolean;
 }) {
-  const note =
+  // What is held hides while balances are hidden; the executor's own sentences are drawn as they came.
+  const note: { text: string; color: string; figure?: FigureKind } | null =
     outcome?.status === 'blocked'
       ? { text: outcome.detail, color: colors.down }
       : outcome?.status === 'failed'
         ? { text: outcome.error, color: colors.down }
         : overBalance
-          ? { text: spendable === 0 ? `You hold no ${pay}.` : `You hold ${quantity(spendable ?? 0)} ${pay}.`, color: colors.down }
+          ? {
+              text: spendable === 0 ? `You hold no ${pay}.` : `You hold ${quantity(spendable ?? 0)} ${pay}.`,
+              color: colors.down,
+              figure: 'units',
+            }
           : unlisted
             ? { text: `${pay} for ${receive} can’t be swapped here.`, color: colors.ink55 }
             : null;
   if (!note) return null;
   return (
-    <Text variant="footnote" color={note.color} align="center" style={{ marginTop: space.s10 }}>
+    <Text variant="footnote" color={note.color} align="center" style={{ marginTop: space.s10 }} figure={note.figure}>
       {note.text}
     </Text>
   );

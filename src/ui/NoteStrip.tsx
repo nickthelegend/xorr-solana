@@ -17,6 +17,7 @@
 import React from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { AssetMark } from './AgentOrb';
+import type { FigureKind } from './mask';
 import { Text } from './Text';
 import { colors, radius, size, space, type Gradient } from './tokens';
 
@@ -45,6 +46,11 @@ export interface NoteStripProps {
   kind?: NoteKind;
   /** §5: 16–22. */
   markSize?: number;
+  /**
+   * A sentence that carries the person's money — "Sold 0.5000 WETH for $1,200.00." — says which figure it is, and hides
+   * it while balances are hidden (FEATURES.md #47). Unsaid, the sentence is words.
+   */
+  figure?: FigureKind;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -54,6 +60,7 @@ export function NoteStrip({
   gradient,
   kind = 'acted',
   markSize,
+  figure,
   style,
   testID,
 }: NoteStripProps) {
@@ -87,7 +94,7 @@ export function NoteStrip({
           }}
         />
       )}
-      <Text variant="secondarySm" color={colors.ink55} style={{ flex: 1 }}>
+      <Text variant="secondarySm" color={colors.ink55} style={{ flex: 1 }} figure={figure}>
         {children}
       </Text>
     </View>

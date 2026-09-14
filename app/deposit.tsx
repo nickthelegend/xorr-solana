@@ -290,11 +290,11 @@ function Funds({
 /**
  * One balance's figure: still until money lands in it, then rolled in at its true value, once for each arrival — each
  * is a new `key`, and `RollingNumber` rolls a figure as it mounts. Reduced motion lands it without the roll. USDC and
- * ETH are money written without a dollar sign, so the figure asks to be masked while balances are hidden.
+ * ETH are money written in their units, without a dollar sign, so the figure says so and hides while balances are hidden.
  */
 function Holding({ figure, arrivals }: { figure: string; arrivals: number }) {
-  if (arrivals === 0) return <Price mask>{figure}</Price>;
-  return <RollingNumber key={arrivals} value={figure} mask />;
+  if (arrivals === 0) return <Price figure="units">{figure}</Price>;
+  return <RollingNumber key={arrivals} value={figure} figure="units" />;
 }
 
 /** What asking for test funds did: what arrived, or the executor's reason nothing was sent. */
@@ -310,7 +310,13 @@ function Outcome({ outcome }: { outcome: FaucetOutcome | undefined }) {
   // Gas that could not be topped up is the one detail that changes what the wallet can do next.
   const gasFailed = outcome.eth !== null && 'failed' in outcome.eth;
   return (
-    <Text variant="footnote" color={gasFailed ? colors.down : colors.ink} align="center" style={{ marginTop: space.s10 }}>
+    <Text
+      variant="footnote"
+      color={gasFailed ? colors.down : colors.ink}
+      align="center"
+      style={{ marginTop: space.s10 }}
+      figure="units"
+    >
       {`Added ${quantity(outcome.usdc.amount, 2)} USDC.${gasFailed ? ' Gas top-up failed.' : ''}`}
     </Text>
   );

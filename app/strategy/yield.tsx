@@ -163,7 +163,7 @@ export default function YieldSetup() {
             {rate.loading ? 'Loading…' : noRate ? 'Couldn’t read the rate.' : 'Variable rate.'}
           </Text>
         </View>
-        <Price color={apy === undefined ? colors.sheet.muted : colors.up}>
+        <Price color={apy === undefined ? colors.sheet.muted : colors.up} figure="market">
           {/* A rate is unsigned: the unsigned percent, not the signed one with its "+" cut off. */}
           {rate.loading
             ? '…'
@@ -174,7 +174,8 @@ export default function YieldSetup() {
       </View>
 
       <View style={{ alignItems: 'center', marginTop: space.s20, gap: space.s6 }}>
-        <Price variant="heroAmount" color={colors.sheet.ink}>
+        {/* Being typed, so never masked: an amount its author cannot read is not private, it is unusable. */}
+        <Price variant="heroAmount" color={colors.sheet.ink} figure="input">
           ${amount}
         </Price>
         <Text variant="body" color={colors.sheet.muted}>
@@ -296,6 +297,7 @@ export default function YieldSetup() {
                 ? 'No rate right now'
                 : `Sweep up to ${money(usd, { decimals: 0 })} ${phrase(cadence)}`
           }
+          figure="own"
           backgroundColor={colors.candleUp}
           color={colors.ink}
           disabled={usd <= 0 || unavailable || apy === undefined}

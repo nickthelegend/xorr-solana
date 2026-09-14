@@ -13,6 +13,7 @@
 import React from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import { Eyebrow } from './Eyebrow';
+import type { FigureKind } from './mask';
 import { Value } from './Text';
 import { colors, radius, space } from './tokens';
 
@@ -20,6 +21,11 @@ export interface StatTileProps {
   label: string;
   /** Already formatted. */
   value: string;
+  /**
+   * What the value is while balances are hidden (FEATURES.md #47, `mask.ts`). Unsaid, a tile is not the person's money
+   * and is drawn as it is: tiles hold a market's figures, a backtest's ratios and counts, and a proposal's prices.
+   */
+  figure?: FigureKind;
   /** Green and red here mean P&L — a return, a drawdown. A trade count is never coloured. */
   color?: string;
   /** The tighter 14.5/600 value used inside a `StatGrid`. */
@@ -56,6 +62,7 @@ export function StatTile({
   compact = false,
   dense = false,
   transparent = false,
+  figure,
   style,
   testID,
 }: StatTileProps) {
@@ -89,6 +96,7 @@ export function StatTile({
         variant={compact ? 'rowPrimary' : 'cardTitleLg'}
         color={color}
         style={{ marginTop: space.s4 }}
+        figure={figure}
       >
         {value}
       </Value>

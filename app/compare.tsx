@@ -219,6 +219,7 @@ function Side({
               variant="rowPrimary"
               tone={change === undefined ? 'neutral' : pnlTone(change)}
               style={{ marginTop: space.s8 }}
+              figure="market"
             >
               {`${symbol} ${change === undefined ? '—' : percent(change, { explicitSign: true })}`}
             </Price>
