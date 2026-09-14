@@ -11,7 +11,9 @@
  * the digits started, the line read "$ ," — punctuation waiting alone for a number.
  *
  * It rolls ONCE — when the figure first appears. A live price that ticks every few seconds changes in
- * place afterwards: a roll on every update would turn a quiet market into a flickering one.
+ * place afterwards: a roll on every update would turn a quiet market into a flickering one. A figure
+ * that should arrive again — money landing on Deposit — is a new figure: the screen gives it a new
+ * `key`, and it rolls as it mounts, at its true value like any other.
  *
  * One clock drives the ripple (2026-09-12). Each character used to carry its own staggered
  * `FadeInDown`, chosen per render from a ref that flipped after the first commit, so the next render

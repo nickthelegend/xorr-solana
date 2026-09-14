@@ -4,8 +4,10 @@
  * The address, with a code where a code is true; the balance, read from the chain every few seconds so a deposit is
  * seen landing; and test funds where this network has them. The network is named here, in a chip, because this is
  * where money moves. A fork build shows no code: a fork shares Base's chain id, so a phone wallet would open on real Base.
+ *
+ * Money landing is a moment (FEATURES.md #21): the balance it lands in rolls to its new figure, with one success tap.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useGoBack } from '@/nav/useGoBack';
@@ -31,11 +33,14 @@ import {
   SignInPrompt,
 } from '@/ui';
 import { AddressQR } from '@/ui/AddressQR';
+import { RollingNumber } from '@/ui/RollingNumber';
+import { successTap } from '@/ui/haptics';
 import { useAuth } from '@/auth/useAuth';
 import { shortAddress } from '@/format';
 import { activeChain, chainLabel, depositQrNote, depositQrWorks, networkChip } from '@/chain';
 import { useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
+import { ETH_DIGITS, NO_ARRIVALS, USDC_DIGITS, noteFunds } from '@/state/moneyIn';
 import { useAsync } from '@/data/useAsync';
 import { usePoll } from '@/data/usePoll';
 import type { PollState } from '@/data/pollState';
@@ -207,6 +212,10 @@ export default function Deposit() {
  *
  * A placeholder before the first answer; a first read that fails, the failure. After that the last answer stays through
  * a failed read, with when it was read. A balance that could not be read is never shown as a number.
+ *
+ * Each answer is set beside the one before it (`src/state/moneyIn.ts`). A balance that rose rolls in at its new figure
+ * and the phone taps once — for that arrival, and never for the first answer, which is what the wallet held when the
+ * screen opened.
  */
 function Funds({
   funds,
@@ -219,13 +228,38 @@ function Funds({
   // The balances are of the wallet the executor has on file. If that is not this address, say so.
   const elsewhere = data !== undefined && address !== undefined && data.owner.toLowerCase() !== address.toLowerCase();
 
+  /*
+   * Noted while rendering, the way React has state follow a prop, so a figure and the arrivals it rolls for always come
+   * from the same answer. Noted in an effect, one render would draw the new balance before its arrival was counted, and
+   * the roll would start on a figure that had already changed in place.
+   */
+  const [arrivals, setArrivals] = useState(NO_ARRIVALS);
+  if (data !== undefined && data !== arrivals.last) setArrivals(noteFunds(arrivals, data));
+
+  // One tap for each arrival. A render that repeats the count taps for nothing.
+  const tapped = useRef(0);
+  useEffect(() => {
+    if (arrivals.count <= tapped.current) return;
+    tapped.current = arrivals.count;
+    successTap();
+  }, [arrivals.count]);
+
   return (
     <View>
       <Eyebrow small>Balance</Eyebrow>
       {data ? (
         <View style={{ marginTop: space.s6 }}>
-          <Row title="USDC" value={<Price>{quantity(data.usdc.amount, 2)}</Price>} height={size.rowSm} />
-          <Row title="ETH" value={<Price>{quantity(data.eth.amount, 4)}</Price>} height={size.rowSm} divider={false} />
+          <Row
+            title="USDC"
+            value={<Holding figure={quantity(data.usdc.amount, USDC_DIGITS)} arrivals={arrivals.usdc} />}
+            height={size.rowSm}
+          />
+          <Row
+            title="ETH"
+            value={<Holding figure={quantity(data.eth.amount, ETH_DIGITS)} arrivals={arrivals.eth} />}
+            height={size.rowSm}
+            divider={false}
+          />
           {error ? (
             <Text variant="footnote" color={colors.down} style={{ marginTop: space.s8 }}>
               {`Couldn’t refresh · last read ${clock(dataAt)}`}
@@ -244,6 +278,16 @@ function Funds({
       )}
     </View>
   );
+}
+
+/**
+ * One balance's figure: still until money lands in it, then rolled in at its true value, once for each arrival — each
+ * is a new `key`, and `RollingNumber` rolls a figure as it mounts. Reduced motion lands it without the roll. USDC and
+ * ETH are money written without a dollar sign, so the figure asks to be masked while balances are hidden.
+ */
+function Holding({ figure, arrivals }: { figure: string; arrivals: number }) {
+  if (arrivals === 0) return <Price mask>{figure}</Price>;
+  return <RollingNumber key={arrivals} value={figure} mask />;
 }
 
 /** What asking for test funds did: what arrived, or the executor's reason nothing was sent. */
