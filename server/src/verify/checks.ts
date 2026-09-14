@@ -29,6 +29,7 @@ import { quote } from '../venues/oneinch.js';
 import { health as graphHealth } from '../graph/client.js';
 import { STOCKS, equitiesFunctional } from '../venues/stocks.js';
 import { earningsCalendar } from '../market/edgar.js';
+import { markBroadcast } from '../http/request-id.js';
 import {
   ensurePolicy as ensurePrivyPolicy,
   allowedDestinations as privyAllowedDestinations,
@@ -301,6 +302,8 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
         const walletId = await privyDemoWalletId();
         if (!walletId) skip('No policy-bound wallet on this deployment.');
         const chainId = CHAIN_KEY === 'base-sepolia' ? 84532 : 8453;
+        // Marked before it is tried: getting through is the failure this check exists to catch, and it would be a real send.
+        await markBroadcast();
         try {
           await privyRpcAsWallet(walletId, {
             method: 'eth_sendTransaction',

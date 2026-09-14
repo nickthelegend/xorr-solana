@@ -38,6 +38,7 @@ import { publicClient } from './client.js';
 import { ADDRESSES, CHAIN_KEY, chain, rpcUrl } from './chains.js';
 import { faucetAccount } from './gasDrip.js';
 import { readChain } from '../http/chain-read.js';
+import { markBroadcast } from '../http/request-id.js';
 import { WHALE as USDC_HOLDER, anvil } from '../fork/makers.js';
 
 const USDC = ADDRESSES.usdcBase;
@@ -257,6 +258,8 @@ async function sendFromHolder(offer: Offer & { source: 'fork-holder' }, to: Addr
     }
     // No retries: a transfer sent twice is two transfers, and a node that did not answer may have taken the first.
     const holder = createWalletClient({ account: USDC_HOLDER, chain, transport: http(rpcUrl, { retryCount: 0 }) });
+    // Recorded before it is sent, so a claim that answers 502 after this is replayed to a retry, never sent twice.
+    await markBroadcast();
     const hash = await holder.writeContract({
       address: USDC,
       abi: erc20Abi,
@@ -307,6 +310,8 @@ async function sendFromFaucetKey(offer: Offer & { source: 'faucet-key' }, to: Ad
   }
 
   const wallet = createWalletClient({ account: faucet, chain, transport: http(rpcUrl, { retryCount: 0 }) });
+  // Recorded before it is sent, as the fork's transfer is.
+  await markBroadcast();
   const hash = await wallet.writeContract({ address: USDC, abi: erc20Abi, functionName: 'transfer', args });
   const receipt = await confirmed(hash, faucet.address, to, offer.usdcRaw);
   return {

@@ -24,6 +24,7 @@ vi.mock('viem', async (importOriginal) => ({
 }));
 
 const { dripGasIfNeeded } = await import('./gasDrip.js');
+const { withRequestScope } = await import('../http/request-id.js');
 
 /** A throwaway key for the test — anvil's second well-known account, never funded anywhere real. */
 const FAUCET_KEY = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
@@ -77,5 +78,34 @@ describe('dripGasIfNeeded', () => {
     const out = await dripGasIfNeeded(NEW_WALLET);
     expect(out.sent === false && out.reason).toMatch(/the faucet holds 0.001 ETH/);
     expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('is recorded against the request’s Idempotency-Key before it is sent, and not sent when that cannot be done', async () => {
+    // A retried `/wallet/connect` must not become a second drip (migration 025).
+    process.env.FAUCET_PRIVATE_KEY = FAUCET_KEY;
+    balances(0n, parseEther('0.05'));
+    const order: string[] = [];
+    sendTransaction.mockImplementation(async () => {
+      order.push('send');
+      return '0xdrip';
+    });
+
+    const sent = await withRequestScope(async (scope) => {
+      scope.beforeFirstBroadcast = async () => {
+        order.push('recorded');
+      };
+      return dripGasIfNeeded(NEW_WALLET);
+    });
+    expect(sent).toMatchObject({ sent: true, hash: '0xdrip' });
+    expect(order).toEqual(['recorded', 'send']);
+
+    const refused = withRequestScope(async (scope) => {
+      scope.beforeFirstBroadcast = async () => {
+        throw new Error('Connection terminated unexpectedly');
+      };
+      return dripGasIfNeeded(NEW_WALLET);
+    });
+    await expect(refused).rejects.toThrow('Connection terminated unexpectedly');
+    expect(order).toEqual(['recorded', 'send']);
   });
 });

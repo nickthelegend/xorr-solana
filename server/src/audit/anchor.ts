@@ -17,6 +17,7 @@
  */
 import type { Address, Hex } from 'viem';
 import { publicClient, walletClient, delegateAccount } from '../evm/client.js';
+import { markBroadcast } from '../http/request-id.js';
 import { one, query } from '../db/index.js';
 import { anchorCooldownSec } from './anchor-limit.js';
 import 'dotenv/config';
@@ -186,6 +187,8 @@ export async function anchorWallet(
     };
   }
 
+  // Recorded before it is sent (`markBroadcast`): `POST /audit/anchor` is a request, and its retry must not pay twice.
+  await markBroadcast();
   const txHash = await walletClient.writeContract({
     address: ANCHOR_ADDRESS,
     abi: ANCHOR_ABI,

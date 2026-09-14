@@ -11,6 +11,7 @@ import { requireScope } from '../auth/middleware.js';
 import { ADDRESSES } from '../evm/chains.js';
 import { DELEGATION_ABI, DELEGATION_ADDRESS } from '../evm/delegation.js';
 import { currentWallet } from './wallet-context.js';
+import { markBroadcast } from '../http/request-id.js';
 import {
   allowedDestinations,
   ensurePolicy,
@@ -80,6 +81,8 @@ privyRoutes.post('/privy/policy/prove', requireScope('admin'), async (c) => {
   const chainId = process.env.XORR_CHAIN === 'base-sepolia' ? 84532 : 8453;
 
   const attempt = async (call: string, to: string, data?: `0x${string}`) => {
+    // Marked before it is tried, outside the catch below: a probe the policy lets through is a real transaction.
+    await markBroadcast();
     try {
       await rpcAsWallet(walletId, {
         method: 'eth_sendTransaction',

@@ -21,8 +21,7 @@ import { limitOrderRoutes } from './routes/limit-orders.js';
 import { mirrorRoutes, startMirrorSchedule } from './routes/mirror.js';
 import { faucetRoutes } from './routes/faucet.js';
 import { withdrawalRoutes } from './routes/withdrawals.js';
-import { idempotency } from './http/idempotency.js';
-import { rateLimit } from './http/rate-limit.js';
+import { guardRequests } from './http/guards.js';
 import { requestId, currentRequestId, log } from './http/request-id.js';
 import { startScheduler } from './executor/scheduler.js';
 import { inFlightRuns } from './executor/run.js';
@@ -142,23 +141,13 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-// Auth before ANY route. An unauthenticated trading server must not be a possible state.
-app.use('*', authMiddleware);
-
 /*
- * Idempotency, after auth because a key is scoped to a user, and before every route so any
- * state-changing request can opt in with a header rather than each handler reimplementing it.
- */
-app.use('*', idempotency);
-
-/*
- * After auth, because the limit is per identity and auth is what resolves one.
+ * Auth, then the rate limiter, then idempotency — in front of every route.
  *
- * The executor holds one 1inch key, one CoinGecko tier and one delegate key, and nothing bounded
- * how fast a single caller could spend them. The scheduler competes for the same quota, so the
- * first thing an unbounded loop would break is the trading — silently, while the app looked fine.
+ * Idempotency sat in front of the limiter, so a 429 claimed its key and was replayed to every retry for a day. The order
+ * is the fix; `http/guards.ts` keeps it, and says why each one sits where it does.
  */
-app.use('*', rateLimit);
+guardRequests(app, authMiddleware);
 
 app.route('/', routes);
 app.route('/', strategyRoutes);

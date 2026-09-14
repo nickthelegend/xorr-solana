@@ -15,6 +15,7 @@ import {
   type TransactionReceipt,
 } from 'viem';
 import { publicClient, walletClient, delegateAccount } from './client.js';
+import { markBroadcast } from '../http/request-id.js';
 import { ADDRESSES, SETTLEMENT_VENUES } from './chains.js';
 import 'dotenv/config';
 
@@ -365,6 +366,8 @@ export async function spendAsDelegate(
   // contract's own named error rather than as a mined failure.
   const { request } = await publicClient.simulateContract(call);
   const gas = withHeadroom(await publicClient.estimateContractGas(call));
+  // Recorded before it is signed: from here on, a retry of the request that asked for this must replay, never send.
+  await markBroadcast();
   return walletClient.writeContract({ ...request, gas });
 }
 
@@ -615,5 +618,7 @@ export async function closeAsDelegate(
   } as const;
   const { request } = await publicClient.simulateContract(call);
   const gas = withHeadroom(await publicClient.estimateContractGas(call));
+  // Recorded before it is signed, as a spend is: a close that answers 502 after this is replayed, never sold twice.
+  await markBroadcast();
   return walletClient.writeContract({ ...request, gas });
 }

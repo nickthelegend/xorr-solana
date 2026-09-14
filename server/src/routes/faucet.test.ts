@@ -90,6 +90,7 @@ const { append } = await import('../audit/log.js');
 const { currentWallet, requireWallet } = await import('./wallet-context.js');
 const { faucetRoutes } = await import('./faucet.js');
 const { errorResponse } = await import('../http/errors.js');
+const { withRequestScope } = await import('../http/request-id.js');
 
 const app = new Hono();
 // Signed in, as the auth middleware would have decided it.
@@ -314,6 +315,37 @@ describe('POST /faucet on a fork of Base', () => {
     expect(anvilMethods()).toContain('anvil_stopImpersonatingAccount');
     expect(claimInsert()).toBeUndefined();
     expect(append).not.toHaveBeenCalled();
+  });
+
+  it('records the transfer against the request’s Idempotency-Key before sending it, and sends nothing when that cannot be done', async () => {
+    // A claim that answers 502 after its transfer is replayed to a retry, never sent twice (migration 025).
+    fork();
+    const order: string[] = [];
+    h.writeContract.mockImplementation(async () => {
+      order.push('send');
+      return TX;
+    });
+
+    const recorded = await withRequestScope(async (scope) => {
+      scope.beforeFirstBroadcast = async () => {
+        order.push('recorded');
+      };
+      return post();
+    });
+    expect(recorded.status).toBe(200);
+    expect(order).toEqual(['recorded', 'send']);
+
+    const unrecorded = await withRequestScope(async (scope) => {
+      scope.beforeFirstBroadcast = async () => {
+        throw new Error('Connection terminated unexpectedly');
+      };
+      return post();
+    });
+    expect(unrecorded.status).toBe(502);
+    expect(await unrecorded.json()).toMatchObject({ status: 'failed' });
+    expect(order).toEqual(['recorded', 'send']);
+    // However it ended, nothing on the node can sign as the reserve afterwards.
+    expect(anvilMethods().filter((m) => m === 'anvil_stopImpersonatingAccount')).toHaveLength(2);
   });
 
   it('records nothing for a receipt whose Transfer went somewhere else', async () => {

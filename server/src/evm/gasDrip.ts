@@ -33,6 +33,7 @@ import { createWalletClient, formatEther, http, parseEther, type Address, type H
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { publicClient } from './client.js';
 import { IS_BASE_MAINNET_STATE, CHAIN_KEY, chain, rpcUrl } from './chains.js';
+import { markBroadcast } from '../http/request-id.js';
 
 /** Enough for the approvals and the grant on an L2, and not a penny of use beyond that. */
 const DRIP_ETH = '0.002';
@@ -75,6 +76,8 @@ export async function dripGasIfNeeded(to: Address): Promise<DripResult> {
   }
 
   const wallet = createWalletClient({ account: faucet, chain, transport: http(rpcUrl) });
+  // Recorded before it is sent (`markBroadcast`): a retried connect must not become a second drip.
+  await markBroadcast();
   const hash = await wallet.sendTransaction({ to, value: drip });
   return { sent: true, amountEth: DRIP_ETH, hash, from: faucet.address };
 }
