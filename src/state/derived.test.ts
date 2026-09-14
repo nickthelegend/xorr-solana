@@ -829,3 +829,67 @@ describe('what Safety shows from the chain', () => {
     expect(d.permissionOnChain(undefined, true)).toBeUndefined();
   });
 });
+
+/*
+ * The two rings on Safety (FEATURES.md #34), from what the permission read returned. A value that is not known is a dash
+ * and no ring — never an empty ring, which reads as nothing spent.
+ */
+describe('cap and term rings', () => {
+  const H = 3_600_000;
+  const now = Date.UTC(2026, 8, 14, 12);
+
+  it('draws today’s spend against the cap the same read returned', () => {
+    const used = d.capUsed({ dailyCapUsd: 1600, spentTodayUsd: 464 });
+    expect(used).toBeCloseTo(0.29, 10);
+    // 0.29 × 100 is 28.999… in binary; the figure is still 29%.
+    expect(d.capUsedFigure(used)).toBe('29%');
+    expect(d.capUsedFigure(d.capUsed({ dailyCapUsd: 1600, spentTodayUsd: 0 }))).toBe('0%');
+  });
+
+  it('rounds down, so a cap is never shown used up before it is', () => {
+    expect(d.capUsedFigure(d.capUsed({ dailyCapUsd: 1600, spentTodayUsd: 1599.99 }))).toBe('99%');
+    expect(d.capUsedFigure(d.capUsed({ dailyCapUsd: 1600, spentTodayUsd: 1600 }))).toBe('100%');
+  });
+
+  it('keeps a spend over a cap lowered mid-day in the figure', () => {
+    expect(d.capUsedFigure(d.capUsed({ dailyCapUsd: 400, spentTodayUsd: 450 }))).toBe('112%');
+  });
+
+  it('is unknown, and a dash, without a tally or a cap to count against', () => {
+    // A policy read off the chain alone, or an executor older than the field.
+    expect(d.capUsed({ dailyCapUsd: 1600 })).toBeUndefined();
+    expect(d.capUsed({ dailyCapUsd: 0, spentTodayUsd: 0 })).toBeUndefined();
+    expect(d.capUsed({ dailyCapUsd: 1600, spentTodayUsd: Number.NaN })).toBeUndefined();
+    expect(d.capUsed(null)).toBeUndefined();
+    expect(d.capUsedFigure(undefined)).toBe('—');
+  });
+
+  it('takes the term left as a share of the whole run from its recorded start', () => {
+    expect(d.termLeft({ expiresAt: now + 24 * H, grantedAt: now - 48 * H }, now)).toBeCloseTo(1 / 3, 10);
+  });
+
+  it('has no term without a recorded start', () => {
+    expect(d.termLeft({ expiresAt: now + H, grantedAt: null }, now)).toBeUndefined();
+    expect(d.termLeft({ expiresAt: now + H }, now)).toBeUndefined();
+    expect(d.termLeft({ expiresAt: now, grantedAt: now + H }, now)).toBeUndefined();
+    expect(d.termLeft(null, now)).toBeUndefined();
+  });
+
+  it('stays inside the ring: empty once ended, full before it began', () => {
+    expect(d.termLeft({ expiresAt: now - H, grantedAt: now - 2 * H }, now)).toBe(0);
+    expect(d.termLeft({ expiresAt: now + 2 * H, grantedAt: now + H }, now)).toBe(1);
+  });
+
+  it('says the time left in its largest whole unit, rounded down, and in words for a screen reader', () => {
+    expect(d.timeLeft(now + 5 * 24 * H + 23 * H, now)).toEqual({ figure: '5d', words: '5 days' });
+    expect(d.timeLeft(now + 24 * H, now)).toEqual({ figure: '1d', words: '1 day' });
+    expect(d.timeLeft(now + 13 * H + 59 * 60_000, now)).toEqual({ figure: '13h', words: '13 hours' });
+    expect(d.timeLeft(now + 40 * 60_000, now)).toEqual({ figure: '40m', words: '40 minutes' });
+    expect(d.timeLeft(now + 59_000, now)).toEqual({ figure: '0m', words: 'under a minute' });
+  });
+
+  it('is a dash with no expiry to count to', () => {
+    expect(d.timeLeft(undefined, now)).toEqual({ figure: '—', words: 'unknown' });
+    expect(d.timeLeft(Number.NaN, now).figure).toBe('—');
+  });
+});

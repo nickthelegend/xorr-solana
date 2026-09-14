@@ -1,11 +1,11 @@
 /**
  * Safety — the kill switch. screens.md Group C, distilled 2026-09-14.
  *
- * A state chip, a title and one line, all from the chain's answer; the two parties to the permission; the approvals
- * that outlive a stop; the rows that guard the wallet; one button. PLAN.md 6.10 / 12.5: the button SIGNS AN ON-CHAIN
- * REVOKE from the user's own wallet, so a stop needs no server to reach every device — and, since FEATURES.md #1, none
- * to be offered: when the executor cannot be read, the chain is asked directly. The stop is held, not tapped
- * (FEATURES.md #3).
+ * A state chip, a title and one line, all from the chain's answer; two rings, today's cap and the time left; the two
+ * parties to the permission; the approvals that outlive a stop; the rows that guard the wallet; one button. PLAN.md 6.10
+ * / 12.5: the button SIGNS AN ON-CHAIN REVOKE from the user's own wallet, so a stop needs no server to reach every
+ * device — and, since FEATURES.md #1, none to be offered: when the executor cannot be read, the chain is asked directly.
+ * The stop is held, not tapped (FEATURES.md #3).
  */
 import React, { useEffect, useState } from 'react';
 import { ScrollView, View } from 'react-native';
@@ -22,6 +22,7 @@ import {
   NoteStrip,
   Placeholder,
   Press,
+  Ring,
   Row,
   Screen,
   SheetCard,
@@ -34,6 +35,8 @@ import {
 } from '@/ui';
 import { shortAddress } from '@/format';
 import {
+  capUsed,
+  capUsedFigure,
   delegateUnusable,
   delegationExpired,
   permissionOnChain,
@@ -43,6 +46,8 @@ import {
   killCta,
   killExplanation,
   killTitle,
+  termLeft,
+  timeLeft,
 } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
@@ -236,6 +241,8 @@ export default function Safety() {
   /** The one sentence that depends on the count: a live permission, as the executor reported it. */
   const needsCount =
     !asking && !signedOut && !unreadable && granted && !killed && !unusable && !expired && fromChain === undefined;
+  /** A permission that can trade now, by whichever read governs: what the two rings describe. */
+  const live = !asking && !signedOut && !unreadable && granted && !killed && !unusable && !expired;
 
   // Signed by the user, on-chain: a stop reaches every device without any server needing to be reachable.
   const { grant: signGrant, revoke: signRevoke, busy, error: txError } = useGrantDelegation();
@@ -317,6 +324,10 @@ export default function Safety() {
   }
 
   const heldApprovals = approvals ? approvals.tokens.filter((t) => !t.none && !t.unread) : [];
+  // The rings, from the read that governs. A policy read off the chain alone carries no spend and no start.
+  const spent = capUsed(record);
+  const term = termLeft(record, now);
+  const left = timeLeft(expiresAt, now);
   const ownerShown = record ? record.ownerPubkey : owner;
   const delegateShown = record ? record.delegatePubkey : chainPolicy?.delegate;
 
@@ -415,6 +426,26 @@ export default function Safety() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: space.s16, gap: space.s12 }}
         >
+          {/* Today's cap used and the time left, while the permission can trade: a stopped or ended one has neither. */}
+          {live ? (
+            <SheetCard borderRadius={radius.panel} padding={space.s16}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                <Ring
+                  fraction={spent}
+                  value={capUsedFigure(spent)}
+                  label="Cap used"
+                  accessibilityLabel={`Cap used, ${spent === undefined ? 'unknown' : capUsedFigure(spent)}`}
+                />
+                <Ring
+                  fraction={term}
+                  value={left.figure}
+                  label="Time left"
+                  accessibilityLabel={`Time left, ${left.words}`}
+                />
+              </View>
+            </SheetCard>
+          ) : null}
+
           {/*
             Signed out, nobody's permission has been read: a sign-in, not a claim about a wallet nobody named. And a read
             that failed is not "Nothing granted yet": that card is for a wallet something actually answered for.

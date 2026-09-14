@@ -87,3 +87,4 @@ export { StatTile, StatGrid, StatRow, type StatTileProps, type StatGridProps } f
 export { TabBar, TAB_ORDER, type TabBarProps, type TabKey } from './TabBar';
 
 export * from './charts';
+export { Ring, type RingProps } from './charts/Ring';

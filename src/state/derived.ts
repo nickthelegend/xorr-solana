@@ -511,6 +511,76 @@ export function permissionOnChain(
   return undefined;
 }
 
+// ── Cap and term rings (Safety, FEATURES.md #34) ─────────────────────────────
+
+/**
+ * How much of today's cap is spent: `spentTodayUsd` over `dailyCapUsd`, as one permission read returned them.
+ *
+ * `/delegation` sends the contract's own `spentToday` tally beside the cap it counts against
+ * (`server/src/routes/index.ts`), so the two cannot disagree; `Delegation` does not declare the field, hence the shape
+ * taken here. Undefined when either is missing or unusable — a policy read off the chain alone carries no tally, and an
+ * executor older than the field sends none — because an unmeasured spend drawn as an empty ring is a spend of zero. Not
+ * capped at one: a cap lowered mid-day can leave more spent than the new cap, and the figure should say so.
+ */
+export function capUsed(
+  permission: { dailyCapUsd?: number; spentTodayUsd?: number } | null | undefined,
+): number | undefined {
+  const cap = permission?.dailyCapUsd;
+  const spent = permission?.spentTodayUsd;
+  if (typeof cap !== 'number' || typeof spent !== 'number') return undefined;
+  if (!Number.isFinite(cap) || !Number.isFinite(spent) || cap <= 0 || spent < 0) return undefined;
+  return spent / cap;
+}
+
+/**
+ * The cap ring's figure: "29%". Rounded down, so a cap never reads used up before it is — the epsilon is float noise,
+ * since 464 of 1,600 is 28.999…% in binary. Unsigned, as a share of a whole is. A dash when unknown.
+ */
+export function capUsedFigure(used: number | undefined): string {
+  if (used === undefined) return '—';
+  return percent(Math.floor(used * 100 + 1e-9), { digits: 0, explicitSign: false });
+}
+
+/**
+ * How much of the permission's term is left, 0 to 1: the time to `expiresAt` over the whole run from `grantedAt`.
+ *
+ * The chain keeps the expiry and not the start (`Delegation.grantedAt`), so without a recorded start there is no term to
+ * take a share of, and this is undefined rather than a length made up.
+ */
+export function termLeft(
+  permission: { expiresAt?: number; grantedAt?: number | null } | null | undefined,
+  now: number,
+): number | undefined {
+  const end = permission?.expiresAt;
+  const start = permission?.grantedAt;
+  if (typeof end !== 'number' || typeof start !== 'number') return undefined;
+  if (!Number.isFinite(end) || !Number.isFinite(start) || end <= start) return undefined;
+  return Math.min(1, Math.max(0, (end - now) / (end - start)));
+}
+
+const TIME_UNITS = [
+  { ms: 86_400_000, short: 'd', long: 'day' },
+  { ms: 3_600_000, short: 'h', long: 'hour' },
+  { ms: 60_000, short: 'm', long: 'minute' },
+] as const;
+
+/**
+ * The time to `expiresAt`, as the term ring's figure ("5d") and as the words a screen reader says ("5 days").
+ *
+ * Its largest whole unit, rounded down, so it never promises time that is not there. A dash with no expiry to count to.
+ */
+export function timeLeft(expiresAt: number | undefined, now: number): { figure: string; words: string } {
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return { figure: '—', words: 'unknown' };
+  }
+  const ms = Math.max(0, expiresAt - now);
+  for (const unit of TIME_UNITS) {
+    const n = Math.floor(ms / unit.ms);
+    if (n >= 1) return { figure: `${n}${unit.short}`, words: `${n} ${unit.long}${n === 1 ? '' : 's'}` };
+  }
+  return { figure: '0m', words: 'under a minute' };
+}
+
 // ── Activity (screen 15) ─────────────────────────────────────────────────────
 
 /**
