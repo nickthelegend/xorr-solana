@@ -384,11 +384,11 @@ export const LocalRepositories: Repositories = {
   },
 
   orders: {
-    async place(input): Promise<OrderOutcome> {
+    async place(input, write): Promise<OrderOutcome> {
       // A 409 is a POLICY refusal, not a transport failure — the body carries the reason the
       // user needs to read, so it is unwrapped rather than thrown as "409".
       try {
-        return await api.post<OrderOutcome>('/orders', input);
+        return await api.post<OrderOutcome>('/orders', input, write);
       } catch (e) {
         if (e instanceof ApiError && e.body && typeof e.body === 'object') {
           const b = e.body as Partial<OrderOutcome>;
@@ -481,11 +481,11 @@ export const LocalRepositories: Repositories = {
         holdings: b.holdings ?? [],
       };
     },
-    async close(input): Promise<PositionClose> {
+    async close(input, write): Promise<PositionClose> {
       // No catch. A sale that did not happen must surface on the screen that asked for it —
       // a swallowed failure here reads to the user as a completed exit.
       try {
-        return await api.post<PositionClose>('/positions/close', input);
+        return await api.post<PositionClose>('/positions/close', input, write);
       } catch (e) {
         if (e instanceof ApiError && e.body && typeof e.body === 'object') {
           const b = e.body as Partial<PositionClose>;

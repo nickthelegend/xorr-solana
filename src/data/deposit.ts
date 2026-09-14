@@ -6,6 +6,7 @@
  * zero would be a different claim.
  */
 import { api, ApiError } from './api';
+import type { Keyed } from './intentKey';
 
 /** The two things a deposit lands as: USDC to trade with, and ETH to sign with. */
 export type WalletFunds = {
@@ -83,10 +84,13 @@ export function faucetStatus(): Promise<FaucetStatus> {
 /**
  * Ask the faucet. A refusal (409) or a failure (502) carries the executor's own sentence in its body, so it is returned for
  * the screen to show rather than thrown as a status code, as `fillLimitOrder` does.
+ *
+ * `write` is the claim's `Idempotency-Key` (FEATURES.md #29). Optional only because onboarding's Fund screen still claims
+ * without one.
  */
-export async function requestFaucet(): Promise<FaucetOutcome> {
+export async function requestFaucet(write?: Keyed): Promise<FaucetOutcome> {
   try {
-    return await api.post<FaucetOutcome>('/faucet', {});
+    return await api.post<FaucetOutcome>('/faucet', {}, write);
   } catch (e) {
     if (e instanceof ApiError && e.body && typeof e.body === 'object' && 'status' in e.body) {
       return e.body as FaucetOutcome;

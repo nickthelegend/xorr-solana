@@ -51,6 +51,7 @@ import { CLOSE_STEPS, closeCta, driftSentence, holdingDrift } from '@/state/deri
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
+import { useIntentKeys } from '@/data/useIntentKeys';
 import { useLogo } from '@/data/useLogos';
 import { errorText } from '@/data/apiError';
 
@@ -85,12 +86,19 @@ export default function PositionScreen() {
   }, [closePct, reduced, pct]);
   const fill = useAnimatedStyle(() => ({ width: `${pct.value * 100}%` }));
 
+  /*
+   * The close's Idempotency-Key (FEATURES.md #29): Close tapped again after a timeout is the same close. Another
+   * percentage is another close, and so is the same one once the first has answered.
+   */
+  const keys = useIntentKeys();
+
   const close = useCallback(async () => {
     if (!p || closing) return;
     setClosing(true);
     setCloseError(undefined);
     try {
-      const res = await repos.portfolio.close({ symbol: p.symbol, fraction: closePct / 100 });
+      const ask = { symbol: p.symbol, fraction: closePct / 100 };
+      const res = await keys.send(ask, (idempotencyKey) => repos.portfolio.close(ask, { idempotencyKey }));
       if (res.status === 'closed') {
         setClosed({ proceeds: res.usd ?? 0, units: res.units ?? 0 });
         reload();
@@ -103,7 +111,7 @@ export default function PositionScreen() {
     } finally {
       setClosing(false);
     }
-  }, [p, closePct, closing, reload]);
+  }, [p, closePct, closing, reload, keys]);
 
   const header = (
     <View

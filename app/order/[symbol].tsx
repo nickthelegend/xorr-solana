@@ -37,6 +37,7 @@ import { api } from '@/data/api';
 import { unitsFor, usePrice } from '@/data/usePrices';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
+import { useIntentKeys } from '@/data/useIntentKeys';
 import { useDebounced } from '@/data/useDebounced';
 import { useStore } from '@/state/store';
 import { DEFAULT_BUY } from '@/data/tradable';
@@ -170,6 +171,11 @@ export default function OrderTicket() {
   const [placing, setPlacing] = useState(false);
   const [refusal, setRefusal] = useState<string>();
   const [filled, setFilled] = useState<{ units: number; price: number }>();
+  /*
+   * The order's Idempotency-Key (FEATURES.md #29). An order that timed out may have filled; the same order tapped again
+   * carries the same key, and the executor answers with what the first one did rather than filling it twice.
+   */
+  const keys = useIntentKeys();
 
   async function place() {
     if (amount <= 0 || placing) return;
@@ -183,10 +189,12 @@ export default function OrderTicket() {
         }
         // A USD amount, expressed as the fraction of the holding it represents — which is
         // what the executor needs to compute an exact on-chain balance to sell.
-        const res = await repos.portfolio.close({
-          symbol,
-          fraction: Math.min(1, amount / heldUsd),
-        });
+        const fraction = Math.min(1, amount / heldUsd);
+        // The key follows the dollars entered, not the fraction: that is worked out from the position's value as last
+        // read, and the same sale asked for again must stay one sale whatever that value does.
+        const res = await keys.send({ side, symbol, usd: amount }, (idempotencyKey) =>
+          repos.portfolio.close({ symbol, fraction }, { idempotencyKey }),
+        );
         if (res.status === 'closed') {
           setFilled({ units: res.units ?? 0, price: (res.usd ?? 0) / (res.units || 1) });
           setTimeout(() => goBack(), 1200);
@@ -196,7 +204,9 @@ export default function OrderTicket() {
         return;
       }
 
-      const res = await repos.orders.place({ symbol, usd: amount });
+      const res = await keys.send({ side, symbol, usd: amount }, (idempotencyKey) =>
+        repos.orders.place({ symbol, usd: amount }, { idempotencyKey }),
+      );
       if (res.status === 'filled') {
         setFilled({ units: res.units ?? 0, price: res.price ?? 0 });
         // Let the fill land on screen before the sheet goes; a ticket that closes the

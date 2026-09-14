@@ -13,6 +13,7 @@
  */
 import { api, ApiError } from './api';
 import type { AnchorReport, RouteComparison } from './types';
+import type { Keyed } from './intentKey';
 
 /* ─────────────────────────────────────────────────────────── trust and proof */
 
@@ -584,10 +585,12 @@ export const system = {
   /**
    * One swap, placed now (PLAN.md 3.9). A refusal (409) or a failure (502, 503) carries the executor's own
    * sentence in its body, so it is returned for the screen to show rather than thrown as a status code.
+   *
+   * Keyed (FEATURES.md #29): the swap Confirm sends again after a timeout is the same swap, not a second one.
    */
-  swap: async (body: SwapBody): Promise<SwapOutcome> => {
+  swap: async (body: SwapBody, write: Keyed): Promise<SwapOutcome> => {
     try {
-      return await api.post<SwapOutcome>('/swap', body);
+      return await api.post<SwapOutcome>('/swap', body, write);
     } catch (e) {
       if (e instanceof ApiError && e.body && typeof e.body === 'object' && 'status' in e.body) {
         return e.body as SwapOutcome;

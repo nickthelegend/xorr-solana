@@ -41,6 +41,7 @@ import { usePoll } from '@/data/usePoll';
 import type { PollState } from '@/data/pollState';
 import { errorText } from '@/data/apiError';
 import { faucetStatus, requestFaucet, walletFunds, type FaucetOutcome, type WalletFunds } from '@/data/deposit';
+import { useIntentKeys } from '@/data/useIntentKeys';
 
 /** Often enough to see a deposit land while you wait for it. Each read is two balance calls against the executor's node. */
 const POLL_MS = 5_000;
@@ -94,11 +95,17 @@ export default function Deposit() {
     setCopied(true);
   }
 
+  /*
+   * The claim's Idempotency-Key (FEATURES.md #29). A claim that timed out may have been sent; the button tapped again
+   * carries the same key, so the executor answers with what that claim did instead of sending again.
+   */
+  const keys = useIntentKeys();
+
   async function ask() {
     if (asking) return;
     setAsking(true);
     try {
-      const result = await requestFaucet();
+      const result = await keys.send('faucet', (idempotencyKey) => requestFaucet({ idempotencyKey }));
       setOutcome(result);
       // The balances changed on chain; read them now rather than at the next tick.
       if (result.status === 'sent') void funds.refresh();

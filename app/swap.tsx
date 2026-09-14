@@ -47,6 +47,7 @@ import { SWAP_SLIPPAGES, keypadPress, swapRequest, swapSpendable } from '@/state
 import { usePrice } from '@/data/usePrices';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
+import { useIntentKeys } from '@/data/useIntentKeys';
 import { apiReason } from '@/data/api';
 import { errorText } from '@/data/apiError';
 import { logoProps, useLogos } from '@/data/useLogos';
@@ -129,11 +130,17 @@ export default function Swap() {
       setPicking(null);
     });
 
+  /*
+   * The swap's Idempotency-Key (FEATURES.md #29). The request is the ask — pair, amount and tolerance — so Confirm after a
+   * timeout sends the same key, and an edit, which ends the review, makes whatever is confirmed next another swap.
+   */
+  const keys = useIntentKeys();
+
   async function confirm() {
     if (!request || placing) return;
     setPlacing(true);
     try {
-      const result = await system.swap(request);
+      const result = await keys.send(request, (idempotencyKey) => system.swap(request, { idempotencyKey }));
       setOutcome(result);
       if (result.status === 'filled') {
         setAmount('0');

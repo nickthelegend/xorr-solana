@@ -9,6 +9,7 @@ import { isPublicPath } from './publicPaths';
 import { authKnowledge, whenAuthKnown } from '@/auth/authState';
 import { API_BASE } from './apiBase';
 import { ApiError, NotSignedIn, TimedOut } from './apiError';
+import { keyHeaders, type Keyed } from './intentKey';
 /*
  * Re-exported, not redefined.
  *
@@ -148,8 +149,12 @@ async function send<T>(path: string, signal: AbortSignal, requestId: string, ini
 
 export const api = {
   get: <T,>(path: string) => request<T>(path),
-  post: <T,>(path: string, body: unknown) =>
-    request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+  /**
+   * `write` carries a money action's `Idempotency-Key` (FEATURES.md #29): the executor runs a keyed write once and answers
+   * a repeat of it with what the first did. When a key is made, kept and dropped is `intentKey.ts`.
+   */
+  post: <T,>(path: string, body: unknown, write?: Keyed) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(body), headers: keyHeaders(write) }),
   patch: <T,>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   del: <T,>(path: string) => request<T>(path, { method: 'DELETE' }),

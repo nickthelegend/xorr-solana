@@ -25,6 +25,7 @@ import type {
   Timeframe,
   Wallet,
 } from './types';
+import type { Keyed } from './intentKey';
 
 export interface MarketRepository {
   listClasses(): Promise<AssetClass[]>;
@@ -102,8 +103,11 @@ export interface OrderRepository {
    * The executor picks the route and the price and enforces every limit — it runs the same
    * `runStrategy` path the scheduler runs. A `blocked` outcome carries the policy engine's
    * own reason, which is the sentence the user should read.
+   *
+   * `write` is the order's `Idempotency-Key`, and there is no placing one without it: a buy tapped again after a timeout
+   * must reach the executor as the same buy (FEATURES.md #29, `intentKey.ts`).
    */
-  place(input: { symbol: string; usd: number }): Promise<OrderOutcome>;
+  place(input: { symbol: string; usd: number }, write: Keyed): Promise<OrderOutcome>;
 }
 
 export type OrderOutcome = {
@@ -172,8 +176,10 @@ export interface PortfolioRepository {
    *
    * Goes through `closePosition`, never `spend`, so the daily cap cannot silence it. The
    * executor picks the route and the price; the app sends only how much.
+   *
+   * Keyed, for the reason `OrderRepository.place` is: a sale asked for again after a timeout is the same sale.
    */
-  close(input: { symbol: string; fraction: number }): Promise<PositionClose>;
+  close(input: { symbol: string; fraction: number }, write: Keyed): Promise<PositionClose>;
 }
 /** What came back from a close. `txHash` is the on-chain proof. */
 export type PositionClose = {
