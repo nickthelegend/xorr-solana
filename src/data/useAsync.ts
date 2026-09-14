@@ -10,6 +10,7 @@
  * gives the same answer for free.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { settleReread, shouldReread, type RereadResult, type Settled } from './reread';
 
 export type AsyncState<T> = {
   data: T | undefined;
@@ -25,9 +26,17 @@ export type AsyncState<T> = {
    * never said.
    */
   settledAt: number | undefined;
+  /**
+   * Read again in place, when the answer on screen is old enough to be worth replacing (FEATURES.md #27).
+   *
+   * `reload` asks a new question, so `loading` turns on and a screen draws its placeholder until the answer lands. This
+   * asks the same question again: `loading` stays off and the data stays on screen until the answer replaces it. A failure
+   * is kept beside the data rather than in place of it (`settleReread`). Nothing is asked while a read is on its way, or
+   * within fifteen seconds of the last answer (`shouldReread`), so calling it often costs nothing. A screen opts in with
+   * `useFreshOnReturn`.
+   */
+  refreshIfStale: () => void;
 };
-
-type Settled<T> = { key: string; at?: number; data?: T; error?: Error };
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncState<T> {
   const [nonce, setNonce] = useState(0);
@@ -35,6 +44,20 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
   const alive = useRef(true);
 
   const key = useMemo(() => JSON.stringify([deps, nonce]), [deps, nonce]);
+  const loading = settled.key !== key;
+
+  /*
+   * What a re-read needs when it is asked for, which is after the render that made the callback: the read, the question
+   * on screen, and whether its answer is still on the way. Written by an effect, never during a render.
+   */
+  const asked = useRef({ fn, key, loading });
+  /** When the last read came back, answered or failed — the age `shouldReread` judges. */
+  const lastSettledAt = useRef<number | undefined>(undefined);
+  const rereading = useRef(false);
+
+  useEffect(() => {
+    asked.current = { fn, key, loading };
+  });
 
   useEffect(() => {
     alive.current = true;
@@ -47,13 +70,19 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
     let current = true;
     fn()
       .then((data) => {
-        if (current && alive.current) setSettled({ key, data, at: Date.now() });
+        if (current && alive.current) {
+          const at = Date.now();
+          lastSettledAt.current = at;
+          setSettled({ key, data, at });
+        }
       })
       .catch((e: unknown) => {
         if (current && alive.current) {
+          const at = Date.now();
+          lastSettledAt.current = at;
           setSettled({
             key,
-            at: Date.now(),
+            at,
             error: e instanceof Error ? e : new Error(String(e)),
           });
         }
@@ -66,13 +95,33 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []): AsyncSt
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
 
+  const refreshIfStale = useCallback(() => {
+    const { fn: read, key: question, loading: answering } = asked.current;
+    const inFlight = answering || rereading.current;
+    if (!shouldReread({ now: Date.now(), lastSettledAt: lastSettledAt.current, inFlight })) return;
+    rereading.current = true;
+    // Started from a resolved promise, so a read that throws before it returns one still ends the re-read.
+    void Promise.resolve()
+      .then(read)
+      .then(
+        (data): RereadResult<T> => ({ ok: true, data, at: Date.now() }),
+        (e: unknown): RereadResult<T> => ({ ok: false, error: e instanceof Error ? e : new Error(String(e)) }),
+      )
+      .then((result) => {
+        rereading.current = false;
+        lastSettledAt.current = Date.now();
+        if (alive.current) setSettled((prev) => settleReread(prev, question, result));
+      });
+  }, []);
+
   // Keep showing the previous data while a new key is in flight — a list that empties on every
   // filter change reads as a bug, and animations.md forbids covering it with a transition.
   return {
     data: settled.data,
     error: settled.key === key ? settled.error : undefined,
-    loading: settled.key !== key,
+    loading,
     reload,
     settledAt: settled.at,
+    refreshIfStale,
   };
 }

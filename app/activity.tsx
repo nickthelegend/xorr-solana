@@ -42,6 +42,7 @@ import {
 import { repos } from '@/data';
 import { exportRecords } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
+import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import { deliverFile } from '@/export/deliver';
 import { useRefreshControl } from '@/ui/useRefreshControl';
 import { useStore } from '@/state/store';
@@ -95,7 +96,10 @@ export default function Activity() {
   const router = useRouter();
   const actFilter = useStore((s) => s.actFilter);
   const setActFilter = useStore((s) => s.setActFilter);
-  const { data, loading, error, reload } = useAsync(() => repos.activity.list(), []);
+  const trail = useAsync(() => repos.activity.list(), []);
+  const { data, loading, error, reload } = trail;
+  // The agents go on acting while nobody is looking: read the trail again on return (FEATURES.md #27).
+  useFreshOnReturn(trail);
   // Pulling down is the gesture people already try on a list of things that keep changing.
   const refresh = useRefreshControl(reload);
   const [exporting, setExporting] = useState(false);

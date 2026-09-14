@@ -35,6 +35,7 @@ import { useSignedOut } from '@/auth/useSignedOut';
 import { signedMoney } from '@/format';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
+import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { walletTokens } from '@/data/walletTokens';
 import { useRefreshControl } from '@/ui/useRefreshControl';
@@ -75,6 +76,11 @@ export default function Assets() {
   const tokens = useAsync(() => walletTokens(), []);
   const positions = useAsync(() => repos.portfolio.positions(), []);
   const realised = useAsync(() => repos.portfolio.realised(), []);
+  /*
+   * Read again when the tab is come back to (FEATURES.md #27): every read here that can change, which is all but the
+   * target mix — product config with no request behind it.
+   */
+  useFreshOnReturn(balance, tokens, positions, realised);
   /*
    * Every read on the screen, because a trade changes all of them at once. Holdings and Realised were left out, so a
    * pull after a sale refreshed the balance and went on listing the position it had just sold.
@@ -140,9 +146,13 @@ export default function Assets() {
               ? '· · ·'
               : '—'}
         </Price>
+        {/* With a figure above it, the failure is a re-read on return (FEATURES.md #27): that figure is the last one
+            read, which is not the same as a balance that never loaded. */}
         {balance.error ? (
           <Text variant="secondary" style={{ marginTop: space.s6 }}>
-            Couldn’t load your balance.
+            {balance.data !== null && balance.data !== undefined
+              ? 'Couldn’t refresh your balance.'
+              : 'Couldn’t load your balance.'}
           </Text>
         ) : null}
 

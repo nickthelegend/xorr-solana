@@ -45,6 +45,7 @@ import { signedMoney } from '@/format';
 import { repos } from '@/data';
 import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
+import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import type { Strategy } from '@/data/types';
 import { driftSentence, holdingDrift } from '@/state/derived';
 
@@ -162,6 +163,12 @@ export default function Portfolio() {
    * savings in the total above left out of the line beneath it.
    */
   const history = useAsync(() => system.portfolioHistory('1W'), []);
+  /*
+   * Read again when someone comes back (FEATURES.md #27). This sheet sits under the position screen a sale is made from,
+   * and under Deposit and Send, and every figure on it moves with what happened there. The cards' closes keep their own
+   * read — a day of hourly prices, asked again when the set of positions changes.
+   */
+  useFreshOnReturn(balance, positions, realised, strategies, runs, activity, history);
   const points = useMemo(() => (history.data?.points ?? []).map((p) => p.totalUsd), [history.data]);
   const firstAt = history.data?.points[0]?.at;
   const graphDelta = points.length > 1 ? points[points.length - 1]! - points[0]! : 0;

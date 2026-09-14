@@ -35,6 +35,7 @@ import { useSignedOut } from '@/auth/useSignedOut';
 // Unsigned: a share of the whole is not a move, and "+62.4%" read as a gain.
 import { money, percent as pct } from '@/format';
 import { useAsync } from '@/data/useAsync';
+import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import { repos } from '@/data';
 
 const BAR_H = 8;
@@ -42,7 +43,11 @@ const BAR_H = 8;
 export default function Balance() {
   const goBack = useGoBack();
   const router = useRouter();
-  const { data, loading, error, reload } = useAsync(() => repos.portfolio.balance(), []);
+  const balance = useAsync(() => repos.portfolio.balance(), []);
+  const { data, loading, error, reload } = balance;
+  // The split moves with every trade, deposit and withdrawal made on another screen: read it again on return
+  // (FEATURES.md #27).
+  useFreshOnReturn(balance);
   const signedOut = useSignedOut();
 
   const total = data?.total ?? 0;
