@@ -138,6 +138,7 @@ describe('motion — animations.md', () => {
   //   Candlestick     the candles revealed left to right  700ms  (arrival)
   //   TabBar          the whole bar down and back up      250ms  (making way for the Messages drawer, 2026-09-16)
   //   FillReceipt     a confirmed fill's receipt arriving   420ms  (arrival; once, on the signature — never on mount)
+  //   CloseResult     what a close realised, scaling in     250ms  (the one fill-confirmation scale-in; silent when unmeasured)
   //   AllocationDonut the ring sweeping clockwise on load    700ms  (arrival, the chart reveal beat — revealed, never resized)
   //   ValueTimeline   the recorded history revealed L→R     700ms  (arrival; no point ever moves to a new value)
   //   AgentOrb        the agent's stage: breathe / settle  3600ms (thinking) · 900ms (executing) · 250ms (decided, filled)
@@ -151,6 +152,7 @@ describe('motion — animations.md', () => {
       .sort();
     expect(animated).toEqual([
       'AgentOrb.tsx',
+      'CloseResult.tsx',
       'FillReceipt.tsx',
       'HoldButton.tsx',
       'Progress.tsx',

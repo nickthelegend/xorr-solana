@@ -61,6 +61,7 @@ import { fetchTimedHistory, fillsOf, type HistoryRange } from '@/data/marketData
 import { system } from '@/data/system';
 import { settlementSymbol } from '@/data/tradable';
 import { useAsync } from '@/data/useAsync';
+import { CloseResult } from '@/ui/CloseResult';
 import { useIntentKeys } from '@/data/useIntentKeys';
 import { replayNote } from '@/markets/placed';
 import { useLogo } from '@/data/useLogos';
@@ -119,6 +120,12 @@ export default function PositionScreen() {
 
   // A failed read leaves the line unmarked and says nothing — see the asset screen, which reads the same record.
   const runs = useAsync(() => system.runs(RUNS_WINDOW), []);
+  /*
+   * The executor's own account of this symbol's cost basis. `basisIncomplete` is it saying that some of what was sold
+   * had no recorded cost — so a gain worked out against that basis would have an error bar nobody can see, and the
+   * result below declines to state one rather than stating it confidently.
+   */
+  const realised = useAsync(() => repos.portfolio.realised(), []);
   const fills = useMemo(
     () => (symbol ? fillsOf(runs.data ?? [], settlementSymbol(symbol)) : []),
     [runs.data, symbol],
@@ -320,6 +327,29 @@ export default function PositionScreen() {
                 ? `Already sold ${quantity(closed.units)} ${p.symbol} for ${money(closed.proceeds)}. Nothing was sold again.`
                 : `Sold ${quantity(closed.units)} ${p.symbol} for ${money(closed.proceeds)}.`}
             </NoteStrip>
+          ) : null}
+
+          {/*
+            And what it realised (FEATURES.md #44) — against this position's own average entry, which is from real
+            fills. Not the `unrealised × fraction` forecast above: that is a projection against a live mark, and what is
+            reported after a sale has to be the sale.
+
+            It states a loss with the same weight as a gain, and says nothing at all where the cost basis cannot carry
+            the claim. A moment that celebrates is worth nothing unless it can stay silent.
+          */}
+          {closed ? (
+            <CloseResult
+              symbol={p.symbol}
+              outcome={{
+                proceedsUsd: closed.proceeds,
+                units: closed.units,
+                entryPrice: p.entry,
+                basisIncomplete:
+                  realised.data?.bySymbol.find((r) => r.symbol === p.symbol)?.basisIncomplete ?? false,
+                replayed: closed.replayed,
+              }}
+              style={{ marginTop: space.s10 }}
+            />
           ) : null}
 
           {flat ? null : (

@@ -522,11 +522,18 @@ async function runStrategyInner(
      * run will not trail from.
      */
     let params = strategy.params as Record<string, unknown>;
+    /*
+     * `levelSetAt` lets a resting level be restated across a split. Without a recorded basis the
+     * strategy's own creation time is the earliest moment its levels could have been set, which is
+     * what decides whether our multiplier history covers the whole period.
+     */
+    const levelSetAt = strategy.created_at;
     const observed = await observationFor(strategy.kind, {
       owner,
       budgetUsd: usd,
       params,
       symbol: strategy.symbol,
+      levelSetAt,
     }).catch(() => null);
     if (observed) {
       await query(`UPDATE strategies SET params = params || $2::jsonb WHERE id = $1`, [
@@ -551,6 +558,7 @@ async function runStrategyInner(
       params,
       symbol: strategy.symbol,
       claimedSellUnits: claimed,
+      levelSetAt,
     });
 
     // "Nothing to do" is the right answer most of the time for a rebalance that has not drifted or
@@ -1210,7 +1218,7 @@ async function watchRun(p: {
   if (!owner) return finishBlocked(runId, walletId, strategy, 'no_wallet', 'This wallet has no address on file.');
 
   let params = strategy.params as Record<string, unknown>;
-  const context = { owner, budgetUsd: usd, params, symbol: strategy.symbol };
+  const context = { owner, budgetUsd: usd, params, symbol: strategy.symbol, levelSetAt: strategy.created_at };
   const observed = await observationFor(strategy.kind, context).catch(() => null);
   if (observed) params = { ...params, ...observed };
   const intent = await planner({ ...context, params });
