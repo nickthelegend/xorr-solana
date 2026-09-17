@@ -141,6 +141,60 @@ describe('tier 3 — take profit and stop loss', () => {
     expect(i).toBeNull();
   });
 
+  /*
+   * Stacking. Two exits on one symbol both close the WHOLE position, so without this the second to
+   * fire would sell units the first had already sold — the failure that used to be prevented by
+   * refusing the second strategy outright.
+   */
+  it('sells only what the rest of the stack has not already claimed', async () => {
+    vi.mocked(holdings).mockResolvedValue(held);
+    vi.mocked(priceOf).mockResolvedValue(3_000);
+
+    const i = await planExitRules({
+      owner: OWNER,
+      budgetUsd: 0,
+      params: { entryPrice: 2_400, takeProfitPct: 20 },
+      symbol: 'WETH',
+      claimedSellUnits: 0.3,
+    });
+
+    expect(i?.amountIn).toBeCloseTo(held[0]!.units - 0.3, 9);
+    // The raw figure is a claim on the whole balance, so it is dropped once part is spoken for.
+    expect(i?.amountInRaw).toBeUndefined();
+    expect(i!.usd).toBeLessThan(held[0]!.usd);
+  });
+
+  it('closes the whole position, to the wei, when nothing else is stacked', async () => {
+    vi.mocked(holdings).mockResolvedValue(held);
+    vi.mocked(priceOf).mockResolvedValue(3_000);
+
+    const i = await planExitRules({
+      owner: OWNER,
+      budgetUsd: 0,
+      params: { entryPrice: 2_400, takeProfitPct: 20 },
+      symbol: 'WETH',
+      claimedSellUnits: 0,
+    });
+
+    expect(i?.amountIn).toBe(held[0]!.units);
+    expect(i?.amountInRaw).toBe(held[0]!.raw);
+  });
+
+  it('does nothing when the rest of the stack has already sold everything', async () => {
+    vi.mocked(holdings).mockResolvedValue(held);
+    vi.mocked(priceOf).mockResolvedValue(3_000);
+
+    const i = await planExitRules({
+      owner: OWNER,
+      budgetUsd: 0,
+      params: { entryPrice: 2_400, takeProfitPct: 20 },
+      symbol: 'WETH',
+      claimedSellUnits: held[0]!.units,
+    });
+
+    expect(i).toBeNull();
+  });
+
   it('closes the whole position on a take profit', async () => {
     vi.mocked(holdings).mockResolvedValue(held);
     vi.mocked(priceOf).mockResolvedValue(3_000);

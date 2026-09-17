@@ -24,6 +24,7 @@ import {
   SELF_SIZING_KINDS,
   type StrategyRow,
 } from '../executor/run.js';
+import { stackOn, stackSummary } from '../executor/stack.js';
 import {
   SETTLEMENT_SYMBOL,
   TOKENS as VENUE_TOKENS,
@@ -246,6 +247,24 @@ async function commitmentRefusal(
   }
   return null;
 }
+
+/**
+ * Everything running on one symbol, and what it commits between them.
+ *
+ * Stacking is ordinary — a recurring buy accumulating, a stop under it, a take-profit above — and
+ * until now there was nowhere to see the whole of it. A strategy list sorted by next run scatters
+ * the three across the page, so the question "what is acting on my NVDAc" had no answer.
+ *
+ * The daily commitment counts only the strategies that can OPEN. A stop-loss commits nothing, and
+ * folding its zero into the total would read as having been considered and found free rather than
+ * as not applying.
+ */
+strategyRoutes.get('/strategies/stack/:symbol', async (c) => {
+  const w = await requireWallet(c);
+  const symbol = c.req.param('symbol');
+  const stack = await stackOn(w.id, symbol);
+  return c.json({ symbol, stack, ...stackSummary(stack) });
+});
 
 strategyRoutes.get('/strategies', async (c) => {
   const w = await currentWallet(c);
