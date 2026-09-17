@@ -30,6 +30,32 @@ await pool.query(
 const dir = path.join(here, 'migrations');
 const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort() : [];
 
+/*
+ * Migrations this repo has renumbered, newest name to the name it shipped under.
+ *
+ * Bookkeeping is by FILENAME, so renaming a migration makes an already-migrated database see a
+ * file it has no record of and run it again. These particular ones are idempotent and would
+ * survive that, but relying on every future rename being idempotent is not a plan — and a second
+ * bookkeeping row for the same change makes the table lie about what was applied when.
+ *
+ * So a rename is declared here and carried forward once: a database that ran the old name is
+ * recorded as having run the new one, without executing anything.
+ */
+const RENAMED: Readonly<Record<string, string>> = Object.freeze({
+  // Collided with 030-agent-risk-profile.sql. Moved after it, which is the order it already ran in.
+  '033-multiplier-observations.sql': '030-multiplier-observations.sql',
+});
+
+for (const [current, previous] of Object.entries(RENAMED)) {
+  const { rowCount } = await pool.query(
+    `INSERT INTO schema_migrations (name)
+     SELECT $1 WHERE EXISTS (SELECT 1 FROM schema_migrations WHERE name = $2)
+       AND NOT EXISTS (SELECT 1 FROM schema_migrations WHERE name = $1)`,
+    [current, previous],
+  );
+  if (rowCount) console.log(`  carried ${previous} forward to ${current}`);
+}
+
 for (const name of files) {
   const done = await pool.query(`SELECT 1 FROM schema_migrations WHERE name = $1`, [name]);
   if (done.rowCount) {
