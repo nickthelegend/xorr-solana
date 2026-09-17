@@ -21,6 +21,8 @@ import {
   NO_RECORD,
   type BackingDetail,
 } from '../data/backingDetail';
+import { ReservesHistoryChart } from './charts/ReservesHistoryChart';
+import type { ReservesHistory } from '../data/reservesHistory';
 
 /** A label and either a value or, honestly, the absence of one. */
 function Field({ label, value }: { label: string; value: string | null }) {
@@ -45,7 +47,14 @@ function short(address: string | null): string | null {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function BackingDrawer({ detail }: { detail?: BackingDetail | null }) {
+export function BackingDrawer({
+  detail,
+  history,
+}: {
+  detail?: BackingDetail | null;
+  /** `undefined` while loading, `null` where it could not be read. */
+  history?: ReservesHistory | null;
+}) {
   if (detail === undefined) {
     return (
       <SheetCard>
@@ -115,6 +124,8 @@ export function BackingDrawer({ detail }: { detail?: BackingDetail | null }) {
                       : null
                   }
                 />
+                {/* How the ratio has moved, drawn only from attestations we have recorded. */}
+                <ReservesHistoryChart history={history} />
               </View>
             ) : (
               <View style={{ gap: space.s6 }}>
