@@ -33,6 +33,7 @@ import {
 import { percent } from '@/format';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { keypadPress } from '@/state/derived';
+import { AMOUNT_DECIMALS, checkAmount } from '@/markets/amount';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { nextRuns } from '@/strategies/schedule';
@@ -71,6 +72,11 @@ export default function YieldSetup() {
   const signedOut = useSignedOut();
 
   const usd = parseFloat(amount || '0') || 0;
+  /*
+   * The same rules the ticket and the recurring buy hold an amount to. A sweep ceiling of `$0.001` sets a
+   * strategy whose every run moves nothing; one of `$9,999,999` is past what the route will take.
+   */
+  const bad = checkAmount({ text: amount });
   const runs = useMemo(() => nextRuns(cadence, 3), [cadence]);
 
   const cash = balance.data?.cash;
@@ -104,7 +110,7 @@ export default function YieldSetup() {
   const noRate = !rate.loading && apy === undefined;
 
   async function create() {
-    if (usd <= 0) return;
+    if (bad.state !== 'ok') return;
     setBusy(true);
     setError(undefined);
     try {
@@ -194,7 +200,7 @@ export default function YieldSetup() {
 
       <Fill style={{ marginTop: space.s8 }}>
         <ScrollView showsVerticalScrollIndicator={false}>
-          <Keypad light onPress={(k) => setAmount((a) => keypadPress(a, k))} />
+          <Keypad light onPress={(k) => setAmount((a) => keypadPress(a, k, { decimals: AMOUNT_DECIMALS }))} />
 
           <Eyebrow small color={colors.sheet.muted} style={{ marginTop: space.s14 }}>
             Always keep spendable
@@ -266,7 +272,17 @@ export default function YieldSetup() {
         executor answered `400` in 304ms with a perfectly good sentence, and the user never saw it.
         Above the button, it is on screen whenever it exists.
       */}
-      {error ? (
+      {/* What is wrong with the field now, ahead of what the executor said about the last thing sent. */}
+      {bad.state === 'refused' ? (
+        <Text
+          variant="secondarySm"
+          color={colors.candleDown}
+          style={{ marginBottom: space.s12 }}
+          accessibilityLiveRegion="polite"
+        >
+          {bad.reason}
+        </Text>
+      ) : error ? (
         <Text variant="secondarySm" color={colors.candleDown} style={{ marginBottom: space.s12 }}>
           {error}
         </Text>
@@ -300,7 +316,7 @@ export default function YieldSetup() {
           figure="own"
           backgroundColor={colors.candleUp}
           color={colors.ink}
-          disabled={usd <= 0 || unavailable || apy === undefined}
+          disabled={bad.state !== 'ok' || unavailable || apy === undefined}
           loading={busy}
           onPress={create}
         />

@@ -35,6 +35,7 @@ import { nextRuns } from '@/strategies/schedule';
 import { RECURRING_BUY_SYMBOLS, type RecurringBuySymbol } from '@/strategies/ladder';
 import type { Cadence } from '@/data/types';
 import { errorText } from '@/data/apiError';
+import { AMOUNT_DECIMALS, checkAmount } from '@/markets/amount';
 
 const CADENCES = [
   { value: 'daily', label: 'Daily' },
@@ -70,11 +71,22 @@ export default function DcaSetup() {
   const signedOut = useSignedOut();
 
   const usd = parseFloat(amount || '0') || 0;
+  /*
+   * The same rules the ticket holds an amount to, on the field that commits to REPEATING it.
+   *
+   * This screen had none: the only guard was `usd <= 0`, so `$0.001 of WETH, weekly` was a live green
+   * button for a strategy every run of which would be refused by the route, and `$9,999,999` likewise. An
+   * amount refused here is refused before it becomes a schedule.
+   *
+   * Not checked against the balance. A recurring buy is not spent today, so today's cash says nothing about
+   * whether it can run — the daily cap is what governs it, and the executor answers that when it is created.
+   */
+  const bad = checkAmount({ text: amount });
   const runs = useMemo(() => nextRuns(cadence, 3), [cadence]);
   const sentence = `${money(usd, { decimals: 0 })} of ${symbol}, ${phrase(cadence)}`;
 
   async function create() {
-    if (usd <= 0) return;
+    if (bad.state !== 'ok') return;
     setBusy(true);
     setError(undefined);
     try {
@@ -137,7 +149,7 @@ export default function DcaSetup() {
 
       <Fill style={{ marginTop: space.s8 }}>
         <ScrollView showsVerticalScrollIndicator={false}>
-          <Keypad light onPress={(k) => setAmount((a) => keypadPress(a, k))} />
+          <Keypad light onPress={(k) => setAmount((a) => keypadPress(a, k, { decimals: AMOUNT_DECIMALS }))} />
 
           {/* The whole point of tier 1: you can check the schedule before you agree to it. */}
           <View
@@ -160,12 +172,12 @@ export default function DcaSetup() {
               button is correctly disabled at that point; the panel above it was still making a
               claim. It asks for the amount instead.
             */}
-            {usd <= 0 ? (
+            {bad.state !== 'ok' ? (
               <Text variant="body" color={colors.sheet.muted}>
                 Enter an amount to see the schedule.
               </Text>
             ) : null}
-            {usd > 0 && runs.map((d) => (
+            {bad.state === 'ok' && runs.map((d) => (
               <View
                 key={d.toISOString()}
                 style={{ flexDirection: 'row', justifyContent: 'space-between' }}
@@ -196,7 +208,21 @@ export default function DcaSetup() {
         executor answered `400` in 304ms with a perfectly good sentence, and the user never saw it.
         Above the button, it is on screen whenever it exists.
       */}
-      {error ? (
+      {/*
+        The amount's own refusal first: it is about what is in the field right now, and the executor's answer
+        below it is about the last thing that was sent. Showing both at once would put two red sentences under
+        one button, one of them stale.
+      */}
+      {bad.state === 'refused' ? (
+        <Text
+          variant="secondarySm"
+          color={colors.candleDown}
+          style={{ marginBottom: space.s12 }}
+          accessibilityLiveRegion="polite"
+        >
+          {bad.reason}
+        </Text>
+      ) : error ? (
         <Text variant="secondarySm" color={colors.candleDown} style={{ marginBottom: space.s12 }}>
           {error}
         </Text>
@@ -210,7 +236,7 @@ export default function DcaSetup() {
           figure="own"
           backgroundColor={colors.candleUp}
           color={colors.ink}
-          disabled={usd <= 0}
+          disabled={bad.state !== 'ok'}
           loading={busy}
           onPress={create}
         />

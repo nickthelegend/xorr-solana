@@ -24,6 +24,7 @@ import {
   WEIGHT_STEP,
   keypadPress,
 } from './derived';
+import { AMOUNT_DECIMALS } from '@/markets/amount';
 import type { Delegation, Wallet } from '../data/types';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -224,7 +225,8 @@ export const useStore = create<Store>()(
       setTp: (v) => set({ tp: round1(clamp(v, TP_MIN, TP_MAX)) }),
 
       setSl: (v) => set({ sl: round1(clamp(v, SL_MIN, SL_MAX)) }),
-      pressKey: (key) => set((s) => ({ orderAmt: keypadPress(s.orderAmt, key) })),
+      // The ticket is a dollar field, so it stops at the cent (`AMOUNT_DECIMALS`).
+      pressKey: (key) => set((s) => ({ orderAmt: keypadPress(s.orderAmt, key, { decimals: AMOUNT_DECIMALS }) })),
       setOrderAmt: (v) => set({ orderAmt: v }),
       setSide: (side) => set({ side }),
       setLev: (lev) => set({ lev }),

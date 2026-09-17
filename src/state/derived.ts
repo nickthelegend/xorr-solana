@@ -94,8 +94,21 @@ export function orderCta(side: 'buy' | 'sell', amountStr: string, symbol = DEFAU
 /**
  * The keypad reducer — state.md: "max 7 chars, single '.', '⌫' pops last, leading '0' replaced
  * by a digit."
+ *
+ * `decimals` caps what can be typed after the point, and exists because two different things are entered on
+ * the same keypad. A DOLLAR field stops at the cent: `$12.345` is not a smaller order, it is a typo, and
+ * catching it at the keypress means nobody has to be told about it afterwards. A TOKEN field — swap,
+ * crosschain — is entered in the token's own units, where eighteen decimals are real, so those pass nothing
+ * and keep the only limit they ever had, which is the seven characters.
+ *
+ * Refusing the keypress rather than correcting the field: silently truncating what someone typed is how an
+ * amount ends up different from the one they read back before tapping a green button.
+ *
+ * An options object and not a third positional number, because `seq.reduce(keypadPress, '0')` is how this is
+ * called in more than one place and `reduce` passes the INDEX third — which as a bare `decimals` would have
+ * silently capped the field at wherever in the sequence the point happened to fall.
  */
-export function keypadPress(current: string, key: string): string {
+export function keypadPress(current: string, key: string, options?: { decimals?: number }): string {
   if (key === '⌫') {
     const next = current.slice(0, -1);
     return next === '' ? '0' : next;
@@ -108,6 +121,9 @@ export function keypadPress(current: string, key: string): string {
   // A leading '0' is replaced, not appended to — otherwise you get "0250".
   if (current === '0') return key;
   if (current.length >= ORDER_MAX_CHARS) return current;
+  const dot = current.indexOf('.');
+  const decimals = options?.decimals;
+  if (decimals !== undefined && dot !== -1 && current.length - dot - 1 >= decimals) return current;
   return `${current}${key}`;
 }
 

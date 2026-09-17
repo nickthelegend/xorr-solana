@@ -15,7 +15,7 @@ describe('a sale is checked against the holding', () => {
   });
 
   it('refuses more than is held, and says how much is', () => {
-    expect(sell(120.5)).toEqual({ state: 'refused', reason: 'You hold $120.50 of WETH.' });
+    expect(sell(120.5)).toEqual({ state: 'refused', code: 'insufficient', reason: 'You hold $120.50 of WETH.' });
   });
 
   it('lets a sale up to the whole holding through', () => {
@@ -37,6 +37,7 @@ describe('a buy is checked against cash, where cash is known', () => {
   it('refuses more than the cash', () => {
     expect(ticketLimit({ side: 'buy', symbol: 'WETH', amountUsd: 500, cashUsd: 320, held: 0 })).toEqual({
       state: 'refused',
+      code: 'insufficient',
       reason: 'You have $320.00.',
     });
   });
@@ -53,5 +54,44 @@ describe('Max on a sale', () => {
     expect(sellMax(120.509)).toBe('120.5');
     expect(sellMax(99.999)).toBe('99.99');
     expect(Number(sellMax(0.01))).toBeLessThanOrEqual(0.01);
+  });
+});
+
+describe('the amount itself, before any balance', () => {
+  const buy = (text: string, cashUsd: number | undefined = 5_000) =>
+    ticketLimit({ side: 'buy', symbol: 'WETH', amountUsd: Number(text) || 0, cashUsd, held: 0, text });
+
+  it('refuses under the executor’s floor rather than sending it', () => {
+    expect(buy('0.001')).toEqual({
+      state: 'refused',
+      code: 'below-minimum',
+      reason: 'The smallest order is $0.01.',
+    });
+  });
+
+  it('refuses over the executor’s ceiling', () => {
+    expect(buy('2000000')).toMatchObject({ code: 'above-maximum' });
+  });
+
+  it('refuses a fraction of a cent at a real size', () => {
+    expect(buy('12.345')).toEqual({ state: 'refused', code: 'too-precise', reason: 'Amounts are to the cent.' });
+  });
+
+  it('passes an empty field, which the ticket disables rather than marks wrong', () => {
+    expect(buy('')).toEqual({ state: 'ok' });
+    expect(buy('0')).toEqual({ state: 'ok' });
+  });
+
+  it('holds a sale to the same rules once the position is read', () => {
+    expect(
+      ticketLimit({ side: 'sell', symbol: 'WETH', amountUsd: 0.001, cashUsd: 5_000, held: 400, text: '0.001' }),
+    ).toMatchObject({ code: 'below-minimum' });
+  });
+
+  it('still works for a caller that has only the number', () => {
+    // `text` is optional, so the screens that pass a parsed amount keep the behaviour they had.
+    expect(ticketLimit({ side: 'buy', symbol: 'WETH', amountUsd: 500, cashUsd: 320, held: 0 })).toMatchObject({
+      code: 'insufficient',
+    });
   });
 });

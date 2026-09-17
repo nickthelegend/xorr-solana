@@ -165,7 +165,18 @@ export default function OrderTicket() {
         : Promise.resolve(null),
     [quoteFor],
   );
-  const limit = ticketLimit({ side, symbol, amountUsd: amount, cashUsd: availableUsd, held: heldRead });
+  /*
+   * `text` as well as the parsed amount: `0.001` and `0.00` are different states and `parseFloat` makes
+   * them one. The first is an order under the executor's floor and the second is an empty field.
+   */
+  const limit = ticketLimit({
+    side,
+    symbol,
+    amountUsd: amount,
+    cashUsd: availableUsd,
+    held: heldRead,
+    text: orderAmt,
+  });
   /** What Max inserts: the cash for a buy, and for a sale the holding — which Max used to ignore, composing a sale of the cash. */
   const maxUsd = side === 'sell' ? (typeof heldRead === 'number' ? heldRead : undefined) : availableUsd;
 
@@ -375,15 +386,22 @@ export default function OrderTicket() {
           {refusal}
         </Text>
       ) : null}
-      {/* Why the order cannot go, on the ticket: nothing held, more than is held, more than the cash. */}
+      {/*
+        Why the order cannot go, on the ticket: nothing held, more than is held, more than the cash, and now
+        the amount's own rules — under a cent, over the executor's ceiling, finer than a cent.
+
+        Only the balance sentences are the person's money. "You have $1,234.00." hides while balances are
+        hidden (FEATURES.md #47); "The smallest order is $0.01." is a property of the executor and masking it
+        would hide the one number that says what to type instead.
+      */}
       {limit.state === 'refused' && tradable && !signedOut && filled === undefined ? (
-        // "You have $1,234.00." is the person's cash, and hides while balances are hidden (FEATURES.md #47).
         <Text
           variant="footnote"
           color={colors.down}
           align="center"
           style={{ marginTop: space.s10 }}
-          figure="own"
+          figure={limit.code === undefined || limit.code === 'insufficient' ? 'own' : undefined}
+          accessibilityLiveRegion="polite"
         >
           {limit.reason}
         </Text>

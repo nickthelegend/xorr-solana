@@ -481,9 +481,25 @@ for (const [path, to] of [
  * exactly the risk the cap describes and exactly what the kill switch ends in one tap. It
  * cannot withdraw, cannot name a destination, and cannot pick a price.
  */
+/**
+ * The floor an order has to clear: a cent.
+ *
+ * `.positive()` alone accepted `$0.000001`, which is not a smaller order — it is an order that rounds to
+ * nothing at the venue and comes back `TF` after a real route, a real claim against the period and a real
+ * audit row. Money in this product is denominated to the cent everywhere it is written; this is that, said
+ * where it can be enforced.
+ *
+ * The app refuses it first and says so on the ticket (`src/markets/amount.ts`). This is the same rule on
+ * the side that has to hold whatever a client sends, and `order-amount.test.ts` checks the two agree.
+ */
+export const ORDER_MIN_USD = 0.01;
+
+/** And the ceiling, which has always been here. */
+export const ORDER_MAX_USD = 1_000_000;
+
 const OrderInput = z.object({
   symbol: z.string().min(1).max(12),
-  usd: z.number().positive().max(1_000_000),
+  usd: z.number().min(ORDER_MIN_USD).max(ORDER_MAX_USD),
 });
 
 /** One order, placed now. The path itself — permission, one-shot row, run — is `placeOrder`. */

@@ -84,7 +84,20 @@ describe('order ticket — screen 14', () => {
     });
     it('a realistic sequence', () => {
       const seq = ['1', '2', '5', '.', '5', '0'];
-      expect(seq.reduce(d.keypadPress, '0')).toBe('125.50');
+      // Two arguments explicitly: `reduce(keypadPress, …)` would hand the INDEX to the third parameter.
+      expect(seq.reduce((a, k) => d.keypadPress(a, k), '0')).toBe('125.50');
+    });
+
+    it('caps a dollar field at the cent, and leaves a token field alone', () => {
+      // The same keypad enters dollars on the ticket and token units on Swap. Eighteen decimals are real
+      // in one of those and a typo in the other.
+      expect(d.keypadPress('12.34', '5', { decimals: 2 })).toBe('12.34');
+      expect(d.keypadPress('12.3', '4', { decimals: 2 })).toBe('12.34');
+      expect(d.keypadPress('12.34', '5')).toBe('12.345');
+      // The cap is on the digits after the point, never on the ones before it.
+      expect(d.keypadPress('1234', '5', { decimals: 2 })).toBe('12345');
+      // And the point itself still goes in.
+      expect(d.keypadPress('12', '.', { decimals: 2 })).toBe('12.');
     });
   });
 });
