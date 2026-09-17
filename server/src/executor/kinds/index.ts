@@ -18,6 +18,7 @@ import { usdcReserve } from '../../market/yield.js';
 import { supplyCalldata, AAVE_POOL } from '../../venues/aave.js';
 import { publicClient } from '../../evm/client.js';
 import { usdToUnits } from '../../evm/delegation.js';
+import { restingLevels, type MultiplierBasis } from '../resting.js';
 import { ADDRESSES } from '../../evm/chains.js';
 import type { Address, Hex } from 'viem';
 
@@ -90,6 +91,8 @@ export type PlanContext = {
   budgetUsd: number;
   params: Record<string, unknown>;
   symbol: string;
+  /** When the strategy's resting levels were set, for scaling them across a split. */
+  levelSetAt?: Date;
 };
 
 /** Below this a rebalance is noise: the drift costs less than the gas and the spread. */
@@ -164,14 +167,37 @@ export async function planRebalance(ctx: PlanContext): Promise<TradeIntent | nul
  * There is no branch here that buys.
  */
 export async function planExitRules(ctx: PlanContext): Promise<TradeIntent | null> {
-  const entry = Number(ctx.params.entryPrice ?? 0);
   const takeProfitPct = Number(ctx.params.takeProfitPct ?? 0);
   const stopLossPct = Number(ctx.params.stopLossPct ?? 0);
   const trailConfigured = Number(ctx.params.trailPct ?? 0) > 0;
-  if (!(entry > 0) || (!takeProfitPct && !stopLossPct && !trailConfigured)) return null;
+  if (!(Number(ctx.params.entryPrice ?? 0) > 0) || (!takeProfitPct && !stopLossPct && !trailConfigured)) {
+    return null;
+  }
 
   const held = (await holdings(ctx.owner)).find((h) => h.symbol === ctx.symbol);
   if (!held || held.usd < MIN_TRADE_USD) return null;
+
+  /*
+   * Restate the stored levels for today's multiplier before comparing anything to a mark.
+   *
+   * These levels are USD per DISPLAYED token, and a split changes what a displayed token is. An
+   * entry of $200 read against a post-4:1-split mark of $50 is a 75% fall that never happened, and
+   * would fire every stop on the token at once. `resting.ts` refuses rather than guesses, and a
+   * level it will not vouch for must not fire.
+   */
+  const resting = await restingLevels({
+    symbol: ctx.symbol,
+    levels: {
+      entryPrice: Number(ctx.params.entryPrice ?? 0),
+      peakPrice: Number(ctx.params.peakPrice ?? 0),
+    },
+    storedBasis: (ctx.params.multiplierBasis as MultiplierBasis | undefined) ?? null,
+    levelSetAt: ctx.levelSetAt ?? new Date(0),
+  });
+  if (resting.status === 'unsafe') return null;
+
+  const entry = resting.levels.entryPrice ?? 0;
+  if (!(entry > 0)) return null;
 
   const mark = await priceOf(ctx.symbol);
   const movePct = ((mark - entry) / entry) * 100;
@@ -188,7 +214,7 @@ export async function planExitRules(ctx: PlanContext): Promise<TradeIntent | nul
    * and is exactly when the trailing has to happen.
    */
   const trailPct = Number(ctx.params.trailPct ?? 0);
-  const peak = Number(ctx.params.peakPrice ?? 0);
+  const peak = resting.levels.peakPrice ?? 0;
   const trailFloor = trailPct > 0 && peak > 0 ? peak * (1 - trailPct / 100) : 0;
   const hitTrail = trailFloor > 0 && mark <= trailFloor;
 
@@ -487,12 +513,40 @@ export async function observationFor(
      * entry price rather than from today's mark matters — seeding from the mark on a position
      * already underwater would place the stop below where it should be and let the loss run.
      */
-    const entry = Number(ctx.params.entryPrice ?? 0);
-    const peak = Number(ctx.params.peakPrice ?? 0);
+    /*
+     * The peak is written in TODAY's displayed-price terms, because `price` is. The stored levels
+     * may have been set under an older multiplier, so they are restated first and the basis is
+     * rewritten with them — otherwise this would file today's number in yesterday's units and the
+     * two would silently disagree the moment a split happened.
+     *
+     * A level we cannot restate safely is left exactly as it is: refusing to touch it keeps the
+     * refusal in one place, the planner, which already declines to fire on it.
+     */
+    const restated = await restingLevels({
+      symbol: ctx.symbol,
+      levels: {
+        entryPrice: Number(ctx.params.entryPrice ?? 0),
+        peakPrice: Number(ctx.params.peakPrice ?? 0),
+      },
+      storedBasis: (ctx.params.multiplierBasis as MultiplierBasis | undefined) ?? null,
+      levelSetAt: ctx.levelSetAt ?? new Date(0),
+    });
+    if (restated.status === 'unsafe') return null;
+
+    const entry = restated.levels.entryPrice ?? 0;
+    const peak = restated.levels.peakPrice ?? 0;
+    const basis: MultiplierBasis = {
+      multiplier: restated.currentMultiplier,
+      recordedAt: new Date().toISOString(),
+    };
+    const rebase = restated.adjusted
+      ? { entryPrice: entry, multiplierBasis: basis }
+      : {};
+
     const seed = peak > 0 ? peak : Math.max(entry, 0);
-    if (price > seed) return { peakPrice: price };
-    if (seed > 0 && peak === 0) return { peakPrice: seed };
-    return null;
+    if (price > seed) return { ...rebase, peakPrice: price };
+    if (seed > 0 && peak === 0) return { ...rebase, peakPrice: seed };
+    return Object.keys(rebase).length > 0 ? rebase : null;
   }
 
   return null;
