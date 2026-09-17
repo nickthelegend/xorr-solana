@@ -75,10 +75,12 @@ function AgentNext({
   preview,
   now,
   onEditRisk,
+  onOpenBasket,
 }: {
   preview: AgentPreview;
   now: number;
   onEditRisk: () => void;
+  onOpenBasket: () => void;
 }) {
   const { wallet } = preview;
 
@@ -124,6 +126,14 @@ function AgentNext({
         belongs next to the sentence about what the agent is about to do, because that sentence is
         the thing it changes.
       */}
+      <Row
+        title="Basket"
+        value="Targets and drift"
+        secondary="What the agent holds to, and how far it has moved"
+        onPress={onOpenBasket}
+        height={size.rowLg}
+      />
+
       <Row
         title="Risk profile"
         value={PROFILE_TITLE[preview.risk.profile]}
@@ -203,6 +213,7 @@ export default function Schedule() {
                   preview={agent.data}
                   now={now}
                   onEditRisk={() => router.push('/agent/risk')}
+                  onOpenBasket={() => router.push('/agent/basket')}
                 />
               </View>
             ) : null}
