@@ -23,6 +23,7 @@ const RECORD: DecisionRecord = {
   nasdaqSession: 'regular',
   spreadBps: 12,
   slippageBps: 50,
+  riskProfile: 'balanced',
   exitStrategyId: 'exit-1',
   decidedAtMs: 1_760_000_000_000,
 };
@@ -89,6 +90,28 @@ describe('explainLines', () => {
   it('trims a multiplier to something a person can read', () => {
     expect(lineFor({ ...RECORD, multiplier: 1.001701196801074 }, 'Share multiplier')).toContain(
       '1.0017',
+    );
+  });
+
+  it('cites the profile that was active when it decided', () => {
+    expect(lineFor(RECORD, 'Risk profile')).toBe('Balanced at the time');
+    expect(lineFor({ ...RECORD, riskProfile: 'aggressive' }, 'Risk profile')).toBe(
+      'Aggressive at the time',
+    );
+  });
+
+  /*
+   * A trade from before the setting existed has no profile. Captioning it with today's value would
+   * attribute the decision to thresholds that were not in force when it was made.
+   */
+  it('omits the profile entirely rather than borrowing the current one', () => {
+    const { riskProfile: _p, ...older } = RECORD;
+    expect(lineFor(older, 'Risk profile')).toBeUndefined();
+  });
+
+  it('shows an unrecognised profile raw rather than dropping what the record says', () => {
+    expect(lineFor({ ...RECORD, riskProfile: 'experimental' }, 'Risk profile')).toBe(
+      'experimental at the time',
     );
   });
 

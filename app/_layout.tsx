@@ -132,6 +132,8 @@ export default function RootLayout() {
           <Stack.Screen name="auto-close/[id]" options={{ presentation: 'modal' }} />
           {/* The reasons behind a trade rise over the trail row they belong to, not away from it. */}
           <Stack.Screen name="explain/[seq]" options={{ presentation: 'modal' }} />
+          {/* The risk setting opens over the panel describing the behaviour it governs. */}
+          <Stack.Screen name="agent/risk" options={{ presentation: 'modal' }} />
           <Stack.Screen name="bot/[id]/intro" options={{ presentation: 'modal' }} />
           <Stack.Screen name="bot/[id]/settings" options={{ presentation: 'modal' }} />
           <Stack.Screen name="strategy/dca" options={{ presentation: 'modal' }} />

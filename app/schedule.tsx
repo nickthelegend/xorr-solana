@@ -34,6 +34,7 @@ import { useAsync } from '@/data/useAsync';
 import { useNow } from '@/state/useNow';
 import { repos } from '@/data';
 import { kindLabel, labelFigure } from '@/strategies/ladder';
+import { PROFILE_TITLE, type RiskProfile, type RiskSettings } from '@/bot/risk';
 
 /** Relative time, in the coarsest unit that still says something useful. */
 function when(at: number, now: number): { label: string; overdue: boolean } {
@@ -55,6 +56,7 @@ type AgentPreview = {
   lastTickAt: number | null;
   universe: { symbol: string; name: string }[];
   wallet: { agentsStopped: boolean; cooldownUntil: number | null; eligible: boolean };
+  risk: { profile: RiskProfile; settings: RiskSettings };
 };
 
 /**
@@ -69,7 +71,15 @@ type AgentPreview = {
  * moved, on the one panel whose whole job is setting expectations accurately. It shows the
  * universe and the gates that are already decided, and says the rest is read when the tick comes.
  */
-function AgentNext({ preview, now }: { preview: AgentPreview; now: number }) {
+function AgentNext({
+  preview,
+  now,
+  onEditRisk,
+}: {
+  preview: AgentPreview;
+  now: number;
+  onEditRisk: () => void;
+}) {
   const { wallet } = preview;
 
   /*
@@ -106,6 +116,21 @@ function AgentNext({ preview, now }: { preview: AgentPreview; now: number }) {
       <Text variant="cardTitle">The agent</Text>
 
       <Row title="Next sweep" value={dueText} height={size.rowLg} />
+
+      {/*
+        The profile, where the behaviour it governs is being described.
+
+        Settings screens are where a control like this usually goes and where nobody finds it. It
+        belongs next to the sentence about what the agent is about to do, because that sentence is
+        the thing it changes.
+      */}
+      <Row
+        title="Risk profile"
+        value={PROFILE_TITLE[preview.risk.profile]}
+        secondary={`Entries up to $${preview.risk.settings.maxTradeUsd}, ${preview.risk.settings.cooldownMinutes} minutes apart`}
+        onPress={onEditRisk}
+        height={size.rowLg}
+      />
 
       {/*
         Not shown as a failure. A held wallet is the cooldown and the kill switch working, and the
@@ -174,7 +199,11 @@ export default function Schedule() {
           >
             {agent.data ? (
               <View style={{ marginBottom: space.s20 }}>
-                <AgentNext preview={agent.data} now={now} />
+                <AgentNext
+                  preview={agent.data}
+                  now={now}
+                  onEditRisk={() => router.push('/agent/risk')}
+                />
               </View>
             ) : null}
 

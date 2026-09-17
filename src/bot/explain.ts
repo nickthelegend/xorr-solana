@@ -38,6 +38,13 @@ export type DecisionRecord = {
   nasdaqSession: string;
   spreadBps: number | null;
   slippageBps: number;
+  /**
+   * The risk profile that was active when this was decided.
+   *
+   * Optional because trades placed before the setting existed do not have one, and captioning
+   * those with today's profile would attribute a decision to a setting that was not yet a thing.
+   */
+  riskProfile?: string;
   exitStrategyId: string | null;
   decidedAtMs: number;
 };
@@ -74,6 +81,13 @@ export const STRATEGY_LABEL: Readonly<Record<string, string>> = Object.freeze({
   dca: 'Accumulating',
 });
 
+/** How each profile reads on the explanation, rather than as a bare enum. */
+const PROFILE_LABEL: Readonly<Record<string, string>> = Object.freeze({
+  conservative: 'Conservative',
+  balanced: 'Balanced',
+  aggressive: 'Aggressive',
+});
+
 /** What the exchange was doing, in words rather than the enum. */
 const SESSION_LABEL: Readonly<Record<string, string>> = Object.freeze({
   regular: 'Nasdaq was open',
@@ -96,6 +110,21 @@ export function explainLines(record: DecisionRecord): ExplainLine[] {
     { label: 'The setup', value: `${strategyLabel(record.strategyKind)}, scored ${record.score}` },
     { label: 'What it saw', value: record.marketCondition },
   ];
+
+  /*
+   * The profile as it was, not as it is.
+   *
+   * Omitted entirely for a trade that predates the setting rather than captioned with today's
+   * value — the thresholds this was decided under are a fact about the decision, and borrowing
+   * the current ones would describe a decision nobody made. An unrecognised value is shown raw
+   * rather than dropped: it is still what the record says.
+   */
+  if (record.riskProfile) {
+    lines.push({
+      label: 'Risk profile',
+      value: `${PROFILE_LABEL[record.riskProfile] ?? record.riskProfile} at the time`,
+    });
+  }
 
   /*
    * The drift, or the fact that there was none to be had.

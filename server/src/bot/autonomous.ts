@@ -35,6 +35,13 @@ import { readMintScale } from '../solana/balances.js';
 import { readDelegation } from '../solana/delegation.js';
 import type { PersonaId } from './personas.js';
 import {
+  DEFAULT_RISK_PROFILE,
+  isRiskProfile,
+  settingsFor,
+  type RiskProfile,
+  type RiskSettings,
+} from './risk-profile.js';
+import {
   evaluateOffHoursGuard,
   referencePriceUsd,
   type OffHoursGuardVerdict,
@@ -48,37 +55,27 @@ import {
  */
 export type StrategyKind = 'momentum' | 'event-driven' | 'dca';
 
-/** The smallest entry worth the fees and the exit rules attached to it. */
-const MIN_TRADE_USD = 10;
-/** The default entry when the caller does not name a size. */
-const DEFAULT_TRADE_USD = 25;
-
 /**
- * How many recorded readings a range needs before it means anything.
+ * How far back a range is drawn. A month of readings, matching what the asset screen charts.
  *
- * `price_observations` starts empty for an asset and fills as the app looks at it. Six readings is
- * not a lot; it is enough that a high and a low are two different observations rather than one
- * number with rounding either side of it.
+ * Not a risk knob. How much history to LOOK at is a question about the asset; how much of it is
+ * enough to act on is the question the profile answers, and that is `minObservations`.
  */
-const MIN_OBSERVATIONS = 6;
-
-/** How far back a range is drawn. A month of readings, matching what the asset screen charts. */
 const RANGE_HOURS = 24 * 30;
 
-/**
- * How close a scheduled multiplier change has to be before the agent stands down on that symbol.
+/*
+ * How close a scheduled multiplier change has to be before the agent stands down on that symbol is
+ * `corporateActionWindowHours`, on the profile.
  *
- * A new position is a stop price and a target price, and both are stated in today's per-unit terms.
- * When the multiplier moves, every holding is restated — units multiplied, price divided — and the
- * levels the setup was written with stop describing the thing they were chosen for. The exits
- * `armExits` attaches are checked daily, so a change inside a day or two lands between one check
- * and the next and the first thing to notice is a stop firing at a price nobody chose.
+ * A new position is a stop price and a target price, both stated in today's per-unit terms. When
+ * the multiplier moves, every holding is restated — units multiplied, price divided — and those
+ * levels stop describing the thing they were chosen for. The exits `armExits` attaches are checked
+ * daily, so a change inside a day or two lands between one check and the next and the first thing
+ * to notice is a stop firing at a price nobody chose.
  *
- * Forty-eight hours covers that gap with a margin. It is a reason not to OPEN something; an
- * existing position is left alone, because closing on a corporate action would be the same
- * mistake pointed the other way.
+ * It is a reason not to OPEN something. An existing position is left alone, because closing on a
+ * corporate action would be the same mistake pointed the other way.
  */
-const CORPORATE_ACTION_WINDOW_MS = 48 * 3_600_000;
 
 /**
  * What this agent writes into `proposals.decision`.
@@ -94,15 +91,11 @@ const CORPORATE_ACTION_WINDOW_MS = 48 * 3_600_000;
  */
 export const AGENT_DECISION = 'approve';
 
-/**
- * How long a wallet waits between autonomous entries.
- *
- * The tick is faster than any thesis is, so without this the agent would re-enter the same setup
- * every thirty seconds. Exported because `/agent/preview` tells the user when the hold lifts, and
- * a screen that disagrees with the sweep about the length of the cooldown is worse than a screen
- * that does not mention it.
+/*
+ * How long a wallet waits between autonomous entries is `cooldownMinutes`, on the profile. The
+ * tick is faster than any thesis is, so without it the agent would re-enter the same setup every
+ * thirty seconds.
  */
-export const COOLDOWN_MINUTES = 10;
 
 /**
  * Why the agent did what it did, in the shape `/agent/explain` reads back.
@@ -139,6 +132,14 @@ export type DecisionRecord = {
   /** Null when no independent price was available to measure drift against. */
   spreadBps: number | null;
   slippageBps: number;
+  /**
+   * Which risk profile was active when this was decided.
+   *
+   * Stored rather than looked up when the trade is explained. The setting is a thing the user can
+   * change, and reading it at explain time would caption last week's careful trade with this
+   * week's aggressive profile — describing a decision that was never made.
+   */
+  riskProfile: RiskProfile;
   exitStrategyId: string | null;
   decidedAtMs: number;
 };
@@ -149,6 +150,7 @@ function decisionRecord(p: {
   receipt: SpendReceipt;
   opening: string;
   exitStrategyId: string | null;
+  riskProfile: RiskProfile;
 }): DecisionRecord {
   const { setup, receipt } = p;
   return {
@@ -174,6 +176,7 @@ function decisionRecord(p: {
     /* Null rather than 0: nothing measured is not the same as measured at zero. */
     spreadBps: setup.offHoursGuard.spreadBps,
     slippageBps: setup.suggestedSlippageBps,
+    riskProfile: p.riskProfile,
     exitStrategyId: p.exitStrategyId,
     decidedAtMs: Date.now(),
   };
@@ -226,7 +229,10 @@ export type AutonomousTradeResult =
  * price — so "breaking out near the upper band" was a sentence about arithmetic, not about the
  * market, and the two branches that read it could never fire.
  */
-async function observedRange(symbol: string): Promise<{ high: number; low: number } | null> {
+async function observedRange(
+  symbol: string,
+  minObservations: number,
+): Promise<{ high: number; low: number } | null> {
   const rows = await query<{ usd: string }>(
     `SELECT usd FROM price_observations
       WHERE symbol = $1 AND at > now() - ($2 || ' hours')::interval`,
@@ -234,7 +240,7 @@ async function observedRange(symbol: string): Promise<{ high: number; low: numbe
   ).catch(() => []);
 
   const prices = rows.map((r) => Number(r.usd)).filter((n) => Number.isFinite(n) && n > 0);
-  if (prices.length < MIN_OBSERVATIONS) return null;
+  if (prices.length < minObservations) return null;
 
   const high = Math.max(...prices);
   const low = Math.min(...prices);
@@ -294,8 +300,15 @@ async function corporateActionSignal(stock: XStockToken): Promise<CorporateActio
 
 /**
  * Evaluates every strategy the conditions support across the xStocks universe, best first.
+ *
+ * The thresholds come in rather than being read here, so the caller that knows WHICH wallet this
+ * is for is the one that decides how careful to be. The default is the default profile, and it is
+ * only ever right for a caller with no wallet in hand — a demo script, or a preview of what the
+ * agent would consider in general. `runAutonomousCycle` always passes the wallet's own.
  */
-export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
+export async function evaluateBestSetup(
+  settings: RiskSettings = settingsFor(DEFAULT_RISK_PROFILE),
+): Promise<CandidateSetup | null> {
   const candidates: CandidateSetup[] = [];
 
   for (const stock of Object.values(XSTOCKS)) {
@@ -313,15 +326,10 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
     if (offHoursGuard.action === 'hold') continue;
 
     const corporateAction = await corporateActionSignal(stock);
-    const range = await observedRange(stock.symbol);
+    const range = await observedRange(stock.symbol, settings.minObservations);
     const earnings = await earningsWindow(stock.symbol);
     const slippageBps = offHoursGuard.suggestedSlippageBps;
 
-    /*
-     * A scheduled multiplier change inside the window is not a reason to skip the symbol, but it is
-     * a reason to prefer accumulating over chasing: the displayed balance is about to move for a
-     * reason that has nothing to do with the trade.
-     */
     /*
      * A corporate action already on the chain is a reason not to open anything here at all.
      *
@@ -330,17 +338,26 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
      * day the agent would take exactly the entry the markdown was warning about. The stop and the
      * target cannot survive the multiplier moving, so there is no size at which this is a good
      * trade and nothing for a score to express.
+     *
+     * How far to stand clear is the profile's: a careful agent keeps four days, an aggressive one
+     * keeps one.
      */
     if (
       corporateAction.pending &&
-      corporateAction.pending.effectiveAtMs - Date.now() <= CORPORATE_ACTION_WINDOW_MS
+      corporateAction.pending.effectiveAtMs - Date.now() <=
+        settings.corporateActionWindowHours * 3_600_000
     ) {
       continue;
     }
     const offHoursPenalty = offHoursGuard.session === 'closed' ? 15 : 0;
 
     // 1. Event-driven: a projected report, far enough out to enter and be flat before the print.
-    if (earnings && earnings.days >= 3 && earnings.days <= 10 && earnings.errorDays <= 3) {
+    if (
+      earnings &&
+      earnings.days >= 3 &&
+      earnings.days <= 10 &&
+      earnings.errorDays <= settings.earningsErrorToleranceDays
+    ) {
       candidates.push({
         symbol: stock.symbol,
         stock,
@@ -362,7 +379,7 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
     const position = range ? bandPosition(price, range) : null;
 
     // 2. Momentum: near the top of the range this app has actually recorded.
-    if (range && position !== null && position >= 0.75) {
+    if (range && position !== null && position >= settings.momentumEntryAt) {
       const stop = Math.max(price * 0.95, range.high * 0.94);
       const target = price + (price - stop) * 2;
       candidates.push({
@@ -375,7 +392,7 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} is trading in the top quarter of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded over the past month.`,
+        reason: `${stock.symbol} is trading at the ${(position * 100).toFixed(0)}th percentile of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded over the past month.`,
         marketCondition: `Upper band, ${(position * 100).toFixed(0)}th percentile of observed range`,
         corporateAction,
         offHoursGuard,
@@ -384,14 +401,14 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
     }
 
     // 3. DCA: near the bottom of that same recorded range.
-    if (range && position !== null && position < 0.4) {
+    if (range && position !== null && position < settings.dcaEntryBelow) {
       candidates.push({
         symbol: stock.symbol,
         stock,
         strategyKind: 'dca',
         persona: 'yield-keeper',
         personaName: 'Yield Keeper',
-        score: Math.round(70 + (0.4 - position) * 20),
+        score: Math.round(70 + (settings.dcaEntryBelow - position) * 20),
         currentPrice: price,
         stopPrice: price * 0.92,
         targetPrice: price * 1.1,
@@ -429,10 +446,12 @@ export async function runAutonomousCycle(
   } = {},
 ): Promise<AutonomousTradeResult> {
   // 1. The wallet, and whether its owner has stopped everything.
-  const wallet = await one<{ id: string; address: string; agents_stopped?: boolean }>(
-    `SELECT id, address, agents_stopped FROM wallets WHERE id = $1`,
-    [walletId],
-  );
+  const wallet = await one<{
+    id: string;
+    address: string;
+    agents_stopped?: boolean;
+    risk_profile?: string;
+  }>(`SELECT id, address, agents_stopped, risk_profile FROM wallets WHERE id = $1`, [walletId]);
   if (!wallet) {
     return { executed: false, reason: 'no_wallet', detail: 'Wallet not found.' };
   }
@@ -454,8 +473,21 @@ export async function runAutonomousCycle(
     };
   }
 
+  /*
+   * How careful to be, as the user set it.
+   *
+   * A value this build does not recognise falls back rather than throwing — a newer deploy could
+   * have written one, and an agent that refuses to run because it does not recognise a word is a
+   * worse failure than an agent that runs carefully. The resolved name is what goes into the
+   * record, so the explanation cites the profile that was actually APPLIED.
+   */
+  const riskProfile: RiskProfile = isRiskProfile(wallet.risk_profile)
+    ? wallet.risk_profile
+    : DEFAULT_RISK_PROFILE;
+  const settings = settingsFor(riskProfile);
+
   // 3. The setup the caller brought, or the best one the current conditions support.
-  const bestSetup = options.setup ?? (await evaluateBestSetup());
+  const bestSetup = options.setup ?? (await evaluateBestSetup(settings));
   if (!bestSetup) {
     return {
       executed: false,
@@ -479,14 +511,14 @@ export async function runAutonomousCycle(
   }
 
   const sizeUsd = Math.min(
-    options.fixedUsd ?? DEFAULT_TRADE_USD,
-    Math.max(MIN_TRADE_USD, Math.floor(verdict.remainingUsd * 0.25)),
+    options.fixedUsd ?? settings.maxTradeUsd,
+    Math.max(settings.minTradeUsd, Math.floor(verdict.remainingUsd * settings.allowanceShare)),
   );
-  if (sizeUsd < MIN_TRADE_USD) {
+  if (sizeUsd < settings.minTradeUsd) {
     return {
       executed: false,
       reason: 'insufficient_budget',
-      detail: `What is left of today's allowance is under the $${MIN_TRADE_USD} minimum trade size.`,
+      detail: `What is left of today's allowance is under the $${settings.minTradeUsd} minimum trade size.`,
     };
   }
 
@@ -538,6 +570,7 @@ export async function runAutonomousCycle(
     receipt,
     opening: openingLine,
     exitStrategyId,
+    riskProfile,
   });
 
   await query(
@@ -589,8 +622,15 @@ export async function runAutonomousCycle(
  * One scheduler tick's worth: the eligible wallets, each past its own cooldown.
  */
 export async function autonomousAgentSweep(_now: Date = new Date()): Promise<number> {
-  const wallets = await query<{ id: string }>(
-    `SELECT id FROM wallets
+  /*
+   * The profile comes back with the wallet, because the cooldown is part of it.
+   *
+   * Read here rather than inside the loop: the gate that decides whether to even look at a wallet
+   * has to know how long that wallet waits, and a careful wallet waiting thirty minutes while the
+   * sweep applied a ten-minute hold would be the setting quietly not taking effect.
+   */
+  const wallets = await query<{ id: string; risk_profile: string | null }>(
+    `SELECT id, risk_profile FROM wallets
       WHERE address IS NOT NULL AND (agents_stopped IS NULL OR agents_stopped = false)
       ORDER BY updated_at DESC LIMIT 10`,
   ).catch(() => []);
@@ -598,13 +638,14 @@ export async function autonomousAgentSweep(_now: Date = new Date()): Promise<num
   let executedCount = 0;
   for (const w of wallets) {
     try {
-      // One autonomous entry per wallet per cooldown. The tick is faster than any thesis is.
+      // One autonomous entry per wallet per its own cooldown. The tick is faster than any thesis is.
+      const profile = isRiskProfile(w.risk_profile) ? w.risk_profile : DEFAULT_RISK_PROFILE;
       const recent = await one<{ id: string }>(
         `SELECT id FROM proposals
           WHERE wallet_id = $1 AND decision = $2
             AND decided_at > now() - ($3 || ' minutes')::interval
           LIMIT 1`,
-        [w.id, AGENT_DECISION, String(COOLDOWN_MINUTES)],
+        [w.id, AGENT_DECISION, String(settingsFor(profile).cooldownMinutes)],
       ).catch(() => null);
       if (recent) continue;
 

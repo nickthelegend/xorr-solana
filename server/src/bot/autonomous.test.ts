@@ -61,6 +61,7 @@ vi.mock('./llm.js', () => ({ speak: vi.fn(async () => ({ ok: true, text: 'Optima
 
 const { evaluateBestSetup, runAutonomousCycle, autonomousAgentSweep, AGENT_DECISION } =
   await import('./autonomous.js');
+const { RISK_SETTINGS, settingsFor } = await import('./risk-profile.js');
 
 const OWNER = Keypair.generate().publicKey.toBase58();
 
@@ -534,6 +535,151 @@ describe('autonomous xStocks trading agent', () => {
     });
   });
 
+  /*
+   * The setting has to CHANGE something, or it is a label. Each of these drives one knob to the
+   * point where the same market reads differently to a careful agent and an aggressive one.
+   */
+  describe('the risk profile changes what the agent will take', () => {
+    it('lets an aggressive agent take a move a conservative one will not', async () => {
+      // 78th percentile: past balanced's 0.75 and aggressive's 0.65, short of conservative's 0.85.
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+      xStockPriceMock.mockResolvedValue(231.2);
+      referencePriceMock.mockResolvedValue(231.2);
+
+      expect(await evaluateBestSetup(settingsFor('conservative'))).toBeNull();
+      expect((await evaluateBestSetup(settingsFor('balanced')))?.strategyKind).toBe('momentum');
+      expect((await evaluateBestSetup(settingsFor('aggressive')))?.strategyKind).toBe('momentum');
+    });
+
+    it('lets an aggressive agent accumulate a dip a conservative one leaves alone', async () => {
+      // 30th percentile: inside balanced's 0.4 and aggressive's 0.5, outside conservative's 0.25.
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 212) : [],
+      );
+      xStockPriceMock.mockResolvedValue(212);
+      referencePriceMock.mockResolvedValue(212);
+
+      expect(await evaluateBestSetup(settingsFor('conservative'))).toBeNull();
+      expect((await evaluateBestSetup(settingsFor('balanced')))?.strategyKind).toBe('dca');
+    });
+
+    it('requires more recorded history before a careful agent trusts a band', async () => {
+      // Five readings: enough for balanced (6)? No — and not for conservative (10) either.
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238, 5) : [],
+      );
+
+      expect(await evaluateBestSetup(settingsFor('conservative'))).toBeNull();
+      expect(await evaluateBestSetup(settingsFor('balanced'))).toBeNull();
+      // Aggressive needs only four, so the same five readings are a band it will act on.
+      expect((await evaluateBestSetup(settingsFor('aggressive')))?.strategyKind).toBe('momentum');
+    });
+
+    it('keeps a careful agent further clear of a scheduled corporate action', async () => {
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+      // 72 hours out: inside conservative's 96, outside balanced's 48 and aggressive's 24.
+      readMintScaleMock.mockResolvedValue({
+        decimals: 8,
+        multiplier: 1,
+        pending: { nextMultiplier: 2, effectiveAtMs: Date.now() + 72 * 3_600_000 },
+      });
+
+      expect(await evaluateBestSetup(settingsFor('conservative'))).toBeNull();
+      expect((await evaluateBestSetup(settingsFor('balanced')))?.strategyKind).toBe('momentum');
+      expect((await evaluateBestSetup(settingsFor('aggressive')))?.strategyKind).toBe('momentum');
+    });
+
+    it('accepts a looser earnings projection the more aggressive it is', async () => {
+      earningsCalendarMock.mockImplementation(async (symbol: string) =>
+        symbol === 'NVDAx'
+          ? { symbol, cik: 1045810, reported: [], nextAt: Date.now() + 6 * 86_400_000, gapDays: [], medianGapDays: 91, errorDays: 4 }
+          : null,
+      );
+
+      // errorDays 4: past conservative's 1 and balanced's 3, inside aggressive's 5.
+      expect(await evaluateBestSetup(settingsFor('conservative'))).toBeNull();
+      expect(await evaluateBestSetup(settingsFor('balanced'))).toBeNull();
+      expect((await evaluateBestSetup(settingsFor('aggressive')))?.strategyKind).toBe(
+        'event-driven',
+      );
+    });
+  });
+
+  describe('the profile reaches the trade and the record', () => {
+    const readyWallet = (profile?: string) => {
+      oneMock.mockResolvedValue({
+        id: 'wallet-1',
+        address: OWNER,
+        agents_stopped: false,
+        ...(profile === undefined ? {} : { risk_profile: profile }),
+      });
+      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
+      // Twelve readings, so even conservative's ten-observation floor has a band to work with.
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238, 12) : [],
+      );
+      guardAndSpendMock.mockResolvedValue(FILL);
+      armExitsMock.mockResolvedValue({ strategyId: 'exit-1', sentence: 'Exit set' });
+    };
+
+    it('sizes the entry from the profile rather than a fixed default', async () => {
+      readyWallet('aggressive');
+      await runAutonomousCycle('wallet-1');
+      expect(guardAndSpendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ usd: RISK_SETTINGS.aggressive.maxTradeUsd }),
+      );
+
+      vi.clearAllMocks();
+      appendMock.mockResolvedValue({ seq: '1' });
+      readMintScaleMock.mockResolvedValue({ decimals: 8, multiplier: 1, pending: null });
+      xStockPriceMock.mockResolvedValue(238);
+      referencePriceMock.mockResolvedValue(238);
+      earningsCalendarMock.mockResolvedValue(null);
+      readyWallet('conservative');
+      await runAutonomousCycle('wallet-1');
+      expect(guardAndSpendMock).toHaveBeenCalledWith(
+        expect.objectContaining({ usd: RISK_SETTINGS.conservative.maxTradeUsd }),
+      );
+    });
+
+    /*
+     * Stored, not looked up when the trade is explained. The setting is a thing the user can
+     * change, and reading it at explain time would caption last week's careful trade with this
+     * week's aggressive profile — describing a decision that was never made.
+     */
+    it('writes the profile that was active into the decision record', async () => {
+      readyWallet('conservative');
+      await runAutonomousCycle('wallet-1');
+
+      expect(appendMock.mock.calls[0]?.[0].payload).toMatchObject({
+        riskProfile: 'conservative',
+      });
+    });
+
+    /*
+     * A row written by a newer deploy, or by hand. Refusing to run would be a worse failure than
+     * running carefully, and the record must name the profile that was actually APPLIED.
+     */
+    it('falls back for a profile this build does not know, and says which it used', async () => {
+      readyWallet('reckless');
+      const result = await runAutonomousCycle('wallet-1');
+
+      expect(result.executed).toBe(true);
+      expect(appendMock.mock.calls[0]?.[0].payload).toMatchObject({ riskProfile: 'balanced' });
+    });
+
+    it('treats a wallet with no profile column as the default', async () => {
+      readyWallet(undefined);
+      await runAutonomousCycle('wallet-1');
+      expect(appendMock.mock.calls[0]?.[0].payload).toMatchObject({ riskProfile: 'balanced' });
+    });
+  });
+
   describe('autonomousAgentSweep', () => {
     it('iterates eligible wallets and honours the per-wallet cooldown', async () => {
       queryMock.mockImplementation(async (sql: string) => {
@@ -552,7 +698,7 @@ describe('autonomous xStocks trading agent', () => {
           return id === 'wallet-active-1' ? { id: 'recent-prop-id' } : null;
         }
         if (sql.includes('FROM wallets')) {
-          return { id, address: OWNER, agents_stopped: false };
+          return { id, address: OWNER, agents_stopped: false, risk_profile: 'balanced' };
         }
         return null;
       });

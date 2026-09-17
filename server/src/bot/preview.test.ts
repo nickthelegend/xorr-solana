@@ -7,7 +7,9 @@ vi.mock('../db/index.js', () => ({ one: (sql: string, p?: unknown[]) => oneMock(
 vi.mock('../executor/scheduler.js', () => ({ schedulerHeartbeat: () => heartbeatMock() }));
 
 const { agentPreview } = await import('./preview.js');
-const { AGENT_DECISION, COOLDOWN_MINUTES } = await import('./autonomous.js');
+const { AGENT_DECISION } = await import('./autonomous.js');
+const { RISK_SETTINGS, DEFAULT_RISK_PROFILE } = await import('./risk-profile.js');
+const COOLDOWN_MINUTES = RISK_SETTINGS[DEFAULT_RISK_PROFILE].cooldownMinutes;
 const { XSTOCKS } = await import('../venues/xstocks.js');
 
 const NOW = Date.parse('2026-09-17T12:00:00Z');

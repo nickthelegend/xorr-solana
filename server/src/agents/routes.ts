@@ -23,6 +23,14 @@ import { PERSONAS, type PersonaId } from '../bot/personas.js';
 import { NO_TRADES, agentRecords, type AgentRecord } from './leaderboard.js';
 import { notifyKill } from '../notifications/alerts.js';
 import { agentPreview } from '../bot/preview.js';
+import {
+  DEFAULT_RISK_PROFILE,
+  RISK_BLURB,
+  RISK_PROFILES,
+  RISK_SETTINGS,
+  isRiskProfile,
+  settingsFor,
+} from '../bot/risk-profile.js';
 
 export const agents = new Hono();
 
@@ -194,6 +202,83 @@ async function setStopped(c: Context, stopped: boolean) {
   }
   return c.json(await stoppedState(id));
 }
+
+/**
+ * How much risk the agent may take, and what each choice actually changes.
+ *
+ * The options come back with the current setting, so the screen offering the choice does not carry
+ * its own copy of the table. A second copy would drift from the agent the first time a threshold
+ * moved, and the drift would show up as a screen confidently describing behaviour the agent no
+ * longer has.
+ */
+agents.get('/agents/risk-profile', async (c) => {
+  const w = await currentWallet(c);
+  if (!w) return c.json({ error: 'no_wallet' }, 400);
+
+  const row = await one<{ risk_profile: string | null }>(
+    `SELECT risk_profile FROM wallets WHERE id = $1`,
+    [w.id],
+  );
+  // A value this build does not know falls back, and the answer names what is actually in force.
+  const active = isRiskProfile(row?.risk_profile) ? row.risk_profile : DEFAULT_RISK_PROFILE;
+
+  return c.json({
+    active,
+    settings: settingsFor(active),
+    options: RISK_PROFILES.map((p) => ({
+      profile: p,
+      blurb: RISK_BLURB[p],
+      settings: RISK_SETTINGS[p],
+    })),
+  });
+});
+
+const RiskInput = z.object({ profile: z.enum(RISK_PROFILES) });
+
+/**
+ * Change it.
+ *
+ * Written to the trail, because this is a risk control. Turning an agent from conservative to
+ * aggressive doubles its position size and halves the distance it keeps from a scheduled split —
+ * that is a change to what the money is exposed to, and a change to what the money is exposed to
+ * belongs in the audit log next to the trades it will produce.
+ */
+agents.post('/agents/risk-profile', async (c) => {
+  const w = await currentWallet(c);
+  if (!w) return c.json({ error: 'no_wallet' }, 400);
+
+  const parsed = RiskInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      { error: 'bad_profile', detail: `Pick one of: ${RISK_PROFILES.join(', ')}.` },
+      400,
+    );
+  }
+  const { profile } = parsed.data;
+
+  const before = await one<{ risk_profile: string | null }>(
+    `SELECT risk_profile FROM wallets WHERE id = $1`,
+    [w.id],
+  );
+  const previous = isRiskProfile(before?.risk_profile) ? before.risk_profile : DEFAULT_RISK_PROFILE;
+
+  await query(`UPDATE wallets SET risk_profile = $2 WHERE id = $1`, [w.id, profile]);
+
+  // Only when it actually moved. A trail row per no-op tap is noise in the record that matters most.
+  if (previous !== profile) {
+    const s = settingsFor(profile);
+    await append({
+      walletId: w.id,
+      agent: 'xorr',
+      action: `Agent risk set to ${profile}`,
+      detail: `Entries up to $${s.maxTradeUsd}, a breakout counted from the ${Math.round(s.momentumEntryAt * 100)}th percentile, ${s.corporateActionWindowHours} hours clear of any scheduled split or dividend, and ${s.cooldownMinutes} minutes between entries.`,
+      kind: 'risk',
+      payload: { previous, profile, settings: s },
+    }).catch(() => undefined);
+  }
+
+  return c.json({ active: profile, settings: settingsFor(profile), previous });
+});
 
 /**
  * When the autonomous agent next looks, and what it will look at.

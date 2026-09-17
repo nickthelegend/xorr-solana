@@ -19,7 +19,14 @@
 import { one } from '../db/index.js';
 import { XSTOCKS } from '../venues/xstocks.js';
 import { schedulerHeartbeat } from '../executor/scheduler.js';
-import { AGENT_DECISION, COOLDOWN_MINUTES } from './autonomous.js';
+import { AGENT_DECISION } from './autonomous.js';
+import {
+  DEFAULT_RISK_PROFILE,
+  isRiskProfile,
+  settingsFor,
+  type RiskProfile,
+  type RiskSettings,
+} from './risk-profile.js';
 
 export type AgentPreview = {
   /** How often the loop runs, in milliseconds. */
@@ -42,16 +49,26 @@ export type AgentPreview = {
     /** Would the next tick actually evaluate this wallet? */
     eligible: boolean;
   };
+  /**
+   * The risk profile in force, and the thresholds it resolves to.
+   *
+   * The settings ride along rather than being looked up again by the screen. A panel that said
+   * "Balanced" while deriving its own numbers from a second copy of the table would drift from the
+   * agent the first time one of them changed, on the panel built to say what the agent will do.
+   */
+  risk: { profile: RiskProfile; settings: RiskSettings };
 };
 
 export async function agentPreview(walletId: string): Promise<AgentPreview> {
   const { tickMs, lastTickAt } = schedulerHeartbeat();
 
-  const stopped = await one<{ agents_stopped: boolean | null }>(
-    `SELECT agents_stopped FROM wallets WHERE id = $1`,
+  const row = await one<{ agents_stopped: boolean | null; risk_profile: string | null }>(
+    `SELECT agents_stopped, risk_profile FROM wallets WHERE id = $1`,
     [walletId],
   );
-  const agentsStopped = Boolean(stopped?.agents_stopped);
+  const agentsStopped = Boolean(row?.agents_stopped);
+  const profile = isRiskProfile(row?.risk_profile) ? row.risk_profile : DEFAULT_RISK_PROFILE;
+  const settings = settingsFor(profile);
 
   /*
    * The most recent decision, which is what the sweep's cooldown actually keys on.
@@ -68,7 +85,7 @@ export async function agentPreview(walletId: string): Promise<AgentPreview> {
   ).catch(() => null);
 
   const cooldownEnds = recent
-    ? new Date(recent.decided_at).getTime() + COOLDOWN_MINUTES * 60_000
+    ? new Date(recent.decided_at).getTime() + settings.cooldownMinutes * 60_000
     : null;
   const cooldownUntil = cooldownEnds !== null && cooldownEnds > Date.now() ? cooldownEnds : null;
 
@@ -82,5 +99,6 @@ export async function agentPreview(walletId: string): Promise<AgentPreview> {
       cooldownUntil,
       eligible: !agentsStopped && cooldownUntil === null,
     },
+    risk: { profile, settings },
   };
 }
