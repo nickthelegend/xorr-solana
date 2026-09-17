@@ -34,10 +34,15 @@ vi.mock('../market/nasdaq.js', async (importOriginal) => ({
   referencePriceUsd: (symbol: string) => referencePriceMock(symbol),
 }));
 
+const applyFillMock = vi.fn();
+
 vi.mock('../db/index.js', () => ({
   one: (sql: string, params?: unknown[]) => oneMock(sql, params),
   query: (sql: string, params?: unknown[]) => queryMock(sql, params),
+  // The cycle books its fill inside a transaction; the client is never touched by these tests.
+  tx: (fn: (c: unknown) => unknown) => fn({}),
 }));
+vi.mock('../positions/index.js', () => ({ applyFill: (...a: unknown[]) => applyFillMock(...a) }));
 
 vi.mock('../rules/engine.js', () => ({ evaluate: (...a: unknown[]) => evaluateMock(...a) }));
 vi.mock('../solana/delegation.js', () => ({
@@ -107,6 +112,7 @@ describe('autonomous xStocks trading agent', () => {
     referencePriceMock.mockResolvedValue(238);
     readMintScaleMock.mockResolvedValue({ decimals: 8, multiplier: 1, pending: null });
     appendMock.mockResolvedValue({ seq: '1' });
+    applyFillMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -510,6 +516,54 @@ describe('autonomous xStocks trading agent', () => {
     });
 
     /*
+     * The fill has to reach the book, or the agent moves real money into a position the app cannot
+     * see: Holdings shows nothing, P&L counts nothing, and the sleeve breakdown has nothing to
+     * attribute. Found by driving the demo path on the fork and reading the tables afterwards.
+     */
+    it('books the fill into the position ledger, attributed to the agent', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+      guardAndSpendMock.mockResolvedValue(FILL);
+      armExitsMock.mockResolvedValue({ strategyId: 'exit-1', sentence: 'Exit set' });
+
+      await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
+
+      expect(applyFillMock).toHaveBeenCalledTimes(1);
+      const booked = applyFillMock.mock.calls[0]?.[1];
+      expect(booked).toMatchObject({
+        walletId: 'wallet-1',
+        symbol: FILL.symbol,
+        units: FILL.filledUnits,
+        usd: FILL.usd,
+      });
+      expect(booked.attribution).toMatchObject({ source: 'agent', label: 'Momentum Scout' });
+      // The proposal that decided it, so the sleeve names the run rather than a live strategy.
+      expect(typeof booked.attribution.id).toBe('string');
+    });
+
+    /* A sale is negative units, or the book would count a close as another buy. */
+    it('books a sale as negative units', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+      guardAndSpendMock.mockResolvedValue({ ...FILL, side: 'sell' });
+      armExitsMock.mockResolvedValue({ strategyId: 'exit-1', sentence: 'Exit set' });
+
+      await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
+
+      const booked = applyFillMock.mock.calls[0]?.[1];
+      expect(booked.units).toBe(-FILL.filledUnits);
+      expect(booked.usd).toBe(-FILL.usd);
+    });
+
+    /*
      * `guardAndSpend` answers with a refusal as readily as a receipt, and a refusal is not a fill:
      * nothing downstream of it — exits, proposal, notification — may run.
      */
@@ -636,6 +690,7 @@ describe('autonomous xStocks trading agent', () => {
 
       vi.clearAllMocks();
       appendMock.mockResolvedValue({ seq: '1' });
+    applyFillMock.mockResolvedValue(undefined);
       readMintScaleMock.mockResolvedValue({ decimals: 8, multiplier: 1, pending: null });
       xStockPriceMock.mockResolvedValue(238);
       referencePriceMock.mockResolvedValue(238);

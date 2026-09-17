@@ -20,8 +20,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
-import { one, query } from '../db/index.js';
+import { one, query, tx } from '../db/index.js';
 import { append } from '../audit/log.js';
+import { applyFill } from '../positions/index.js';
 import { log } from '../http/request-id.js';
 import { evaluate } from '../rules/engine.js';
 import { XSTOCKS, xStockPriceUsd, type XStockToken } from '../venues/xstocks.js';
@@ -562,8 +563,34 @@ export async function runAutonomousCycle(
     log.error('[autonomous] failed to arm exits:', e instanceof Error ? e.message : e);
   }
 
-  // 8. Write down what it decided and why, then put it on the trail with everything else.
+  /*
+   * 8. Book the fill, so the position the agent just opened is a position the app knows about.
+   *
+   * `guardAndSpend` places the swap and hands back a receipt; it does not touch `positions`, and
+   * nothing on this path did either. So an autonomous buy reached the chain, moved real money and
+   * sent a notification — and then did not appear in the book at all: Holdings showed nothing, P&L
+   * counted nothing, and the sleeve breakdown had nothing to attribute. Found by driving the whole
+   * demo path on the fork and reading the tables afterwards.
+   *
+   * Attributed to the agent and to the proposal that decided it, so the sleeve says which run
+   * opened it rather than crediting it to whichever strategy happened to be live.
+   *
+   * A sale is negative units; `side` decides the sign. Not fatal if it fails — the money has
+   * already moved, and throwing here would turn a bookkeeping failure into a second one.
+   */
   const proposalId = randomUUID();
+  const signedUnits = receipt.side === 'sell' ? -receipt.filledUnits : receipt.filledUnits;
+  const signedUsd = receipt.side === 'sell' ? -receipt.usd : receipt.usd;
+  await tx((client) =>
+    applyFill(client, {
+      walletId,
+      symbol: bestSetup.symbol,
+      units: signedUnits,
+      usd: signedUsd,
+      attribution: { source: 'agent', id: proposalId, label: bestSetup.personaName },
+    }),
+  ).catch((e) => log.error('[autonomous] failed to book the fill:', e));
+
   const record = decisionRecord({
     setup: bestSetup,
     usd: sizeUsd,

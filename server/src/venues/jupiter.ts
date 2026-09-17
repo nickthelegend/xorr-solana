@@ -113,6 +113,14 @@ export class UnpricedError extends Error {
  *
  * Throws `UnpricedError` when no venue answers. It never invents one — see the throw below.
  */
+/**
+ * The least slippage a fork can execute a cloned route at.
+ *
+ * Not a view on what a trade should tolerate — it is the distance between a live quote and a
+ * frozen pool. See the note in `quote`.
+ */
+const FORK_MIN_SLIPPAGE_BPS = Number(process.env.FORK_MIN_SLIPPAGE_BPS ?? 200);
+
 export async function quote(params: {
   inSymbolOrMint: string;
   outSymbolOrMint: string;
@@ -122,7 +130,25 @@ export async function quote(params: {
   const inputMint = resolveMint(params.inSymbolOrMint);
   const outputMint = resolveMint(params.outSymbolOrMint);
   const amount = params.amountUnits.toString();
-  const slippageBps = params.slippageBps ?? 50;
+  /*
+   * Off mainnet, the quote and the pool are not looking at the same moment.
+   *
+   * The price comes from Jupiter's LIVE mainnet quote API; the fill executes against pool accounts
+   * cloned onto the fork at some earlier slot. Mainnet keeps moving and the clone does not, so the
+   * two drift apart — and the route reverts with `0x1771` (6001, SlippageToleranceExceeded) the
+   * moment the gap exceeds the tolerance, whereupon the fill degrades to the venue vault and stops
+   * being a Jupiter swap at all.
+   *
+   * Measured rather than guessed: at $100 of NVDAx the cloned Whirlpool delivered 45,664,177
+   * against a 50 bps floor of 45,678,185 — short by roughly three basis points. So 50 sits exactly
+   * on the edge, and the gap widens the longer a fork runs. 200 bps is headroom for a frozen clone,
+   * not a trading decision, and it is why this is floored only off mainnet: on mainnet the quote
+   * and the pool ARE the same moment, 50 bps is the real tolerance, and widening it there would
+   * mean accepting a materially worse fill than the one quoted.
+   */
+  const asked = params.slippageBps ?? 50;
+  const slippageBps =
+    CLUSTER_KEY === 'solana-mainnet' ? asked : Math.max(asked, FORK_MIN_SLIPPAGE_BPS);
 
   /*
    * Off mainnet, pin the quote to the one AMM the fork has cloned.
