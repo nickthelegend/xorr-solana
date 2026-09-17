@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { classify, migrationFilename, MAX_LEGACY_NUMBER } from './migration-names.js';
+import { classify, migrationFilename, MAX_LEGACY_NUMBER, LEGACY_MIGRATIONS } from './migration-names.js';
 
 const DIR = path.join(import.meta.dirname, 'migrations');
 const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort();
@@ -105,5 +105,51 @@ describe('the name a new migration should have', () => {
 
   it('refuses a name that would leave nothing to read', () => {
     expect(() => migrationFilename('   ')).toThrow(/needs a name/);
+  });
+});
+
+/**
+ * Why the check itself cannot race.
+ *
+ * The collision that reached main twice was not missed by a weak assertion; it was invisible to a
+ * correct one. "No two migrations share a number" is a claim about the whole tree, and a branch can
+ * only evaluate it against the tree it can see. Two branches each adding 034 both passed, because
+ * when each ran the other did not exist. The collision was created by the second merge, after every
+ * check had already finished.
+ *
+ * The fix is not a better assertion but a different KIND of assertion: one whose truth does not
+ * depend on any other branch. A timestamp is unique by construction, and the numbered list is
+ * closed, so "is this file allowed" is answered against a constant.
+ */
+describe('the check cannot be raced by another branch', () => {
+  it('rejects a new numbered migration on its own base, whatever else is in flight', () => {
+    // Both branches in the 034 incident would have failed here, independently, before merging.
+    for (const name of ['035-branch-a.sql', '035-branch-b.sql', '036-anything.sql']) {
+      const c = classify(name);
+      expect(c.style, `${name} should not be accepted`).toBe('invalid');
+      if (c.style !== 'invalid') continue;
+      expect(c.reason).toMatch(/Numbers are closed/);
+    }
+  });
+
+  it('still accepts every numbered migration that already exists', () => {
+    for (const name of LEGACY_MIGRATIONS) {
+      expect(classify(name).style, `${name} must stay valid`).toBe('legacy');
+    }
+  });
+
+  it('keeps the frozen list and the directory in step', () => {
+    const onDisk = files.filter((f) => /^\d{3}-/.test(f));
+    // A numbered file deleted or renamed without updating the list would make the list a fiction.
+    expect([...LEGACY_MIGRATIONS].sort()).toEqual(onDisk.sort());
+  });
+
+  it('accepts two timestamped migrations written by different branches', () => {
+    // The property that removes the race: no shared resource to contend for.
+    const a = migrationFilename('branch-a', new Date('2026-09-17T10:00:00Z'));
+    const b = migrationFilename('branch-b', new Date('2026-09-17T10:00:01Z'));
+    expect(classify(a).style).toBe('timestamp');
+    expect(classify(b).style).toBe('timestamp');
+    expect(a).not.toBe(b);
   });
 });

@@ -43,6 +43,61 @@ export const TIMESTAMP_RE = /^(\d{8}T\d{6})-[a-z0-9]+(?:-[a-z0-9]+)*\.sql$/;
  */
 export const MAX_LEGACY_NUMBER = 199;
 
+/**
+ * Every numbered migration that exists. The list is closed.
+ *
+ * This is the part that cannot race, and it is worth being precise about why.
+ *
+ * "No two migrations share a number" is a statement about the whole tree, so a branch can only
+ * check it against the tree it can see — its own base. Two branches each adding 035 both pass,
+ * because at the moment each is tested the other does not exist. The collision is created by the
+ * second merge, after every check has already run. That is exactly how 034 happened twice, with
+ * both PRs green.
+ *
+ * "This file is in the frozen list" is a statement about ONE file against a constant. Its truth
+ * does not depend on any other branch, so a branch adding `035-anything.sql` fails on its own base,
+ * every time, no matter what else is in flight. There is nothing left to race for: the next free
+ * number is not a resource because no new file may take a number at all.
+ *
+ * Nothing is added here. A new migration is timestamped.
+ */
+export const LEGACY_MIGRATIONS: ReadonlySet<string> = new Set([
+  '001-alert-firing.sql',
+  '002-realised-pnl.sql',
+  '003-unbased-units.sql',
+  '004-idempotency.sql',
+  '005-last-seen.sql',
+  '006-disposals.sql',
+  '007-notification-prefs.sql',
+  '008-audit-chain-unique.sql',
+  '009-app-config.sql',
+  '010-price-observations.sql',
+  '011-wallet-active-at.sql',
+  '012-fill-quality.sql',
+  '013-supply-is-not-a-fill.sql',
+  '014-strategy-retry-attempts.sql',
+  '015-chain-scope.sql',
+  '016-fill-sides.sql',
+  '017-portfolio-snapshots.sql',
+  '018-venue-backfill.sql',
+  '019-agents-stopped.sql',
+  '020-limit-orders.sql',
+  '021-faucet-claims.sql',
+  '022-withdrawal-addresses.sql',
+  '023-delegation-grant-time.sql',
+  '024-ended-strategies-have-no-next-run.sql',
+  '025-idempotency-body-broadcast-claim.sql',
+  '026-business-treasuries.sql',
+  '027-custom-agents.sql',
+  '028-solana-withdrawals.sql',
+  '029-reserve-attestations.sql',
+  '030-agent-risk-profile.sql',
+  '031-strategy-paused-from.sql',
+  '032-xstock-basket.sql',
+  '033-multiplier-observations.sql',
+  '034-position-sleeves.sql',
+]);
+
 export type MigrationName =
   | { style: 'legacy'; key: string; number: number }
   | { style: 'timestamp'; key: string; at: string }
@@ -51,6 +106,15 @@ export type MigrationName =
 export function classify(filename: string): MigrationName {
   const legacy = LEGACY_RE.exec(filename);
   if (legacy) {
+    if (!LEGACY_MIGRATIONS.has(filename)) {
+      return {
+        style: 'invalid',
+        key: filename,
+        reason:
+          'is a new numbered migration. Numbers are closed because two branches cannot tell that ' +
+          'they picked the same one until they meet',
+      };
+    }
     const number = Number(legacy[1]);
     if (number > MAX_LEGACY_NUMBER) {
       return {
