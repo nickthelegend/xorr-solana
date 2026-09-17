@@ -136,6 +136,19 @@ type WalletSlice = {
   recoveryBackedUp: boolean;
   setRecoveryBackedUp: (v: boolean) => void;
   delegation: Delegation | null;
+  /**
+   * Which address `delegation` was read for.
+   *
+   * Nothing recorded this, which was harmless while an account had one wallet and became a hazard
+   * the moment the switcher shipped: a switch re-points every executor call at the second account
+   * while the store goes on holding the first account's permission. Safety reads that value, so
+   * the failure is a live cap shown for an account that never granted one.
+   *
+   * `accounts/delegationScope.ts` turns the pair into the three states a screen actually needs —
+   * granted, none, and NOT ASKED — because `null` already means "this address granted nothing" and
+   * cannot also mean "we have not looked".
+   */
+  delegationAddress: string | null;
   setWallet: (w: Wallet | null) => void;
   /**
    * Has the executor been asked whether this user has a wallet yet?
@@ -146,7 +159,17 @@ type WalletSlice = {
    */
   walletChecked: boolean;
   setWalletChecked: (v: boolean) => void;
-  setDelegation: (d: Delegation | null) => void;
+  /** The permission and whose it is, together — they must never be set apart. */
+  setDelegation: (d: Delegation | null, forAddress: string | null) => void;
+  /**
+   * Switch to another address on the same account.
+   *
+   * Everything account-scoped in this store — the permission, the stop switch, the caps, the
+   * approvals, the onboarding answers — belongs to ONE address. Carrying any of it across a switch
+   * means showing one account's safety state while the executor acts on another, so the switch
+   * drops all of it and lets each be read again for the account now in use.
+   */
+  switchAccount: (w: Wallet) => void;
   /**
    * Forget what this device holds about the signed-in person, and keep what belongs to the device.
    *
@@ -170,6 +193,8 @@ const ACCOUNT_KEYS = [
   'wallet',
   'walletChecked',
   'delegation',
+  // Beside `delegation`, always: a permission without the address it belongs to is worse than none.
+  'delegationAddress',
   'recoveryBackedUp',
   'killed',
   'hired',
@@ -288,10 +313,22 @@ export const useStore = create<Store>()(
       recoveryBackedUp: false,
       setRecoveryBackedUp: (recoveryBackedUp) => set({ recoveryBackedUp }),
       delegation: null,
+      delegationAddress: null,
       setWallet: (wallet) => set({ wallet }),
       walletChecked: false,
       setWalletChecked: (walletChecked) => set({ walletChecked }),
-      setDelegation: (delegation) => set({ delegation }),
+      setDelegation: (delegation, delegationAddress) => set({ delegation, delegationAddress }),
+      switchAccount: (wallet) => {
+        /*
+         * Forget first, then set the wallet.
+         *
+         * `forgetAccount` resets every account-scoped key to its default — the same set sign-out
+         * clears, for the same reason — and the new wallet is written after, so the switch does not
+         * leave the app without one for a render.
+         */
+        get().forgetAccount();
+        set({ wallet, walletChecked: true });
+      },
       forgetAccount: () => {
         const initial = api.getInitialState();
         set(Object.fromEntries(ACCOUNT_KEYS.map((key) => [key, initial[key]])) as Partial<Store>);

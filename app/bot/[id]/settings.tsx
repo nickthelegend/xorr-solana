@@ -52,7 +52,7 @@ import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { CAP_MAX, CAP_MIN, RUN_FOR, capLabel, capMarkerPct, runForMs } from '@/state/derived';
 import { useStore } from '@/state/store';
-import { repos } from '@/data';
+import { readDelegationIntoStore } from '@/wallet/readDelegation';
 import { errorText } from '@/data/apiError';
 
 const RAIL_H = 6;
@@ -73,7 +73,6 @@ export default function TradeSettings() {
   const cycleRunFor = useStore((s) => s.cycleRunFor);
   const cap = useStore((s) => s.cap);
   const bumpCap = useStore((s) => s.bumpCap);
-  const setDelegation = useStore((s) => s.setDelegation);
 
   const target = capMarkerPct(cap);
   const pct = useSharedValue(target);
@@ -86,9 +85,9 @@ export default function TradeSettings() {
     setLocalError(undefined);
     try {
       await signGrant(cap, runForMs(runFor));
-      // Read it back from the chain rather than trusting what we just sent.
-      const d = await repos.wallet.delegation();
-      setDelegation(d);
+      // Read it back from the chain rather than trusting what we just sent, and file it against
+      // the address it was read for (`wallet/readDelegation.ts`).
+      await readDelegationIntoStore();
       goBack();
     } catch (e) {
       setLocalError(errorText(e));

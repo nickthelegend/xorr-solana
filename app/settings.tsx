@@ -28,6 +28,7 @@ import {
 } from '@/ui';
 import { capLabel, delegateUnusable, delegationExpired, permissionUnreadable } from '@/state/derived';
 import { useStore } from '@/state/store';
+import { delegationOrUnknown, delegationScope } from '@/accounts/delegationScope';
 import { useNow } from '@/state/useNow';
 import { useAllowlist } from '@/wallet/allowlist';
 import { repos } from '@/data';
@@ -68,7 +69,21 @@ export default function Settings() {
    * Safety, one tap away, said Expired or Disconnected. The same helpers now decide both rows, in the
    * same order, and the stored delegation is only the answer until the read lands.
    */
-  const storedDelegation = useStore((s) => s.delegation);
+  /*
+   * The cached permission ONLY when it belongs to the address in use.
+   *
+   * A switch re-points every executor call at another account; carrying the old grant across would
+   * show one account's cap while the executor acts on another. `undefined` is "not read yet",
+   * which is what every reader here already treats as still-loading — `null` is a claim that this
+   * address has granted nothing, and must never stand in for not having looked.
+   */
+  const storedDelegation = delegationOrUnknown(
+    delegationScope({
+      cached: useStore((s) => s.delegation),
+      cachedFor: useStore((s) => s.delegationAddress),
+      active: useStore((s) => s.wallet?.address),
+    }),
+  );
   const storedKilled = useStore((s) => s.killed);
   const permission = useAsync(() => repos.wallet.delegation(), []);
   const delegation = permission.data !== undefined ? permission.data : storedDelegation;

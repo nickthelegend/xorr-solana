@@ -38,7 +38,7 @@ import { api } from '@/data/api';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { CAP_MAX, CAP_MIN, RUN_FOR, capLabel, runForMs } from '@/state/derived';
 import { useStore } from '@/state/store';
-import { repos } from '@/data';
+import { readDelegationIntoStore } from '@/wallet/readDelegation';
 import { errorText } from '@/data/apiError';
 
 
@@ -50,7 +50,6 @@ export default function GrantDelegation() {
   const bumpCap = useStore((s) => s.bumpCap);
   const runFor = useStore((s) => s.runFor);
   const cycleRunFor = useStore((s) => s.cycleRunFor);
-  const setDelegation = useStore((s) => s.setDelegation);
   const [localError, setLocalError] = useState<string>();
   // The grant is signed by the USER's own wallet. The executor cannot grant itself
   // permission — that is the whole point of the delegation being on-chain.
@@ -89,9 +88,9 @@ export default function GrantDelegation() {
         }
       }
       await signGrant(cap, runForMs(runFor));
-      // Read it back from the chain rather than trusting what we just sent.
-      const d = await repos.wallet.delegation();
-      setDelegation(d);
+      // Read it back from the chain rather than trusting what we just sent, and file it against
+      // the address it was read for (`wallet/readDelegation.ts`).
+      await readDelegationIntoStore();
       router.replace('/proposal');
     } catch (e) {
       setLocalError(errorText(e));
