@@ -49,7 +49,7 @@ import { STAGGER } from '@/ui/motion';
 import { selectionTick } from '@/ui/haptics';
 import { repos } from '@/data';
 import { NotSignedIn, isRetryable } from '@/data/apiError';
-import { system, type Limits } from '@/data/system';
+import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import { logoProps, perpLogoProps, useLogos } from '@/data/useLogos';
@@ -71,6 +71,8 @@ import type { Address } from 'viem';
 import { pinnedDelegation } from '@/chain';
 import { chainAccess } from '@/wallet/chainAccess';
 import { standingOnChain } from '@/wallet/delegationChain';
+import { killSwitchChip } from '@/state/killSwitch';
+import { KillSwitchChip } from '@/ui/KillSwitchChip';
 
 type SheetTab = 'agents' | 'gainers' | 'stocks' | 'futures';
 
@@ -82,7 +84,6 @@ const TABS: readonly { key: SheetTab; label: string }[] = [
 ];
 
 const AVATAR = 40;
-const DOT = 7;
 const GRABBER_W = 36;
 const GRABBER_H = 4;
 const TAB_RULE = 2;
@@ -108,12 +109,6 @@ const ROWS_FROM = 3;
 function magnitude(chg: string): number {
   const n = Number(chg.replace(/[^\d.]/g, ''));
   return Number.isFinite(n) ? n : 0;
-}
-
-/** Whether the bot may place an order right now: a permission that exists, is live, and is not stopped. */
-function isLive(limits: Limits | undefined, killed: boolean): boolean {
-  if (!limits || killed || limits.revoked || limits.dailyCapUsd <= 0) return false;
-  return limits.expiresAt === undefined || limits.expiresAt > Date.now();
 }
 
 function shortAddress(address: string): string {
@@ -244,7 +239,6 @@ export default function Home() {
   const hydrated = useHasHydrated();
   const wallet = useStore((s) => s.wallet);
   const walletChecked = useStore((s) => s.walletChecked);
-  const killed = useStore((s) => s.killed);
   const { email } = usePrivyIdentity();
   /* `/?tab=futures` opens straight onto a tab — for links from elsewhere in the app. */
   const params = useLocalSearchParams<{ tab?: string }>();
@@ -333,7 +327,6 @@ export default function Home() {
   );
 
   const total = balance.data?.total ?? null;
-  const live = isLive(limits.data ?? undefined, killed);
   const fillsNothing = nothingSettles(tradable.data, watchable.data);
 
   /*
@@ -600,43 +593,31 @@ export default function Home() {
               })}
             </ScrollView>
             {/*
-              Whether the agents can act right now, and the way to Safety — a dot, not a card. A limits read that failed
-              is a dash: "Not trading" said about a permission nobody read is the claim Safety was rebuilt to stop making.
+              Whether the agents can act right now, and the way to Safety.
+
+              From THE CHAIN (`standing`), not from `store.killed` and not from the executor's `/limits`. The stored
+              flag is a boolean this browser wrote when someone pressed the button here, and it drifts the moment
+              anything happens anywhere else — a revoke from another device, a permission that expired on its own, a
+              reload after site data was cleared. This app has already shipped a green LIVE badge over a permission the
+              contract reported revoked, and that is exactly this bug.
+
+              Armed is claimed only where the chain said `live`. A chain that could not be read says so, in amber: a
+              grey dot would read as a settled, harmless "off", and rounding "could not ask" down to "stopped" tells
+              someone the agents are off when they may be trading.
             */}
             <Press
               onPress={() => router.push('/safety')}
               accessibilityRole="button"
-              accessibilityLabel={
-                live
-                  ? 'Trading is live. Open Safety.'
-                  : limits.data
-                    ? 'Not trading right now. Open Safety.'
-                    : 'Couldn’t read whether anything can trade. Open Safety.'
-              }
+              accessibilityLabel={`${killSwitchChip(standing.data, standing.error !== undefined).detail} Open Safety.`}
               style={{
                 marginLeft: 'auto',
                 flexDirection: 'row',
                 alignItems: 'center',
-                gap: space.s6,
                 paddingBottom: space.s10,
                 paddingRight: space.gutter,
               }}
             >
-              <View
-                style={{
-                  width: DOT,
-                  height: DOT,
-                  borderRadius: DOT / 2,
-                  backgroundColor: live ? colors.up : colors.ink30,
-                }}
-              />
-              {limits.loading && !limits.data ? (
-                <Placeholder width={44} height={12} />
-              ) : (
-                <Text variant="secondarySm" color={colors.ink55}>
-                  {!limits.data ? '—' : live ? 'Live' : killed ? 'Stopped' : 'Not trading'}
-                </Text>
-              )}
+              <KillSwitchChip standing={standing.data} failed={standing.error !== undefined} />
             </Press>
           </View>
 
