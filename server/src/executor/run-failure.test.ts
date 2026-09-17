@@ -42,7 +42,7 @@ vi.mock('../db/index.js', () => {
     },
   };
 });
-vi.mock('../audit/log.js', () => ({ append: vi.fn(async () => undefined) }));
+vi.mock('../audit/log.js', () => ({ append: vi.fn(async () => ({ seq: '4821' })) }));
 vi.mock('../notifications/push.js', () => ({ send: vi.fn(async () => undefined) }));
 vi.mock('../rules/engine.js', () => ({ evaluate: vi.fn(), recordSpend: vi.fn() }));
 vi.mock('../market/prices.js', () => ({ priceOf: vi.fn(async () => 2_500) }));
@@ -61,6 +61,7 @@ vi.mock('../evm/delegation.js', () => ({
 }));
 
 const { append } = await import('../audit/log.js');
+const { send } = await import('../notifications/push.js');
 const { readPolicy } = await import('../evm/delegation.js');
 const { runStrategy, retryDelayMs } = await import('./run.js');
 type StrategyRow = import('./run.js').StrategyRow;
@@ -92,6 +93,8 @@ beforeEach(() => {
   h.statements.length = 0;
   h.claimTaken = false;
   vi.mocked(append).mockClear();
+  vi.mocked(append).mockResolvedValue({ seq: '4821' } as never);
+  vi.mocked(send).mockClear();
   vi.mocked(readPolicy).mockReset();
 });
 
@@ -152,6 +155,39 @@ describe('a blocked run', () => {
     expect(next).toBeGreaterThanOrEqual(before + DAY);
     expect(next).toBeLessThanOrEqual(Date.now() + DAY);
     expect(actions()).toEqual(['Skipped WETH']);
+  });
+
+  it('tells the phone which row to open, and which instrument it was about', async () => {
+    vi.mocked(readPolicy).mockResolvedValue(null);
+
+    await runStrategy(strategy(), at);
+
+    /*
+     * The push that most needs to land somewhere precise. It says a trade did not happen, and
+     * "which one" is the first thing anyone reading it wants — `/activity` alone opens the top of
+     * a log that may have a hundred rows in it, with the one it meant somewhere below.
+     */
+    expect(vi.mocked(send).mock.calls[0]?.[1]).toMatchObject({
+      kind: 'strategy-blocked',
+      route: '/activity',
+      data: { seq: '4821', symbol: 'WETH' },
+    });
+  });
+
+  it('still sends, and still settles the run, when the trail reported no row', async () => {
+    // The id is for a notification. It is not part of the run, and reading it must never be able
+    // to fail one that has already been decided.
+    vi.mocked(readPolicy).mockResolvedValue(null);
+    vi.mocked(append).mockResolvedValue(undefined as never);
+
+    const out = await runStrategy(strategy(), at);
+
+    expect(out).toMatchObject({ status: 'blocked', reason: 'no_delegation' });
+    const sent = vi.mocked(send).mock.calls[0]?.[1] as { data?: Record<string, unknown> };
+    expect(sent.data).toEqual({ symbol: 'WETH' });
+    // Absent, not null and not an empty string: the app falls back to the list rather than
+    // trying to open a row that does not exist.
+    expect('seq' in (sent.data ?? {})).toBe(false);
   });
 });
 
