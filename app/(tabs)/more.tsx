@@ -1,12 +1,14 @@
 /**
- * The grid tab — intentionally blank (2026-09-12).
+ * Compatibility route for the former grid tab.
  *
- * A grid of tiles stood here and was not what the product owner wants for this tab, so it is empty
- * until that is decided. The button stays in the bar; the screen draws only the ground.
+ * The approved shell has three actions — Home, Swap and Messages — so there is no fourth More
+ * control to select. Leaving the old route blank nevertheless made existing deep links a dead
+ * end. Explore is the maintained catalogue of the same wallet, activity, proof and settings
+ * surfaces, so send callers there.
  */
 import React from 'react';
-import { Screen } from '@/ui';
+import { Redirect } from 'expo-router';
 
 export default function More() {
-  return <Screen tabBar />;
+  return <Redirect href="/explore" />;
 }
