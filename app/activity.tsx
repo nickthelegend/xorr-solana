@@ -52,6 +52,47 @@ import { plainAction, plainDetail } from '@/format/activity';
 
 const DOT = 8;
 
+type ExportKind = 'fills' | 'disposals' | 'trail';
+
+/**
+ * The three documents this screen can hand over, and what each one is for.
+ *
+ * They are not variations of one file. Each answers a different question for a different reader,
+ * and the empty sentence differs for the same reason — "no trades yet" and "nothing sold yet" are
+ * different facts about the same wallet.
+ *
+ *   fills     — a receipt. What moved, when, at what price, on which transaction. ONLY runs that
+ *               settled and carry a signature: a receipt for something that did not happen is not
+ *               a weaker receipt, it is a false one.
+ *   disposals — the tax document. Sales with cost basis, average cost stated in the file rather
+ *               than assumed, because a jurisdiction that wants FIFO needs to be told this is not it.
+ *   trail     — the compliance artifact. EVERY row, blocked runs included, hash-chained. The
+ *               blocked ones are the point: they are where the safety layer did its job.
+ */
+const EXPORTS: Record<
+  ExportKind,
+  { label: string; filename: string; empty: string; read: () => Promise<string> }
+> = {
+  fills: {
+    label: 'Receipts (CSV)',
+    filename: 'xorr-fills.csv',
+    empty: 'Nothing has settled yet, so there are no receipts.',
+    read: () => repos.activity.exportFills(),
+  },
+  disposals: {
+    label: 'Disposals (CSV)',
+    filename: 'xorr-disposals.csv',
+    empty: 'Nothing sold yet, so there is nothing to report.',
+    read: () => repos.activity.exportDisposals(),
+  },
+  trail: {
+    label: 'Export audit trail',
+    filename: 'xorr-audit.csv',
+    empty: 'Nothing to export yet.',
+    read: () => repos.activity.exportTrail('csv'),
+  },
+};
+
 /** What an empty filter says while the trail itself has rows, by the index of `ACTIVITY_FILTERS`. */
 const NONE_UNDER: Readonly<Record<number, string>> = {
   1: 'No trades yet.',
@@ -103,8 +144,8 @@ export default function Activity() {
   useFreshOnReturn(trail);
   // Pulling down is the gesture people already try on a list of things that keep changing.
   const refresh = useRefreshControl(reload);
-  const [exporting, setExporting] = useState(false);
-  const [exportingTax, setExportingTax] = useState(false);
+  /** Which of the three files is being fetched, if any. One at a time: they share one note. */
+  const [exportingWhich, setExportingWhich] = useState<ExportKind>();
   /** A failure, or an empty file said as one. Kept apart so "Nothing to export yet." is not reported as a failed export. */
   const [exportNote, setExportNote] = useState<{ text: string; failed: boolean }>();
 
@@ -116,21 +157,22 @@ export default function Activity() {
    * This called `Share.share`, which Chrome rejects outright — the exact failure `/export` was fixed for, one screen
    * over. The two now share `deliverFile`, and the same refusal to hand over a file with no records in it.
    *
-   * The disposals file is separate from the audit trail because they answer different questions for different
-   * readers. Average cost is stated inside the file rather than assumed — a jurisdiction that requires FIFO needs to be
-   * told this is not it.
+   * Three files, because there are three questions and one document cannot answer them all — see
+   * `EXPORTS` below for which is which.
    */
-  async function exportFile(which: 'trail' | 'disposals') {
-    const setBusy = which === 'trail' ? setExporting : setExportingTax;
-    setBusy(true);
+  async function exportFile(which: ExportKind) {
+    const file = EXPORTS[which];
+    setExportingWhich(which);
     setExportNote(undefined);
     try {
-      const csv = which === 'trail' ? await repos.activity.exportTrail('csv') : await repos.activity.exportDisposals();
+      // `read`, not `fetch`: `repositories.test.ts` bans the literal token in a screen, and the
+      // rule is worth more than the name — every call here goes through the data layer.
+      const csv = await file.read();
       if (exportRecords(csv, 'csv') === 0) {
-        setExportNote({ text: 'Nothing to export yet.', failed: false });
+        setExportNote({ text: file.empty, failed: false });
         return;
       }
-      const out = await deliverFile(which === 'trail' ? 'xorr-audit.csv' : 'xorr-disposals.csv', csv);
+      const out = await deliverFile(file.filename, csv);
       // A dismissed share sheet is a change of mind, which `deliverFile` words as "Cancelled." — not a failure to report.
       if (!out.ok && out.reason !== 'Cancelled.') setExportNote({ text: `Export failed: ${out.reason}`, failed: true });
     } catch (e) {
@@ -138,7 +180,7 @@ export default function Activity() {
       // worse than none: the user walks away believing they have the record.
       setExportNote({ text: `Export failed: ${errorText(e)}`, failed: true });
     } finally {
-      setBusy(false);
+      setExportingWhich(undefined);
     }
   }
 
@@ -248,27 +290,35 @@ export default function Activity() {
       ) : null}
 
       {/*
-        Two different documents, so two different buttons. The audit trail records what the
-        BOT did; the disposals file records what the USER owes. Folding the second into the
-        first would produce a file that is the wrong shape for both jobs — an accountant does
-        not want blocked runs, and a compliance reviewer does not want cost basis.
+        Three documents, so three buttons. Folding any two together would produce a file that is
+        the wrong shape for both jobs — an accountant does not want blocked runs, a compliance
+        reviewer does not want cost basis, and someone asking "what did I buy" wants neither.
 
-        A plain row: `ButtonRow` is the secondary/affirmative pair for a decision, and these
-        two are peers rather than a choice between them.
+        Plain rows: `ButtonRow` is the secondary/affirmative pair for a decision, and these are
+        peers rather than a choice between them.
       */}
       <View style={{ flexDirection: 'row', gap: space.s10, marginTop: space.s14 }}>
         <Button
-          label="Export audit trail"
+          label={EXPORTS.fills.label}
           variant="ghost"
-          loading={exporting}
-          onPress={() => exportFile('trail')}
+          loading={exportingWhich === 'fills'}
+          onPress={() => exportFile('fills')}
           style={{ flex: 1 }}
         />
         <Button
-          label="Disposals (CSV)"
+          label={EXPORTS.disposals.label}
           variant="ghost"
-          loading={exportingTax}
+          loading={exportingWhich === 'disposals'}
           onPress={() => exportFile('disposals')}
+          style={{ flex: 1 }}
+        />
+      </View>
+      <View style={{ flexDirection: 'row', marginTop: space.s10 }}>
+        <Button
+          label={EXPORTS.trail.label}
+          variant="ghost"
+          loading={exportingWhich === 'trail'}
+          onPress={() => exportFile('trail')}
           style={{ flex: 1 }}
         />
       </View>

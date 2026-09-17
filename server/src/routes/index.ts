@@ -11,6 +11,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { one, query } from '../db/index.js';
 import { append, exportTrail, list as listAudit, verify } from '../audit/log.js';
+import { FILLS_SQL, fillsCsv, type FillRow } from '../audit/fills.js';
 import { explainTrade } from '../bot/explain.js';
 import { recordGrant, recordRevoke } from '../delegation/record.js';
 import {
@@ -940,6 +941,26 @@ routes.get('/activity/export', async (c) => {
   return c.text(body, 200, {
     'content-type': format === 'json' ? 'application/json' : 'text/csv',
     'content-disposition': `attachment; filename="xorr-audit.${format}"`,
+  });
+});
+
+/**
+ * GET /activity/fills.csv — a receipt for every trade that actually settled.
+ *
+ * Narrower than `/activity/export` on purpose, and the narrowness is the feature. The audit trail
+ * carries every row — the blocked runs, the ones with nothing to do, the strategies someone paused
+ * — which is exactly right for a compliance artifact and wrong for "show me what I bought". This
+ * answers the third question: what moved, when, at what price, and on which transaction.
+ *
+ * Only a run that reached `filled` AND carries a signature appears. A receipt for something that
+ * did not happen is not a weaker receipt; it is a false one. `audit/fills.ts` holds the rule.
+ */
+routes.get('/activity/fills.csv', async (c) => {
+  const w = await requireWallet(c);
+  const rows = await query<FillRow>(FILLS_SQL, [w.id]);
+  return c.body(fillsCsv(rows), 200, {
+    'content-type': 'text/csv; charset=utf-8',
+    'content-disposition': 'attachment; filename="xorr-fills.csv"',
   });
 });
 

@@ -532,6 +532,9 @@ export const LocalRepositories: Repositories = {
     async exportDisposals() {
       return api.getText('/pnl/disposals.csv');
     },
+    async exportFills() {
+      return api.getText('/activity/fills.csv');
+    },
   },
 
   news: {
