@@ -243,7 +243,25 @@ export default function Watchlist() {
                         onDown={() => void reorder(sym, 'down')}
                         symbol={sym}
                       />
-                    ) : undefined
+                    ) : (
+                      /*
+                       * An alert, from where someone is already looking at the market.
+                       *
+                       * The watchlist IS the list of things they want to be told about, and setting
+                       * an alert meant going to another screen and typing the ticker they had just
+                       * tapped. The symbol travels with the tap; the level is seeded from the live
+                       * price on the screen that takes it.
+                       */
+                      <Press
+                        onPress={() => router.push(`/alerts/new?symbol=${encodeURIComponent(sym)}`)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Set an alert on ${sym}`}
+                        hitHeight={size.hit}
+                        hitWidth={size.hit}
+                      >
+                        <Icon name="bell" size={16} color={colors.ink40} />
+                      </Press>
+                    )
                   }
                 />
               );

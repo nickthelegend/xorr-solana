@@ -7,6 +7,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { TextInput, View } from 'react-native';
+import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   Button,
@@ -33,7 +34,19 @@ const FIELD_H = 48;
 
 export default function NewAlert() {
   const goBack = useGoBack();
-  const [symbol, setSymbol] = useState<string>(DEFAULT_BUY);
+  /*
+   * Opened on a symbol, when something already knows which one.
+   *
+   * The watchlist is where someone is already looking at a market and thinking about a level, and
+   * sending them here to type its ticker again is asking them to re-enter what they just tapped.
+   * Without a param this is the ordinary blank alert, on the default buy as it always was.
+   */
+  const { symbol: fromRoute } = useLocalSearchParams<{ symbol?: string }>();
+  const [symbol, setSymbol] = useState<string>(
+    // NOT uppercased, and not resolved here: rule 3 in `venues/oneinch.ts`. The field's own
+    // `resolvePriceable` does that below, against the list of what can actually be priced.
+    typeof fromRoute === 'string' && fromRoute.trim() ? fromRoute.trim() : DEFAULT_BUY,
+  );
 
   /*
    * The symbols something can put a price on, so an alert that can never fire is refused HERE —
