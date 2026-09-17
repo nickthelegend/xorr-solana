@@ -35,6 +35,7 @@ import { priceOf } from '../market/prices.js';
 import { send } from '../notifications/push.js';
 import { PLANNERS, observationFor, type TradeIntent } from './kinds/index.js';
 import { chooseSettlement, type SettlementVenue } from './settle.js';
+import { claimedSellUnits } from './stack.js';
 import { canonicalSymbol, TOKENS as VENUE_TOKENS } from '../venues/oneinch.js';
 import { agentForKind } from '../agents/attribution.js';
 import { isStock } from '../venues/stocks.js';
@@ -542,11 +543,21 @@ async function runStrategyInner(
       params = { ...params, ...observed };
     }
 
+    /*
+     * What the rest of the stack has already committed to selling on this symbol.
+     *
+     * Read once, here, so the planner stays a function of what it is given. Only a close-capable
+     * kind can be affected by it, but it is read for every kind rather than branching: a planner
+     * that gains a sell leg later must not have to remember to ask.
+     */
+    const claimed = await claimedSellUnits(walletId, strategy.symbol, strategy.id).catch(() => 0);
+
     const intent: TradeIntent | null = await PLANNERS[strategy.kind]!({
       owner,
       budgetUsd: usd,
       params,
       symbol: strategy.symbol,
+      claimedSellUnits: claimed,
       levelSetAt,
     });
 

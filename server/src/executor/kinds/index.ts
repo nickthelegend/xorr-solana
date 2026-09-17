@@ -14,6 +14,7 @@ import { priceOf } from '../../market/prices.js';
 import { daily, history } from '../../backtest/engine.js';
 import { earningsCalendar } from '../../market/edgar.js';
 import { holdings, cashUsd } from '../../evm/balances.js';
+import { sellableUnits } from '../stack.js';
 import { usdcReserve } from '../../market/yield.js';
 import { supplyCalldata, AAVE_POOL } from '../../venues/aave.js';
 import { publicClient } from '../../evm/client.js';
@@ -91,6 +92,17 @@ export type PlanContext = {
   budgetUsd: number;
   params: Record<string, unknown>;
   symbol: string;
+  /**
+   * Units of `symbol` that OTHER live strategies have already committed to selling.
+   *
+   * Stacking makes this necessary. `planExitRules` closes the whole position, so two exits on one
+   * symbol firing in the same window would each try to sell everything — the first succeeds and
+   * the second sells units that no longer exist. Passed in rather than read here so the planner
+   * stays a function of what it is given.
+   *
+   * Absent means nothing is stacked, which is the ordinary case and reads as zero.
+   */
+  claimedSellUnits?: number;
   /** When the strategy's resting levels were set, for scaling them across a split. */
   levelSetAt?: Date;
 };
@@ -199,6 +211,21 @@ export async function planExitRules(ctx: PlanContext): Promise<TradeIntent | nul
   const entry = resting.levels.entryPrice ?? 0;
   if (!(entry > 0)) return null;
 
+  /*
+   * What is left after the rest of the stack has had its say.
+   *
+   * A sibling exit that has already fired — or has claimed its period and may have broadcast — has
+   * spent those units whether or not the balance above reflects it yet. Selling them again is the
+   * failure this guard exists for, and it is the one that looks fine in isolation on both sides.
+   *
+   * After the level check, not before: whether these levels can be trusted at all is a question
+   * about the split, and there is no point sizing a sale that must not happen.
+   */
+  const sellable = sellableUnits(held.units, ctx.claimedSellUnits ?? 0);
+  if (sellable <= 0) return null;
+  const sellUsd = held.units > 0 ? held.usd * (sellable / held.units) : 0;
+  if (sellUsd < MIN_TRADE_USD) return null;
+
   const mark = await priceOf(ctx.symbol);
   const movePct = ((mark - entry) / entry) * 100;
 
@@ -220,14 +247,21 @@ export async function planExitRules(ctx: PlanContext): Promise<TradeIntent | nul
 
   if (!hitTP && !hitSL && !hitTrail) return null;
 
+  /*
+   * The whole position, unless another strategy has already spoken for part of it.
+   *
+   * A partial close on a stop is a decision the user did not make, so the raw amount is passed
+   * through untouched when nothing is stacked — closing to the wei rather than to whatever a float
+   * rounds to. Once a sibling has claimed units, the raw figure would be a claim on more than
+   * remains, so it is dropped and the sized amount stands on its own.
+   */
+  const partial = sellable < held.units;
   return {
     inSymbol: ctx.symbol,
     outSymbol: 'USDC',
-    // Close the whole position. A partial close on a stop is a decision the user did not make.
-    amountIn: held.units,
-    // And close it to the wei, not to whatever a float rounds to.
-    amountInRaw: held.raw,
-    usd: held.usd,
+    amountIn: sellable,
+    amountInRaw: partial ? undefined : held.raw,
+    usd: sellUsd,
     because: hitTP
       ? `${ctx.symbol} is up ${movePct.toFixed(1)}% from ${entry.toFixed(2)}, which is your take profit.`
       : hitSL

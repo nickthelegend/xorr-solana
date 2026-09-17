@@ -122,12 +122,28 @@ export async function armExits(
     };
   }
 
-  const existing = await one<{ id: string }>(
+  /*
+   * An exit at the SAME levels is a duplicate; one at different levels is a stack.
+   *
+   * This used to refuse any second exit on a symbol, because `planExitRules` closes the whole
+   * position and two of them firing together would have the second selling units the first had
+   * already sold. That is now handled where it belongs — a sell is sized against what the rest of
+   * the stack has claimed (`executor/stack.ts`) — so a tighter stop under an existing take-profit
+   * is allowed, which is the ordinary thing people want.
+   *
+   * What is still refused is the same exit twice. Two identical stops are not a strategy, they are
+   * a double-tap, and arming both would put two rows on the schedule that fire on the same tick.
+   */
+  const duplicate = await one<{ id: string }>(
     `SELECT id FROM strategies
-      WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live' AND chain = ${THIS_CHAIN} LIMIT 1`,
-    [w.id, p.symbol],
-  );
-  if (existing) {
+      WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live'
+        AND chain = ${THIS_CHAIN}
+        AND round((params->>'takeProfitPct')::numeric, 2) = round($3::numeric, 2)
+        AND round((params->>'stopLossPct')::numeric, 2) = round($4::numeric, 2)
+      LIMIT 1`,
+    [w.id, p.symbol, takeProfitPct.toFixed(2), stopLossPct.toFixed(2)],
+  ).catch(() => null);
+  if (duplicate) {
     return { strategyId: null, sentence: `Your existing exit on ${p.symbol} stays as it is.` };
   }
 
