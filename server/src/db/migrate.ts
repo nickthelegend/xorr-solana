@@ -44,6 +44,14 @@ const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(
 const RENAMED: Readonly<Record<string, string>> = Object.freeze({
   // Collided with 030-agent-risk-profile.sql. Moved after it, which is the order it already ran in.
   '033-multiplier-observations.sql': '030-multiplier-observations.sql',
+  /*
+   * Collided with 034-position-sleeves.sql, which landed four minutes earlier.
+   *
+   * The later one moves: the earlier had already been applied by anything that deployed in
+   * between, and renumbering a migration a database has run is the case this map exists for
+   * rather than one to create on purpose.
+   */
+  '035-corporate-action-notices.sql': '034-corporate-action-notices.sql',
 });
 
 for (const [current, previous] of Object.entries(RENAMED)) {
