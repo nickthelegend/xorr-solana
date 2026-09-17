@@ -26,8 +26,9 @@ import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } fr
  * lookup table over what that module produces — so this is string functions, not the data layer's fetching
  * machinery. The alternative was resolving the text and the retry at all 51 call sites.
  */
-import { NotSignedIn } from '@/data/apiError';
+import { NotSignedIn, wasReplayed } from '@/data/apiError';
 import { classify, waitSentence } from '@/data/failures';
+import { replayNote } from '@/markets/placed';
 import { Button } from './Button';
 import { emptyList, type EmptyListKey } from './emptyActions';
 import { Press } from './Press';
@@ -334,6 +335,13 @@ export function FailureNote({
   const failure = classify(error);
   const tone = light ? colors.candleDown : colors.down;
   const quiet = light ? colors.sheet.muted : colors.ink55;
+  /*
+   * A refusal the executor had already answered under this key.
+   *
+   * It is stored and replayed exactly as a fill is, so a second tap gets the first attempt's refusal back —
+   * and without saying so, that reads as a second, separate rejection of a second try.
+   */
+  const replay = replayNote(wasReplayed(error));
   return (
     <View
       testID={testID}
@@ -344,6 +352,11 @@ export function FailureNote({
       <Text variant="footnote" color={tone} align="center">
         {failure.message}
       </Text>
+      {replay ? (
+        <Text variant="footnote" color={quiet} align="center">
+          {replay}
+        </Text>
+      ) : null}
       {failure.retryAfterSec !== undefined && failure.retryAfterSec > 0 ? (
         <Text variant="footnote" color={quiet} align="center">
           {waitSentence(failure.retryAfterSec)}

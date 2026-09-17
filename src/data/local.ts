@@ -22,7 +22,7 @@ import {
 } from './marketData';
 import { ApiError, NotSignedIn, api, apiReason } from './api';
 import { waitOutWarming } from './warming';
-import { absentOrThrow, goneProposal } from './apiError';
+import { absentOrThrow, goneProposal, markReplayed } from './apiError';
 import type {
   ActivityEvent,
   Agent,
@@ -408,7 +408,14 @@ export const LocalRepositories: Repositories = {
       } catch (e) {
         if (e instanceof ApiError && e.body && typeof e.body === 'object') {
           const b = e.body as Partial<OrderOutcome>;
-          if (b.status) return b as OrderOutcome;
+          /*
+           * The refusal is unwrapped, so the fact that it was a REPLAY has to come with it.
+           *
+           * The executor stores a keyed refusal exactly as it stores a fill, and answers the same key with
+           * it again (`server/src/http/idempotency.ts`). Without this, the second tap's stored 409 reads as
+           * a second, separate rejection — see `markets/placed.ts`.
+           */
+          if (b.status) return markReplayed(b as OrderOutcome, e.replayed === true);
         }
         throw e;
       }
@@ -505,7 +512,8 @@ export const LocalRepositories: Repositories = {
       } catch (e) {
         if (e instanceof ApiError && e.body && typeof e.body === 'object') {
           const b = e.body as Partial<PositionClose>;
-          if (b.status) return b as PositionClose;
+          // The replay mark travels with the unwrapped refusal, as it does on an order.
+          if (b.status) return markReplayed(b as PositionClose, e.replayed === true);
         }
         throw e;
       }

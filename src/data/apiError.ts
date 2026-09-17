@@ -52,6 +52,14 @@ export class ApiError extends Error {
  */
 export const REPLAYED = Symbol.for('xorr.idempotentReplay');
 
+/** Put the replay mark on a value, for the repositories that unwrap an answer out of the error it arrived in. */
+export function markReplayed<T>(value: T, replayed: boolean): T {
+  if (replayed && value !== null && typeof value === 'object') {
+    Object.defineProperty(value, REPLAYED, { value: true, enumerable: false });
+  }
+  return value;
+}
+
 /** Was this answer the executor repeating what an earlier attempt with the same key did? */
 export function wasReplayed(value: unknown): boolean {
   return (

@@ -62,8 +62,9 @@ import { system } from '@/data/system';
 import { settlementSymbol } from '@/data/tradable';
 import { useAsync } from '@/data/useAsync';
 import { useIntentKeys } from '@/data/useIntentKeys';
+import { replayNote } from '@/markets/placed';
 import { useLogo } from '@/data/useLogos';
-import { errorText } from '@/data/apiError';
+import { errorText, wasReplayed } from '@/data/apiError';
 import { useLiveRead } from '@/markets/useLiveRead';
 
 /** The close bar. 6pt — a readout, not a control; the pills below it do the setting. */
@@ -86,7 +87,8 @@ export default function PositionScreen() {
 
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState<string>();
-  const [closed, setClosed] = useState<{ proceeds: number; units: number } | undefined>();
+  /* `replayed`: the executor had already answered this key, so this tap sold nothing. See `markets/placed.ts`. */
+  const [closed, setClosed] = useState<{ proceeds: number; units: number; replayed: boolean } | undefined>();
   // A week, not a day: a position is held for longer than one, and the fills that built it are what the marks are for.
   const [range, setRange] = useState<HistoryRange>('1W');
 
@@ -146,11 +148,14 @@ export default function PositionScreen() {
       const ask = { symbol: p.symbol, fraction: closePct / 100 };
       const res = await keys.send(ask, (idempotencyKey) => repos.portfolio.close(ask, { idempotencyKey }));
       if (res.status === 'closed') {
-        setClosed({ proceeds: res.usd ?? 0, units: res.units ?? 0 });
+        setClosed({ proceeds: res.usd ?? 0, units: res.units ?? 0, replayed: wasReplayed(res) });
         reload();
       } else {
-        // A blocked or failed close is not a success. Say which, in the server's own words.
-        setCloseError(res.detail ?? res.error ?? `The close came back "${res.status}".`);
+        // A blocked or failed close is not a success. Say which, in the server's own words — and say when
+        // that answer belongs to an earlier attempt rather than to this tap.
+        const note = replayNote(wasReplayed(res));
+        const said = res.detail ?? res.error ?? `The close came back "${res.status}".`;
+        setCloseError(note ? `${said} ${note}` : said);
       }
     } catch (e) {
       setCloseError(errorText(e));
@@ -304,9 +309,16 @@ export default function PositionScreen() {
             </NoteStrip>
           ) : null}
 
+          {/*
+            A close that was a REPLAY says so. The executor answered this key before and handed back what
+            that attempt did, so this tap sold nothing — and "Sold 0.0412 WETH" a second time is the sentence
+            that makes a user believe they sold twice.
+          */}
           {closed ? (
             <NoteStrip kind="acted" style={{ marginTop: space.s14 }} figure="units">
-              {`Sold ${quantity(closed.units)} ${p.symbol} for ${money(closed.proceeds)}.`}
+              {closed.replayed
+                ? `Already sold ${quantity(closed.units)} ${p.symbol} for ${money(closed.proceeds)}. Nothing was sold again.`
+                : `Sold ${quantity(closed.units)} ${p.symbol} for ${money(closed.proceeds)}.`}
             </NoteStrip>
           ) : null}
 

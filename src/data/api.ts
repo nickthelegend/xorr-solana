@@ -8,7 +8,7 @@ import { accessToken } from '@/auth/token';
 import { isPublicPath } from './publicPaths';
 import { authKnowledge, whenAuthKnown } from '@/auth/authState';
 import { API_BASE } from './apiBase';
-import { ApiError, NotSignedIn, REPLAYED, TimedOut, retryAfterSeconds } from './apiError';
+import { ApiError, NotSignedIn, TimedOut, markReplayed, retryAfterSeconds } from './apiError';
 import { keyHeaders, type Keyed } from './intentKey';
 /*
  * Re-exported, not redefined.
@@ -21,7 +21,7 @@ import { keyHeaders, type Keyed } from './intentKey';
 export { NotSignedIn, TimedOut } from './apiError';
 
 export { API_BASE };
-export { ApiError, apiReason, REPLAYED, wasReplayed } from './apiError';
+export { ApiError, apiReason, REPLAYED, markReplayed, wasReplayed } from './apiError';
 
 /**
  * Every request carries the Privy access token. The executor rejects anything without one, so a
@@ -157,11 +157,7 @@ async function send<T>(path: string, signal: AbortSignal, requestId: string, ini
    * answered this key once already, so nothing happened a second time. Carried as a property on the parsed
    * body rather than thrown, because nothing went wrong.
    */
-  const body = (await res.json()) as T;
-  if (res.headers.get('idempotent-replay') === 'true' && body !== null && typeof body === 'object') {
-    Object.defineProperty(body, REPLAYED, { value: true, enumerable: false });
-  }
-  return body;
+  return markReplayed((await res.json()) as T, res.headers.get('idempotent-replay') === 'true');
 }
 
 export const api = {

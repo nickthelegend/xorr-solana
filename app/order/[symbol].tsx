@@ -43,7 +43,8 @@ import { useDebounced } from '@/data/useDebounced';
 import { useStore } from '@/state/store';
 import { DEFAULT_BUY } from '@/data/tradable';
 import { useSettleable } from '@/data/useSettleable';
-import { ApiError } from '@/data/apiError';
+import { ApiError, wasReplayed } from '@/data/apiError';
+import { placementOf } from '@/markets/placed';
 import type { SwapQuoteResult } from '@/data/useSwapQuote';
 import { waitOutWarming } from '@/data/warming';
 import { sellMax, ticketLimit } from '@/markets/ticket';
@@ -57,8 +58,12 @@ type Side = 'buy' | 'sell';
  * which `repos` hands back as a value rather than throwing. Wrapping it in the same `ApiError` a thrown
  * refusal arrives as means one component reads both, and `failures.ts` finds the code either way.
  */
-function refusalOf(res: { status?: string; reason?: string; error?: string; detail?: string }, fallback: string) {
-  return new ApiError(409, fallback, { error: res.reason ?? res.error, detail: res.detail ?? fallback });
+function refusalOf(
+  res: { status?: string; reason?: string; error?: string; detail?: string },
+  fallback: string,
+  replayed: boolean,
+) {
+  return new ApiError(409, fallback, { error: res.reason ?? res.error, detail: res.detail ?? fallback }, undefined, undefined, replayed);
 }
 
 const SIDES = [
@@ -206,7 +211,15 @@ export default function OrderTicket() {
    * arrive here in the same shape.
    */
   const [refusal, setRefusal] = useState<unknown>();
-  const [filled, setFilled] = useState<{ units: number; price: number }>();
+  /*
+   * What came back, once something did.
+   *
+   * `replayed` is the executor saying this key had already been answered: the order filled once, a while
+   * ago, and this tap placed nothing. Without it the ticket rendered the first attempt's confirmation a
+   * second time, so the mechanism that prevented a double spend looked exactly like one. See
+   * `markets/placed.ts`.
+   */
+  const [filled, setFilled] = useState<{ units: number; price: number; replayed: boolean }>();
   /*
    * The order's Idempotency-Key (FEATURES.md #29). An order that timed out may have filled; the same order tapped again
    * carries the same key, and the executor answers with what the first one did rather than filling it twice.
@@ -232,10 +245,15 @@ export default function OrderTicket() {
           repos.portfolio.close({ symbol, fraction }, { idempotencyKey }),
         );
         if (res.status === 'closed') {
-          setFilled({ units: res.units ?? 0, price: (res.usd ?? 0) / (res.units || 1) });
-          setTimeout(() => goBack(), 1200);
+          setFilled({
+            units: res.units ?? 0,
+            price: (res.usd ?? 0) / (res.units || 1),
+            replayed: wasReplayed(res),
+          });
+          // A replay is read, not glanced at: it says the tap did nothing, which takes longer than a fill.
+          setTimeout(() => goBack(), wasReplayed(res) ? 2600 : 1200);
         } else {
-          setRefusal(refusalOf(res, `The sale came back "${res.status}".`));
+          setRefusal(refusalOf(res, `The sale came back "${res.status}".`, wasReplayed(res)));
         }
         return;
       }
@@ -244,14 +262,15 @@ export default function OrderTicket() {
         repos.orders.place({ symbol, usd: amount }, { idempotencyKey }),
       );
       if (res.status === 'filled') {
-        setFilled({ units: res.units ?? 0, price: res.price ?? 0 });
+        setFilled({ units: res.units ?? 0, price: res.price ?? 0, replayed: wasReplayed(res) });
         // Let the fill land on screen before the sheet goes; a ticket that closes the
-        // instant you tap it leaves you unsure whether anything happened.
-        setTimeout(() => goBack(), 1200);
+        // instant you tap it leaves you unsure whether anything happened. An "already filled" has a
+        // sentence under it and takes longer to read, so it gets longer.
+        setTimeout(() => goBack(), wasReplayed(res) ? 2600 : 1200);
       } else {
         // The policy engine's own sentence — "the daily cap is spent", not "409" — and its code with it, so
         // the note below can offer the screen that fixes it.
-        setRefusal(refusalOf(res, `The order came back "${res.status}".`));
+        setRefusal(refusalOf(res, `The order came back "${res.status}".`, wasReplayed(res)));
       }
     } catch (e) {
       setRefusal(e);
@@ -377,7 +396,7 @@ export default function OrderTicket() {
         <Button
           label={
             filled
-              ? `${side === 'buy' ? 'Bought' : 'Sold'} ${quantity(filled.units)} ${symbol}`
+              ? placementOf({ side, symbol, units: filled.units, replayed: filled.replayed }).label
               : orderCta(side, orderAmt, symbol)
           }
           // What filled is the person's money and hides while balances are hidden; the order being typed does not.
@@ -398,6 +417,23 @@ export default function OrderTicket() {
           </Text>
         </View>
       )}
+      {/*
+        A duplicate submit, said in as many words.
+
+        The executor answered this key before and handed back what that attempt did, so nothing was placed
+        here. The button already says "Already bought"; this is the sentence that makes it unambiguous.
+      */}
+      {filled?.replayed ? (
+        <Text
+          variant="footnote"
+          color={colors.sheet.muted}
+          align="center"
+          style={{ marginTop: space.s10 }}
+          accessibilityLiveRegion="polite"
+        >
+          {placementOf({ side, symbol, units: filled.units, replayed: true }).note}
+        </Text>
+      ) : null}
       {refusal !== undefined ? (
         <FailureNote error={refusal} light style={{ marginTop: space.s10 }} />
       ) : null}
