@@ -158,3 +158,77 @@ describe('the check cannot be raced by another branch', () => {
     expect(a).not.toBe(b);
   });
 });
+
+/**
+ * Renaming a migration is bookkeeping, not just a file move.
+ *
+ * `schema_migrations` records the FILENAME, so a renamed migration is a file an already-migrated
+ * database has no record of and will run again. `migrate.ts` handles that with a `RENAMED` map
+ * that carries the bookkeeping row forward without executing anything.
+ *
+ * The timestamp scheme removed the collisions that forced those renames; it did not remove
+ * renaming. The map already carries two entries, and nothing held it to the files it names — so it
+ * can go stale in three ways, silently, and the symptom is a deployed database re-running SQL.
+ *
+ * Read out of the source rather than imported: `migrate.ts` connects to a database and migrates it
+ * at import time, so importing it here would run a migration.
+ */
+describe('the renamed-migration map', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'migrate.ts'), 'utf8');
+
+  /** The `'current': 'previous'` pairs inside `const RENAMED = Object.freeze({ ... })`. */
+  function renamedPairs(): { current: string; previous: string }[] {
+    const block = /const RENAMED[^{]*\{([\s\S]*?)\}\)/.exec(source);
+    if (!block?.[1]) throw new Error('could not find the RENAMED map in migrate.ts');
+    return [...block[1].matchAll(/'([^']+\.sql)'\s*:\s*'([^']+\.sql)'/g)].map((m) => ({
+      current: m[1]!,
+      previous: m[2]!,
+    }));
+  }
+
+  it('finds the map, so these assertions are checking something', () => {
+    expect(renamedPairs().length).toBeGreaterThan(0);
+  });
+
+  /*
+   * A key naming a file that is not there carries nothing forward, silently. It is what happens the
+   * second time one migration is renamed — the map still points at the first new name.
+   */
+  it('names a migration that actually exists for every rename', () => {
+    const missing = renamedPairs()
+      .filter((p) => !files.includes(p.current))
+      .map((p) => p.current);
+    expect(missing, `RENAMED points at files that are not here: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  /* Both present means the same migration runs twice, under two names. */
+  it('does not leave the old filename in place beside the new one', () => {
+    const stillThere = renamedPairs()
+      .filter((p) => files.includes(p.previous))
+      .map((p) => p.previous);
+    expect(stillThere, `renamed away but still present: ${stillThere.join(', ')}`).toEqual([]);
+  });
+
+  /*
+   * A rename declared twice would write two carry-forward rows for one change, and the second
+   * would claim a migration ran under a name it never had.
+   */
+  it('declares each rename once, in each direction', () => {
+    const pairs = renamedPairs();
+    expect(new Set(pairs.map((p) => p.current)).size).toBe(pairs.length);
+    expect(new Set(pairs.map((p) => p.previous)).size).toBe(pairs.length);
+  });
+
+  /*
+   * A chain — A renamed to B, then B renamed to C — needs `A -> C` as well, or a database still on
+   * A is carried to B and then left there, and B is not a file any more.
+   */
+  it('leaves no rename chained through a name that no longer exists', () => {
+    const pairs = renamedPairs();
+    const currents = new Set(pairs.map((p) => p.current));
+    const dangling = pairs
+      .filter((p) => currents.has(p.previous))
+      .map((p) => `${p.previous} -> ${p.current}`);
+    expect(dangling, `chained rename needs a direct entry too: ${dangling.join(', ')}`).toEqual([]);
+  });
+});
