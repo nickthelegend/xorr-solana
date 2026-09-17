@@ -16,6 +16,7 @@ import { autonomousAgentSweep } from '../bot/autonomous.js';
 import { basketSweep } from '../bot/basket.js';
 import { evaluateAlerts } from '../alerts/evaluate.js';
 import { anchorSweep } from '../audit/anchor-sweep.js';
+import { sweepCorporateActions } from '../venues/corporate-actions.js';
 import { snapshotSweep } from '../portfolio/snapshots.js';
 
 export const TICK_MS = Number(process.env.SCHEDULER_TICK_MS ?? 30_000);
@@ -115,6 +116,27 @@ export async function tick(now: Date = new Date()): Promise<number> {
     for (const o of broken) log.warn(`[alerts] cannot evaluate "${o.name}": ${o.detail}`);
   } catch (e) {
     log.error('[alerts] sweep failed:', e instanceof Error ? e.message : e);
+  }
+
+  /*
+   * Then anything the issuers have scheduled.
+   *
+   * Non-fatal for the same reason the alert sweep is, and after it for the same reason: a warning
+   * about a split is commentary on the position, never a precondition for trading it. The sweep is
+   * idempotent — each holder is claimed once per action — so running it every tick costs one query
+   * per xStock and sends nothing it has already sent.
+   */
+  try {
+    const actions = await sweepCorporateActions();
+    for (const o of actions) {
+      if (o.walletsNotified.length > 0) {
+        console.log(
+          `[corporate-actions] ${o.action.symbol} ${o.action.reading} on ${o.action.effectiveAt}: told ${o.walletsNotified.length}`,
+        );
+      }
+    }
+  } catch (e) {
+    log.error('[corporate-actions] sweep failed:', e instanceof Error ? e.message : e);
   }
 
   /*
