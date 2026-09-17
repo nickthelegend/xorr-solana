@@ -31,6 +31,7 @@ import {
   canonicalSymbol,
 } from '../venues/oneinch.js';
 import { nextRuns, type Cadence } from '../executor/schedule.js';
+import { nextRunOnResume, resumeMovedSchedule, stateOnResume } from '../executor/resume.js';
 import { CHAIN_KEY } from '../evm/chains.js';
 import { equitiesFunctional, isStock } from '../venues/stocks.js';
 import { readPolicy } from '../evm/delegation.js';
@@ -186,6 +187,14 @@ function toApi(r: StrategyRow) {
     createdAt: new Date(r.created_at).getTime(),
     /** The agent that runs it, when one does — how an agent someone made finds its own strategies (2026-09-16). */
     agentId: r.agent_id ?? undefined,
+    /*
+     * What a resume will put this back to, published only while it is paused.
+     *
+     * A paused row that resumes into `watch` and one that resumes into `live` are different things
+     * to tap, and the list had no way to tell them apart. On any row that is not paused this is
+     * stale bookkeeping rather than a fact about the strategy, so it is not published.
+     */
+    pausedFrom: r.state === 'paused' ? (r.paused_from ?? undefined) : undefined,
   };
 }
 
@@ -338,18 +347,40 @@ type StrategyState = 'draft' | 'watch' | 'live' | 'paused' | 'ended';
 /** The states that hold allowance against the daily cap. */
 const COMMITTED_STATES: ReadonlySet<string> = new Set(['live', 'watch']);
 
-/** What a move says on the trail. */
-function describeMove(from: string, to: StrategyState, label: string): { action: string; detail: string } {
+/**
+ * What a move says on the trail.
+ *
+ * A pause says what it is NOT, in the sentence itself. Pausing one strategy stops one row from
+ * being selected by the scheduler; the delegation is untouched and every other strategy and agent
+ * goes on trading. The kill switch is the only thing that revokes on chain, and someone reading
+ * this line later must not be left thinking they had already pulled it.
+ */
+function describeMove(
+  from: string,
+  to: StrategyState,
+  label: string,
+  scheduleMoved = false,
+): { action: string; detail: string } {
   switch (to) {
     case 'paused':
-      return { action: `Paused ${label}`, detail: 'It will not run again until you resume it. Nothing was sold.' };
+      return {
+        action: `Paused ${label}`,
+        detail:
+          'It will not run again until you resume it. Nothing was sold, and your permission is ' +
+          'still live — this stops one strategy, not the bot.',
+      };
     case 'live':
       return {
         action: `${from === 'paused' ? 'Resumed' : 'Started'} ${label}`,
-        detail: 'It runs on its schedule again, inside your daily cap.',
+        detail: scheduleMoved
+          ? 'It runs on its schedule again, inside your daily cap. Its next run was overdue, so it moves to the next one rather than buying now.'
+          : 'It runs on its schedule again, inside your daily cap.',
       };
     case 'watch':
-      return { action: `Watching ${label}`, detail: 'It records what it would do and moves nothing.' };
+      return {
+        action: `${from === 'paused' ? 'Resumed watching' : 'Watching'} ${label}`,
+        detail: 'It records what it would do and moves nothing.',
+      };
     case 'draft':
       return { action: `Moved ${label} back to draft`, detail: 'It will not run until you start it.' };
     case 'ended':
@@ -400,22 +431,52 @@ async function moveStrategy(c: Context, to: StrategyState): Promise<Response | S
     if (refusal) return c.json(refusal, 400);
   }
 
+  /*
+   * A resume never causes an immediate spend.
+   *
+   * `next_run_at` stays where it was while a strategy is paused, so a daily buy paused on Monday and
+   * resumed on Friday is four days overdue — the next tick selects it, `periodKey` buckets it under
+   * Friday rather than the Monday it was due, and a real buy settles seconds after a tap that said
+   * "resume". A due time already past moves to the next slot from now; one still ahead is left
+   * exactly where the user set it. "Run now" is next to Resume for anyone who meant it at once.
+   */
+  const resuming = current.state === 'paused' && to !== 'ended';
+  const before = current.next_run_at ? new Date(current.next_run_at) : null;
+  const after = resuming ? nextRunOnResume(before, current.cadence, new Date()) : before;
+  const scheduleMoved = resuming && resumeMovedSchedule(before, after);
+
+  /*
+   * `paused_from` is written on the way in and cleared on the way out (migration 031).
+   *
+   * Without it every resume meant `live`, and a strategy in `watch` — whose entire purpose is to
+   * record what it WOULD do and move nothing — came back from a pause able to spend.
+   */
   const row = await one<StrategyRow>(
     `UPDATE strategies
         SET state = $3::text,
-            next_run_at = CASE WHEN $3::text = 'ended' THEN NULL ELSE next_run_at END
+            paused_from = CASE WHEN $3::text = 'paused' THEN $5::text ELSE NULL END,
+            next_run_at = CASE WHEN $3::text = 'ended' THEN NULL ELSE $4::timestamptz END
       WHERE id = $1 AND wallet_id = $2
       RETURNING *`,
-    [id, w.id, to],
+    [id, w.id, to, after, current.state],
   );
   if (!row) return c.json({ error: 'not_found' }, 404);
 
   await append({
     walletId: w.id,
     agent: 'xorr',
-    ...describeMove(current.state, to, row.label),
+    ...describeMove(current.state, to, row.label, scheduleMoved),
     kind: 'risk',
-    payload: { strategyId: row.id, from: current.state, state: to },
+    payload: {
+      strategyId: row.id,
+      from: current.state,
+      state: to,
+      /*
+       * Said on the trail, because it is a change to when someone's money moves. A silent one
+       * reads as a bug the first time it surprises them.
+       */
+      ...(scheduleMoved ? { nextRunMovedTo: after?.toISOString() } : {}),
+    },
   });
   return row;
 }
@@ -449,7 +510,6 @@ strategyRoutes.delete('/strategies/:id', async (c) => {
 /** The same moves by name — what the app's Strategy screen calls. */
 for (const [path, to] of [
   ['pause', 'paused'],
-  ['resume', 'live'],
   ['end', 'ended'],
 ] as const) {
   strategyRoutes.post(`/strategies/:id/${path}`, async (c) => {
@@ -457,6 +517,29 @@ for (const [path, to] of [
     return moved instanceof Response ? moved : c.json(toApi(moved));
   });
 }
+
+/**
+ * Resume, to whichever state the pause was taken out of.
+ *
+ * This route used to be generated beside `pause` and `end` with a fixed destination of `live`, so a
+ * strategy in `watch` — the state whose entire purpose is to record what it WOULD do and move
+ * nothing — came back from a pause able to spend. The row remembers (`paused_from`, migration 031)
+ * and the destination is read from it rather than assumed.
+ *
+ * The client deliberately does not choose: a resume is "undo the pause", and letting a caller name
+ * the state would put the question back where the bug was.
+ */
+strategyRoutes.post('/strategies/:id/resume', async (c) => {
+  const w = await requireWallet(c);
+  const current = await one<StrategyRow>(
+    `SELECT * FROM strategies WHERE id = $1 AND wallet_id = $2 AND chain = ${THIS_CHAIN}`,
+    [c.req.param('id'), w.id],
+  );
+  if (!current) return c.json({ error: 'not_found' }, 404);
+
+  const moved = await moveStrategy(c, stateOnResume(current.paused_from));
+  return moved instanceof Response ? moved : c.json(toApi(moved));
+});
 
 /**
  * A market order the user placed themselves — screen 14's "Buy ${amount} of {symbol}".

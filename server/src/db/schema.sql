@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS strategies (
   cadence               TEXT,
   next_run_at           TIMESTAMPTZ,
   daily_allocation_usd  NUMERIC(14,2) NOT NULL DEFAULT 0,
+  -- Which state a pause was taken out of, so a resume puts it back there rather than always into
+  -- `live`. Migration 031, and `executor/resume.ts` says why null means live.
+  paused_from           TEXT,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS strategies_due_idx ON strategies(state, next_run_at);

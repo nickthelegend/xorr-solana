@@ -34,6 +34,7 @@ vi.mock('../venues/stocks.js', async (importOriginal) => ({
 }));
 
 const { one, query } = await import('../db/index.js');
+const { append } = await import('../audit/log.js');
 const { currentWallet, requireWallet } = await import('./wallet-context.js');
 const { readPolicy } = await import('../evm/delegation.js');
 const { strategyRoutes } = await import('./strategies.js');
@@ -157,5 +158,170 @@ describe('GET /runs', () => {
       expect((await call(path)).status, path).toBe(200);
       expect(vi.mocked(query).mock.calls[0]![1], path).toEqual(['wallet-1', limit]);
     }
+  });
+});
+
+/**
+ * Pausing one strategy is not the kill switch.
+ *
+ * The kill switch revokes the delegation on chain and stops everything. This stops one row from
+ * being selected by the scheduler, which reads only `live` and `watch`; the permission is untouched
+ * and every other strategy goes on running. Two behaviours below used to make a pause quietly cost
+ * money on the way back out.
+ */
+describe('POST /strategies/:id/pause and /resume', () => {
+  /** Answers `one` with `current` for the SELECT and with the UPDATE's own parameters for the write. */
+  function onRow(current: Record<string, unknown>) {
+    vi.mocked(requireWallet).mockResolvedValue(WALLET as never);
+    vi.mocked(one).mockImplementation((async (text: string, params: unknown[] = []) => {
+      if (/UPDATE strategies/.test(text)) {
+        return row({ ...current, state: params[2], paused_from: params[4], next_run_at: params[3] });
+      }
+      return row(current);
+    }) as never);
+  }
+
+  const updateFor = () =>
+    vi.mocked(one).mock.calls.find(([text]) => /UPDATE strategies/.test(String(text)))!;
+
+  it('records which state the pause was taken out of', async () => {
+    onRow({ state: 'watch', next_run_at: new Date('2126-01-01T09:00:00Z') });
+
+    const r = await call('/strategies/s-1/pause', {});
+
+    expect(r.status).toBe(200);
+    // Written on the way in so the resume has something to read on the way out.
+    expect(updateFor()[1]![4]).toBe('watch');
+    expect(r.body).toMatchObject({ state: 'paused' });
+  });
+
+  it('resumes a watching strategy to watching, not to live', async () => {
+    /*
+     * `watch` exists to record what a strategy WOULD do and move nothing. Resuming it into `live`
+     * handed it the ability to spend — nobody asked for that, and the row reads identically in the
+     * list either way.
+     */
+    onRow({ state: 'paused', paused_from: 'watch', next_run_at: new Date('2126-01-01T09:00:00Z') });
+
+    const r = await call('/strategies/s-1/resume', {});
+
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ state: 'watch' });
+  });
+
+  it('resumes a live one to live', async () => {
+    onRow({ state: 'paused', paused_from: 'live', next_run_at: new Date('2126-01-01T09:00:00Z') });
+    expect((await call('/strategies/s-1/resume', {})).body).toMatchObject({ state: 'live' });
+  });
+
+  it('resumes a row paused before the column existed to live', async () => {
+    // Quietly demoting someone's live strategy to watch would be its own surprise.
+    onRow({ state: 'paused', paused_from: null, next_run_at: new Date('2126-01-01T09:00:00Z') });
+    expect((await call('/strategies/s-1/resume', {})).body).toMatchObject({ state: 'live' });
+  });
+
+  it('clears the record on the way out', async () => {
+    onRow({ state: 'paused', paused_from: 'watch', next_run_at: new Date('2126-01-01T09:00:00Z') });
+    await call('/strategies/s-1/resume', {});
+    // The CASE in the UPDATE nulls it for any destination that is not `paused`.
+    expect(String(updateFor()[0])).toMatch(/paused_from = CASE WHEN .* THEN .* ELSE NULL END/s);
+  });
+
+  it('does not let a resume spend immediately when the schedule is overdue', async () => {
+    /*
+     * `next_run_at` stays put while a strategy is paused, so a daily buy paused on Monday and
+     * resumed on Friday is four days overdue: the next tick selects it, `periodKey` buckets it
+     * under Friday rather than the Monday it was due, and a real buy settles seconds after a tap
+     * that said "resume".
+     */
+    onRow({
+      state: 'paused',
+      paused_from: 'live',
+      cadence: 'daily',
+      next_run_at: new Date('2020-01-01T09:00:00Z'),
+    });
+
+    await call('/strategies/s-1/resume', {});
+
+    const written = updateFor()[1]![3] as Date;
+    expect(written.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('leaves a due time the user set, when it is still ahead', async () => {
+    const ahead = new Date('2126-01-01T09:00:00Z');
+    onRow({ state: 'paused', paused_from: 'live', cadence: 'daily', next_run_at: ahead });
+
+    await call('/strategies/s-1/resume', {});
+
+    expect((updateFor()[1]![3] as Date).getTime()).toBe(ahead.getTime());
+  });
+
+  it('says on the trail that a pause is not the kill switch', async () => {
+    onRow({ state: 'live', next_run_at: new Date('2126-01-01T09:00:00Z') });
+
+    await call('/strategies/s-1/pause', {});
+
+    const entry = vi.mocked(append).mock.calls.at(-1)![0] as { action: string; detail: string };
+    expect(entry.action).toMatch(/^Paused /);
+    // Someone reading this later must not be left thinking they had already pulled the kill switch.
+    expect(entry.detail).toMatch(/permission is still live/i);
+    expect(entry.detail).toMatch(/one strategy, not the bot/i);
+  });
+
+  it('says on the trail when a resume moved the schedule', async () => {
+    onRow({
+      state: 'paused',
+      paused_from: 'live',
+      cadence: 'daily',
+      next_run_at: new Date('2020-01-01T09:00:00Z'),
+    });
+
+    await call('/strategies/s-1/resume', {});
+
+    // A silent change to when someone's money moves reads as a bug the first time it surprises them.
+    const entry = vi.mocked(append).mock.calls.at(-1)![0] as {
+      detail: string;
+      payload: Record<string, unknown>;
+    };
+    expect(entry.detail).toMatch(/moves to the next one rather than buying now/i);
+    expect(entry.payload.nextRunMovedTo).toEqual(expect.any(String));
+  });
+
+  it('says nothing about the schedule when it did not move', async () => {
+    onRow({
+      state: 'paused',
+      paused_from: 'live',
+      cadence: 'daily',
+      next_run_at: new Date('2126-01-01T09:00:00Z'),
+    });
+
+    await call('/strategies/s-1/resume', {});
+
+    const entry = vi.mocked(append).mock.calls.at(-1)![0] as {
+      detail: string;
+      payload: Record<string, unknown>;
+    };
+    expect(entry.detail).not.toMatch(/overdue/i);
+    expect(entry.payload).not.toHaveProperty('nextRunMovedTo');
+  });
+
+  it('answers another account’s strategy id exactly like a missing one', async () => {
+    vi.mocked(requireWallet).mockResolvedValue(WALLET as never);
+    vi.mocked(one).mockResolvedValue(undefined as never);
+
+    // A permission error would confirm the row exists.
+    expect(await call('/strategies/someone-elses/resume', {})).toMatchObject({
+      status: 404,
+      body: { error: 'not_found' },
+    });
+  });
+
+  it('is backed by a migration that adds the column and backfills nothing', () => {
+    const sql = readFileSync(new URL('../db/migrations/031-strategy-paused-from.sql', import.meta.url), 'utf8')
+      .split('\n')
+      .filter((line) => !line.startsWith('--') && line.trim())
+      .join(' ');
+    // Rows paused by firing an agent were all live, so the honest backfill is exactly the default.
+    expect(sql).toBe('ALTER TABLE strategies ADD COLUMN IF NOT EXISTS paused_from TEXT;');
   });
 });

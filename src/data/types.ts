@@ -324,6 +324,13 @@ export type Strategy = {
   createdAt: number;
   /** The agent that runs it, when one does (`POST /strategies` takes it; `GET /strategies` says it). */
   agentId?: string;
+  /**
+   * Which state a resume will put this back to. Present only while it is paused.
+   *
+   * A strategy paused out of `watch` resumes into `watch`; one paused out of `live` resumes live.
+   * The two are different things to tap, and the list had no way to tell them apart.
+   */
+  pausedFrom?: string;
 };
 
 /** A 90x30 sparkline row on screen 5. G5 lifted these out of the prototype. */
