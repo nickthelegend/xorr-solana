@@ -6,9 +6,7 @@
  * remembered nothing, which is a worse failure than an error would have been.
  */
 import { randomUUID } from 'node:crypto';
-import { canonicalSymbol } from '../venues/oneinch.js';
-import { isStock } from '../venues/stocks.js';
-import { COINGECKO_IDS } from '../market/ids.js';
+import { priceable } from '../market/feeds.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { one, query } from '../db/index.js';
@@ -110,13 +108,14 @@ export function unevaluableReason(body: z.infer<typeof NewAlert>): string | unde
      * alert sitting in the user's list that cannot fire, discoverable only by waiting for the
      * thing it was supposed to warn about.
      *
-     * The rule mirrors `priceOf`, which is what the evaluator calls: an equity is priced by the
-     * venue that would fill it, and everything else needs an entry in the feed table. Resolved
-     * through `canonicalSymbol` rather than uppercased — rule 3 in `oneinch.ts`, which three
-     * separate production bugs came from breaking.
+     * Asked of `market/feeds.ts`, which is the SAME definition `priceOf` dispatches on, rather
+     * than a second list here. This check used to keep its own copy — `isStock || COINGECKO_IDS` —
+     * and the copy went stale in the direction nobody guards against: the executor grew a Solana
+     * price for xStocks, this route never heard, and `POST /alerts` refused a price alert on NVDAx
+     * saying nothing could price it while `venues/xstocks.ts` was pricing it all day. A refusal
+     * that is wrong is worse than the bug it was written to prevent.
      */
-    const symbol = canonicalSymbol(body.symbol);
-    if (!isStock(symbol) && !COINGECKO_IDS[symbol]) {
+    if (!priceable(body.symbol)) {
       return `nothing prices ${body.symbol}, so this alert could never fire`;
     }
     if (!Number.isFinite(n('above')) && !Number.isFinite(n('below'))) {

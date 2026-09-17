@@ -6,6 +6,7 @@ import { getJson, staleValue } from '../http/get.js';
 import { StillFetching, beforeDeadline } from '../http/deadline.js';
 import { COINGECKO_IDS, COINGECKO_PRICE_URL, type CoingeckoPrices } from './ids.js';
 import { isStock, stockPriceUsd } from '../venues/stocks.js';
+import { feedFor } from './feeds.js';
 
 const IDS = COINGECKO_IDS;
 
@@ -49,7 +50,26 @@ export async function priceOf(symbol: string, deadlineMs?: number): Promise<numb
    * Held to the caller's deadline too. The deadline raced only the CoinGecko fetch below, so an equity waited out the
    * 1inch lane whatever its caller had said — which is why `/wallet/tokens` wraps every price in a race of its own.
    */
-  if (isStock(symbol)) {
+  const feed = feedFor(symbol);
+
+  /*
+   * A tokenized equity on Solana, priced by the Jupiter route that would fill it.
+   *
+   * The same read `executor/place.ts` marks a fill against, so an alert on NVDAx watches the number
+   * a buy of it would actually pay rather than a second opinion about the same asset. `xStockPriceUsd`
+   * answers null when nothing will route — never a zero — and a missing price is an error here,
+   * because every caller of `priceOf` is about to size, cap-check or compare against it.
+   */
+  if (feed === 'xstock') {
+    // Imported here rather than at the top: the Solana venue pulls in a web3 connection, and the
+    // EVM callers of this module must not pay for it to ask CoinGecko what ETH costs.
+    const { xStockPriceUsd } = await import('../venues/xstocks.js');
+    const px = await beforeDeadline(xStockPriceUsd(symbol), deadlineMs, late);
+    if (px && px > 0) return px;
+    throw new Error(`No route for ${symbol} right now, so it has no price to trade against.`);
+  }
+
+  if (feed === 'equity') {
     const px = await beforeDeadline(stockPriceUsd(symbol), deadlineMs, late);
     if (px && px > 0) return px;
     throw new Error(`No route for ${symbol} right now, so it has no price to trade against.`);

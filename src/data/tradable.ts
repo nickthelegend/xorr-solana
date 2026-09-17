@@ -130,11 +130,30 @@ export async function priceableSymbols(): Promise<Set<string> | undefined> {
   priceableInFlight ??= (async () => {
     try {
       const { api } = await import('./api');
-      const [crypto, stocks] = await Promise.all([
+      /*
+       * Three registries, because the executor has three (`server/src/market/feeds.ts`): the crypto
+       * feed table, the EVM equities, and the xStocks priced by the Jupiter route that would fill
+       * them. The third was missing, so the field refused an alert on NVDAx — "nothing prices it" —
+       * while the executor was pricing it all day.
+       */
+      const [crypto, stocks, xstocks] = await Promise.all([
         api.get<string[]>('/market/symbols'),
         api.get<{ symbol: string }[]>('/market/stocks'),
+        api.get<{ rows: { symbol: string }[] }>('/market/xstocks'),
       ]);
-      priceable = new Set([...crypto, ...stocks.map((s) => s.symbol)]);
+      /*
+       * Every catalogued mint, including the ones with no price at this moment.
+       *
+       * "Nothing can ever price this" and "nothing will route it right now" are different facts and
+       * only the first is a reason to refuse an alert. A mint whose route is quiet has a feed; the
+       * alert sits armed and fires when the route comes back, which is what someone setting one
+       * during a quiet hour actually wants.
+       */
+      priceable = new Set([
+        ...crypto,
+        ...stocks.map((s) => s.symbol),
+        ...xstocks.rows.map((r) => r.symbol),
+      ]);
       return priceable;
     } catch {
       priceableInFlight = undefined;
