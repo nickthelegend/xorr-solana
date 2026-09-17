@@ -16,6 +16,7 @@ import { useGoBack } from '@/nav/useGoBack';
 import {
   Button,
   CloseButton,
+  FailureNote,
   Fill,
   Keypad,
   Pill,
@@ -42,12 +43,23 @@ import { useDebounced } from '@/data/useDebounced';
 import { useStore } from '@/state/store';
 import { DEFAULT_BUY } from '@/data/tradable';
 import { useSettleable } from '@/data/useSettleable';
-import { errorText } from '@/data/apiError';
+import { ApiError } from '@/data/apiError';
 import type { SwapQuoteResult } from '@/data/useSwapQuote';
 import { waitOutWarming } from '@/data/warming';
 import { sellMax, ticketLimit } from '@/markets/ticket';
 
 type Side = 'buy' | 'sell';
+
+/**
+ * A refusal the executor ANSWERED with, as the error it is.
+ *
+ * `/orders` and `/positions/close` answer a blocked attempt 409 with a body — `{ status, reason, detail }` —
+ * which `repos` hands back as a value rather than throwing. Wrapping it in the same `ApiError` a thrown
+ * refusal arrives as means one component reads both, and `failures.ts` finds the code either way.
+ */
+function refusalOf(res: { status?: string; reason?: string; error?: string; detail?: string }, fallback: string) {
+  return new ApiError(409, fallback, { error: res.reason ?? res.error, detail: res.detail ?? fallback });
+}
 
 const SIDES = [
   { value: 'buy', label: 'Buy' },
@@ -184,7 +196,16 @@ export default function OrderTicket() {
   const { quote, error: priceError } = usePrice(symbol);
 
   const [placing, setPlacing] = useState(false);
-  const [refusal, setRefusal] = useState<string>();
+  /*
+   * What the attempt came back with, kept as it came.
+   *
+   * This used to be `errorText(e)` — a string, assigned at the catch — which threw away everything except the
+   * sentence: whether repeating it could answer differently, whether a transaction may have gone out, and
+   * which screen fixes it. `FailureNote` reads all three off the error itself (`failures.ts`), so it is the
+   * error that is kept. A refusal the executor answered with rather than threw is wrapped as one, so both
+   * arrive here in the same shape.
+   */
+  const [refusal, setRefusal] = useState<unknown>();
   const [filled, setFilled] = useState<{ units: number; price: number }>();
   /*
    * The order's Idempotency-Key (FEATURES.md #29). An order that timed out may have filled; the same order tapped again
@@ -214,7 +235,7 @@ export default function OrderTicket() {
           setFilled({ units: res.units ?? 0, price: (res.usd ?? 0) / (res.units || 1) });
           setTimeout(() => goBack(), 1200);
         } else {
-          setRefusal(res.detail ?? res.error ?? `The sale came back "${res.status}".`);
+          setRefusal(refusalOf(res, `The sale came back "${res.status}".`));
         }
         return;
       }
@@ -228,11 +249,12 @@ export default function OrderTicket() {
         // instant you tap it leaves you unsure whether anything happened.
         setTimeout(() => goBack(), 1200);
       } else {
-        // The policy engine's own sentence — "the daily cap is spent", not "409".
-        setRefusal(res.detail ?? res.reason ?? res.error ?? `The order came back "${res.status}".`);
+        // The policy engine's own sentence — "the daily cap is spent", not "409" — and its code with it, so
+        // the note below can offer the screen that fixes it.
+        setRefusal(refusalOf(res, `The order came back "${res.status}".`));
       }
     } catch (e) {
-      setRefusal(errorText(e));
+      setRefusal(e);
     } finally {
       setPlacing(false);
     }
@@ -376,15 +398,8 @@ export default function OrderTicket() {
           </Text>
         </View>
       )}
-      {refusal ? (
-        <Text
-          variant="footnote"
-          color={colors.down}
-          align="center"
-          style={{ marginTop: space.s10 }}
-        >
-          {refusal}
-        </Text>
+      {refusal !== undefined ? (
+        <FailureNote error={refusal} light style={{ marginTop: space.s10 }} />
       ) : null}
       {/*
         Why the order cannot go, on the ticket: nothing held, more than is held, more than the cash, and now

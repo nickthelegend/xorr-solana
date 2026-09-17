@@ -17,6 +17,7 @@ import {
   Button,
   CloseButton,
   Eyebrow,
+  FailureNote,
   Fill,
   Keypad,
   Price,
@@ -38,7 +39,6 @@ import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { nextRuns } from '@/strategies/schedule';
 import type { Cadence } from '@/data/types';
-import { errorText } from '@/data/apiError';
 
 const CADENCES = [
   { value: 'daily', label: 'Daily' },
@@ -65,7 +65,7 @@ export default function YieldSetup() {
   const [cadence, setCadence] = useState<Cadence>('daily');
   const [keepCashUsd, setKeepCashUsd] = useState<number>(100);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<unknown>();
 
   const rate = useAsync(() => repos.yield.staking(), []);
   const balance = useAsync(() => repos.portfolio.balance(), []);
@@ -128,7 +128,8 @@ export default function YieldSetup() {
       });
       goBack();
     } catch (e) {
-      setError(errorText(e));
+      // Kept as the error it is: `FailureNote` reads the retry, the wait and the fix off it.
+      setError(e);
     } finally {
       setBusy(false);
     }
@@ -282,10 +283,8 @@ export default function YieldSetup() {
         >
           {bad.reason}
         </Text>
-      ) : error ? (
-        <Text variant="secondarySm" color={colors.candleDown} style={{ marginBottom: space.s12 }}>
-          {error}
-        </Text>
+      ) : error !== undefined ? (
+        <FailureNote error={error} light style={{ marginBottom: space.s12 }} />
       ) : null}
 
       {/*

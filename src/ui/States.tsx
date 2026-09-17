@@ -21,12 +21,13 @@ import { View, type DimensionValue, type StyleProp, type ViewStyle } from 'react
 import { useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 /*
- * The one import this layer takes from outside itself. `apiError.ts` is pure by construction —
- * its own docblock exists because it was split out of `api.ts` to stay free of any runtime — so
- * this is a couple of string functions, not the data layer's fetching machinery. The alternative
- * was resolving the text at all 51 call sites.
+ * The two imports this layer takes from outside itself. Both are pure by construction — `apiError.ts` has
+ * its own docblock about being split out of `api.ts` to stay free of any runtime, and `failures.ts` is a
+ * lookup table over what that module produces — so this is string functions, not the data layer's fetching
+ * machinery. The alternative was resolving the text and the retry at all 51 call sites.
  */
-import { NotSignedIn, errorRef, errorText, isRetryable } from '@/data/apiError';
+import { NotSignedIn } from '@/data/apiError';
+import { classify, waitSentence } from '@/data/failures';
 import { Button } from './Button';
 import { emptyList, type EmptyListKey } from './emptyActions';
 import { Press } from './Press';
@@ -142,8 +143,21 @@ export function LoadingRows({
 }
 
 /**
- * A failure the user can act on. The message is the real one off the error — a generic
- * "something went wrong" hides which of the executor, the price feed or the chain is down.
+ * A failure the user can act on.
+ *
+ * The message is the real one off the error — a generic "something went wrong" hides which of the executor,
+ * the price feed or the chain is down — and what is offered beside it comes from `classify` (`failures.ts`)
+ * rather than from the status code alone.
+ *
+ * Three things that table decides which this could not:
+ *
+ *   - **Whether a retry is honest.** `isRetryable` read the status, so every 409 was permanent and every 503
+ *     was worth repeating. The executor's `warming` is a 503 that answers in seconds and its
+ *     `request_in_flight` is a 409 that must NOT be repeated, and neither is visible from a number.
+ *   - **When.** A 429 and a warming 503 both carry `retry-after`. A retry offered without it is offered for
+ *     right now, which against a limiter turns one refusal into six.
+ *   - **Where the fix is.** A missing permission is fixed on Safety and a spent cap on Limits. A sentence
+ *     naming a problem with no route to its fix is half an error.
  */
 export function ErrorState({
   error,
@@ -154,23 +168,37 @@ export function ErrorState({
   onRetry?: () => void;
   testID?: string;
 }) {
+  const router = useRouter();
   // Signed out is not a failure — nothing was asked — so it gets a way in, not a retry. See SignIn.tsx.
   if (error instanceof NotSignedIn) return <SignInPrompt testID={testID} />;
-  const ref = errorRef(error);
+  const failure = classify(error);
   return (
-    <View testID={testID} style={{ paddingVertical: space.s30, gap: space.s14, alignItems: 'center' }}>
+    <View
+      testID={testID}
+      style={{ paddingVertical: space.s30, gap: space.s14, alignItems: 'center' }}
+      accessibilityLiveRegion="polite"
+    >
       <Text variant="rowPrimary">That did not load.</Text>
       <Text variant="secondary" align="center">
-        {errorText(error)}
+        {failure.message}
       </Text>
+      {/*
+        How long the executor asked for, where it said. "Try again" under a limiter that has just asked for
+        forty seconds is an invitation to spend the next forty seconds being refused.
+      */}
+      {failure.retryAfterSec !== undefined && failure.retryAfterSec > 0 ? (
+        <Text variant="footnote" color={colors.ink55} align="center">
+          {waitSentence(failure.retryAfterSec)}
+        </Text>
+      ) : null}
       {/*
         The request's reference, under a server fault or a timeout (FEATURES.md #90): the first eight characters the
         executor's own log lines for it begin with. Quiet, and selectable, because its only job is to be copied into a
         report.
       */}
-      {ref ? (
+      {failure.ref ? (
         <Text variant="footnote" color={colors.ink55} selectable>
-          {`Ref ${ref}`}
+          {`Ref ${failure.ref}`}
         </Text>
       ) : null}
       {/*
@@ -184,8 +212,19 @@ export function ErrorState({
         dies with it and the second half of a double-tap fires a second request. Measured on the
         deployed app — two `/limits` calls 11ms apart against one for a single click.
       */}
-      {onRetry && isRetryable(error) ? (
+      {onRetry && failure.retryable ? (
         <Button label="Try again" variant="ghost" onPress={onRetry} testID="error-retry" />
+      ) : null}
+      {/* And the screen that fixes it, where the failure has one. A refusal with a route out is not a dead end. */}
+      {failure.fix ? (
+        <Press
+          onPress={() => router.push(failure.fix!.href)}
+          accessibilityRole="button"
+          accessibilityLabel={failure.fix.label}
+          hitHeight={size.hit}
+        >
+          <Text variant="control">{failure.fix.label} ›</Text>
+        </Press>
       ) : null}
     </View>
   );
@@ -262,5 +301,78 @@ export function EmptyList({
       onAction={() => router.push(copy.href)}
       testID={testID}
     />
+  );
+}
+
+/**
+ * A failure from something the user DID, said where they did it.
+ *
+ * `ErrorState` is for a read that did not land: it replaces the content, because there is none. This is for a
+ * write that was refused — an order, a strategy, a grant — where the screen is still full of the thing that
+ * was being attempted and the failure belongs beside the button, not over the top of it.
+ *
+ * Every screen with a write was rendering `errorText(e)` into a red footnote, which is the sentence and
+ * nothing else: no way to tell a refusal that will stand from one worth repeating, and no route to the fix
+ * even where the failure names one. A daily cap spent, said over a green Buy button, with no way to Limits.
+ */
+export function FailureNote({
+  error,
+  onRetry,
+  light = false,
+  style,
+  testID,
+}: {
+  error: unknown;
+  /** Offered only where the failure says repeating it could answer differently. */
+  onRetry?: () => void;
+  /** On a white sheet — the order ticket and the strategy setups. */
+  light?: boolean;
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+}) {
+  const router = useRouter();
+  const failure = classify(error);
+  const tone = light ? colors.candleDown : colors.down;
+  const quiet = light ? colors.sheet.muted : colors.ink55;
+  return (
+    <View
+      testID={testID}
+      style={[{ gap: space.s6, alignItems: 'center' }, style]}
+      // Announced when it appears: the refusal is the answer to the button that was just pressed.
+      accessibilityLiveRegion="polite"
+    >
+      <Text variant="footnote" color={tone} align="center">
+        {failure.message}
+      </Text>
+      {failure.retryAfterSec !== undefined && failure.retryAfterSec > 0 ? (
+        <Text variant="footnote" color={quiet} align="center">
+          {waitSentence(failure.retryAfterSec)}
+        </Text>
+      ) : null}
+      {failure.ref ? (
+        <Text variant="footnote" color={quiet} selectable>
+          {`Ref ${failure.ref}`}
+        </Text>
+      ) : null}
+      {failure.fix ? (
+        <Press
+          onPress={() => router.push(failure.fix!.href)}
+          accessibilityRole="button"
+          accessibilityLabel={failure.fix.label}
+          hitHeight={size.hit}
+        >
+          <Text variant="control" color={light ? colors.sheet.ink : undefined}>
+            {failure.fix.label} ›
+          </Text>
+        </Press>
+      ) : null}
+      {onRetry && failure.retryable ? (
+        <Press onPress={onRetry} accessibilityRole="button" accessibilityLabel="Try again" hitHeight={size.hit}>
+          <Text variant="control" color={light ? colors.sheet.ink : undefined}>
+            Try again ›
+          </Text>
+        </Press>
+      ) : null}
+    </View>
   );
 }

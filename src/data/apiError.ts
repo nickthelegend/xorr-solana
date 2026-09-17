@@ -20,10 +20,69 @@ export class ApiError extends Error {
     readonly body?: unknown,
     /** The id the request carried as `x-request-id`, which the executor's log lines for it begin with. */
     readonly requestId?: string,
+    /**
+     * `retry-after`, in seconds, where the answer carried one.
+     *
+     * The executor sends it on both of the refusals that mean "not now": the rate limiter's 429 and a 503 from
+     * something still warming. Without it a screen offering a retry is guessing at when, and the guess is
+     * always "immediately" — which against a limiter is how a user turns one refusal into six.
+     */
+    readonly retryAfterSec?: number,
+    /**
+     * `idempotent-replay`, set by `server/src/http/idempotency.ts` when this answer is a STORED one: the same
+     * key was sent before, and this is what that first attempt did rather than a second thing happening.
+     */
+    readonly replayed?: boolean,
   ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/**
+ * The mark a replayed answer carries.
+ *
+ * `idempotent-replay: true` on a 200 means the executor had already run this key and is handing back what that
+ * first attempt did — so the order filled once, a while ago, and this tap placed nothing. A screen that cannot
+ * tell those apart shows "Bought 0.0412 WETH" twice for one fill.
+ *
+ * A symbol and non-enumerable, so it travels on the parsed body without appearing in it: these bodies are
+ * compared, spread and serialised all over the app, and a stray `replayed: true` key would show up in every
+ * one of those places.
+ */
+export const REPLAYED = Symbol.for('xorr.idempotentReplay');
+
+/** Was this answer the executor repeating what an earlier attempt with the same key did? */
+export function wasReplayed(value: unknown): boolean {
+  return (
+    (value !== null && typeof value === 'object' && (value as Record<symbol, unknown>)[REPLAYED] === true) ||
+    (value instanceof ApiError && value.replayed === true)
+  );
+}
+
+/** `retry-after` as seconds. The header is seconds or an HTTP date; both are real, and neither is a number here. */
+export function retryAfterSeconds(header: string | null, now: number = Date.now()): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds);
+  const at = Date.parse(header);
+  if (Number.isNaN(at)) return undefined;
+  // A date already past is not a wait. Zero, so a caller says "now" rather than a negative number of seconds.
+  return Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+/**
+ * The prose fields only: the sentence someone wrote, never an identifier.
+ *
+ * Split out of `apiReason` for `failures.ts`, which has a sentence of its own for every code it knows. There,
+ * preferring `no_delegation` over "No trading permission is granted, so nothing can be placed." is exactly
+ * backwards — the identifier is the last resort precisely because nobody had written the sentence yet, and
+ * for those codes somebody now has.
+ */
+export function apiProse(e: unknown): string | undefined {
+  if (!(e instanceof ApiError)) return undefined;
+  const body = e.body as { message?: unknown; detail?: unknown } | undefined;
+  return [body?.message, body?.detail].find((v): v is string => typeof v === 'string' && v.trim().length > 0)?.trim();
 }
 
 /**
@@ -57,9 +116,7 @@ export function apiReason(e: unknown): string | undefined {
    * screen that still needs a sentence written for it, and that should stay visible rather than be
    * hidden behind a generic fallback.
    */
-  const prose = [body?.message, body?.detail].find(
-    (v): v is string => typeof v === 'string' && v.trim().length > 0,
-  );
+  const prose = apiProse(e);
   const reason = prose ?? body?.error ?? body?.reason;
   if (typeof reason !== 'string' || !reason.trim()) return undefined;
   // `no_route` and `insufficient_liquidity` are identifiers, not prose. Left alone deliberately:

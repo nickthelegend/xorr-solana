@@ -15,6 +15,7 @@ import {
   Button,
   CloseButton,
   Eyebrow,
+  FailureNote,
   Fill,
   Keypad,
   Price,
@@ -34,7 +35,6 @@ import { repos } from '@/data';
 import { nextRuns } from '@/strategies/schedule';
 import { RECURRING_BUY_SYMBOLS, type RecurringBuySymbol } from '@/strategies/ladder';
 import type { Cadence } from '@/data/types';
-import { errorText } from '@/data/apiError';
 import { AMOUNT_DECIMALS, checkAmount } from '@/markets/amount';
 
 const CADENCES = [
@@ -67,7 +67,7 @@ export default function DcaSetup() {
   const [cadence, setCadence] = useState<Cadence>('weekly');
   const [symbol, setSymbol] = useState<Symbol>('WETH');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<unknown>();
   const signedOut = useSignedOut();
 
   const usd = parseFloat(amount || '0') || 0;
@@ -102,7 +102,8 @@ export default function DcaSetup() {
       });
       goBack();
     } catch (e) {
-      setError(errorText(e));
+      // Kept as the error it is: `FailureNote` reads the retry, the wait and the fix off it.
+      setError(e);
     } finally {
       setBusy(false);
     }
@@ -222,10 +223,8 @@ export default function DcaSetup() {
         >
           {bad.reason}
         </Text>
-      ) : error ? (
-        <Text variant="secondarySm" color={colors.candleDown} style={{ marginBottom: space.s12 }}>
-          {error}
-        </Text>
+      ) : error !== undefined ? (
+        <FailureNote error={error} light style={{ marginBottom: space.s12 }} />
       ) : null}
 
       {signedOut ? (

@@ -90,7 +90,7 @@ export { HoldButton, type HoldButtonProps } from './HoldButton';
 export { Eyebrow, type EyebrowProps } from './Eyebrow';
 export { BackButton, CloseButton, IconButton, HeaderBar, type IconButtonProps } from './IconButton';
 export { Progress, type ProgressProps } from './Progress';
-export { Placeholder, LoadingRows, ErrorState, EmptyState, EmptyList } from './States';
+export { Placeholder, LoadingRows, ErrorState, EmptyState, EmptyList, FailureNote } from './States';
 export { EMPTY_LISTS, emptyList, type EmptyListKey, type EmptyListCopy } from './emptyActions';
 export { SignInPrompt, SignInButton, signIn } from './SignIn';
 export { RadioCard, type RadioCardProps } from './RadioCard';

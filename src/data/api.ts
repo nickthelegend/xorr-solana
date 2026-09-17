@@ -8,7 +8,7 @@ import { accessToken } from '@/auth/token';
 import { isPublicPath } from './publicPaths';
 import { authKnowledge, whenAuthKnown } from '@/auth/authState';
 import { API_BASE } from './apiBase';
-import { ApiError, NotSignedIn, TimedOut } from './apiError';
+import { ApiError, NotSignedIn, REPLAYED, TimedOut, retryAfterSeconds } from './apiError';
 import { keyHeaders, type Keyed } from './intentKey';
 /*
  * Re-exported, not redefined.
@@ -21,7 +21,7 @@ import { keyHeaders, type Keyed } from './intentKey';
 export { NotSignedIn, TimedOut } from './apiError';
 
 export { API_BASE };
-export { ApiError, apiReason } from './apiError';
+export { ApiError, apiReason, REPLAYED, wasReplayed } from './apiError';
 
 /**
  * Every request carries the Privy access token. The executor rejects anything without one, so a
@@ -142,9 +142,26 @@ async function send<T>(path: string, signal: AbortSignal, requestId: string, ini
     } catch {
       parsed = undefined;
     }
-    throw new ApiError(res.status, `${res.status} ${res.statusText}${text ? `: ${text}` : ''}`, parsed, requestId);
+    throw new ApiError(
+      res.status,
+      `${res.status} ${res.statusText}${text ? `: ${text}` : ''}`,
+      parsed,
+      requestId,
+      // Both headers are on the CORS expose list (`server/src/index.ts`), so they are readable from the app.
+      retryAfterSeconds(res.headers.get('retry-after')),
+      res.headers.get('idempotent-replay') === 'true',
+    );
   }
-  return (await res.json()) as T;
+  /*
+   * A replayed success is still a success, and the screen has to be able to tell the two apart: the executor
+   * answered this key once already, so nothing happened a second time. Carried as a property on the parsed
+   * body rather than thrown, because nothing went wrong.
+   */
+  const body = (await res.json()) as T;
+  if (res.headers.get('idempotent-replay') === 'true' && body !== null && typeof body === 'object') {
+    Object.defineProperty(body, REPLAYED, { value: true, enumerable: false });
+  }
+  return body;
 }
 
 export const api = {
