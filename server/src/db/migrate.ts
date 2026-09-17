@@ -8,6 +8,23 @@
  *
  * Recorded in `schema_migrations`, so re-running this is free. That is what makes it safe to put
  * in a start script rather than a wiki page.
+ *
+ * ## Naming a new migration
+ *
+ *     npx tsx src/db/new-migration.ts watchlist-order
+ *     -> server/src/db/migrations/20260917T084512-watchlist-order.sql
+ *
+ * New migrations are named for the UTC second they were created, not for the next free number.
+ * A number has to be read from the directory, and with several branches open it is stale the
+ * moment it is read: two people both see 033, both write 034, both pass their own tests, and the
+ * collision exists only once the branches meet. That happened three times. A timestamp needs no
+ * knowledge of any other branch and cannot collide unless two migrations are created in the same
+ * second.
+ *
+ * The existing numbered files keep their names. Bookkeeping below is by FILENAME, so renaming an
+ * applied migration would make a migrated database run it again — and plain filename sort already
+ * orders the two schemes correctly, because `034-` sorts before `2026…`. `migration-names.ts` has
+ * the details and `migration-order.test.ts` enforces them.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -44,6 +61,9 @@ const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(
 const RENAMED: Readonly<Record<string, string>> = Object.freeze({
   // Collided with 030-agent-risk-profile.sql. Moved after it, which is the order it already ran in.
   '033-multiplier-observations.sql': '030-multiplier-observations.sql',
+  // Collided with 034-position-sleeves.sql: both branches read 033 and both wrote 034. Moved to
+  // the timestamped scheme, which is the collision this repo stopped being able to have.
+  '20260917T091529-corporate-action-notices.sql': '034-corporate-action-notices.sql',
 });
 
 for (const [current, previous] of Object.entries(RENAMED)) {
