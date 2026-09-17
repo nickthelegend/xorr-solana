@@ -33,6 +33,7 @@ import { TOKENS as VENUE_TOKENS, canonicalSymbol } from '../venues/oneinch.js';
 import { nextRuns, type Cadence } from '../executor/schedule.js';
 import { backingFor, backingSeries } from '../venues/proof-of-reserves.js';
 import { backingDetail } from '../venues/backing-detail.js';
+import { dividendYield } from '../venues/dividend-yield.js';
 import { checkEligibility } from '../solana/eligibility.js';
 import { XSTOCKS, xStockKey } from '../venues/xstocks.js';
 import { ADDRESSES, APPROVABLE_TOKENS, CHAIN_KEY, IS_BASE_MAINNET_STATE, SETTLEMENT_VENUES, explorerTx } from '../evm/chains.js';
@@ -739,6 +740,28 @@ routes.get('/positions', async (c) => {
  * it is holding. Nothing is interpolated — gaps stay gaps, and a short series means we have not
  * been watching long, not that the token was unbacked before we started.
  */
+/**
+ * What an xStock has paid, derived from the multiplier it reinvests dividends through.
+ *
+ * `unmeasured` is a first-class answer with its own reason. A window we have not watched long
+ * enough to measure is not a window in which the token paid nothing, and 0.00% would say it was.
+ */
+routes.get('/xstocks/:symbol/yield', async (c) => {
+  const symbol = c.req.param('symbol');
+  const stock = XSTOCKS[xStockKey(symbol) ?? symbol];
+  if (!stock) {
+    return c.json({ error: 'unknown_symbol', message: `${symbol} is not an xStock this executor knows.` }, 404);
+  }
+  const days = Number(c.req.query('days') ?? 365);
+  return c.json(
+    await dividendYield({
+      symbol: stock.symbol,
+      mint: stock.address,
+      sinceDays: Number.isFinite(days) && days > 0 ? Math.min(days, 3650) : 365,
+    }),
+  );
+});
+
 routes.get('/xstocks/:symbol/reserves/history', async (c) => {
   const symbol = c.req.param('symbol');
   const stock = XSTOCKS[xStockKey(symbol) ?? symbol];
