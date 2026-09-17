@@ -466,7 +466,14 @@ describe('POST /limit-orders/:hash/fill', () => {
     const run = statement('INSERT INTO strategy_runs')!;
     expect(run.text).toMatch(/'filled', \$4, \$5, \$6, \$7, 'lop', 'buy', \$8, 'crypto'/);
     expect(run.params.slice(2)).toEqual([`limit:${HASH}`, 25, 0.01, 2500, '0xfill', 0.01]);
-    expect(vi.mocked(applyFill).mock.calls[0]![1]).toEqual({ walletId: 'wallet-1', symbol: 'WETH', units: 0.01, usd: 25 });
+    expect(vi.mocked(applyFill).mock.calls[0]![1]).toEqual({
+      walletId: 'wallet-1',
+      symbol: 'WETH',
+      units: 0.01,
+      usd: 25,
+      // Attributed to the order, not to whichever strategy happened to be running.
+      attribution: { source: 'limit-order', id: null, label: 'Limit order' },
+    });
     expect(vi.mocked(recordSpend).mock.calls[0]!.slice(0, 2)).toEqual(['wallet-1', 25]);
     expect(vi.mocked(append).mock.calls[0]![0]).toMatchObject({
       walletId: 'wallet-1',

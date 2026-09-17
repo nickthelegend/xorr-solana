@@ -60,6 +60,9 @@ const { append } = await import('../audit/log.js');
 const { readPolicy, closeAsDelegate, waitForTx } = await import('../evm/delegation.js');
 const { priceOf } = await import('../market/prices.js');
 const { applyFill } = await import('../positions/index.js');
+
+/** A swap a person asked for, as `swap.ts` attributes it. */
+const SWAP = { source: 'manual', id: null, label: 'Swap' } as const;
 const { recordSale } = await import('../routes/panic.js');
 const { equitiesFunctional } = await import('../venues/stocks.js');
 const { chooseSettlement } = await import('./settle.js');
@@ -205,8 +208,9 @@ describe('paying anything else converts the holding through closePosition()', ()
     // cbBTC read before the transaction, so the delta afterwards is the fill and nothing else.
     expect(measuredDelta).toHaveBeenCalledWith({ owner: OWNER, symbol: 'CBBTC', before: 0n });
     expect(vi.mocked(applyFill).mock.calls.map((c) => c[1])).toEqual([
-      { walletId: 'wallet-1', symbol: 'WETH', units: -0.2, usd: -400 },
-      { walletId: 'wallet-1', symbol: 'CBBTC', units: 0.004, usd: 400 },
+      // Both legs attributed to the swap, so neither lands in the book as nobody's.
+      { walletId: 'wallet-1', symbol: 'WETH', units: -0.2, usd: -400, attribution: SWAP },
+      { walletId: 'wallet-1', symbol: 'CBBTC', units: 0.004, usd: 400, attribution: SWAP },
     ]);
     expect(recordSale).toHaveBeenCalledWith(
       { client: true },
@@ -252,7 +256,7 @@ describe('paying anything else converts the holding through closePosition()', ()
     expect(proceedsSince).toHaveBeenCalledWith(OWNER, 7n);
     expect(measuredDelta).not.toHaveBeenCalled();
     expect(vi.mocked(applyFill).mock.calls.map((c) => c[1])).toEqual([
-      { walletId: 'wallet-1', symbol: 'WETH', units: -0.2, usd: -499.2 },
+      { walletId: 'wallet-1', symbol: 'WETH', units: -0.2, usd: -499.2, attribution: SWAP },
     ]);
     expect(vi.mocked(recordSale).mock.calls[0]![1]).toMatchObject({ kind: 'close', proceedsUsd: 499.2, quotedUsd: 500 });
     expect(r.body).toMatchObject({ status: 'filled', to: 'USDC', received: 499.2, usd: 499.2 });

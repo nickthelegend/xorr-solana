@@ -63,7 +63,14 @@ describe('a close', () => {
 
     expect(out.status).toBe(200);
     expect(out.body).toMatchObject({ status: 'closed', symbol: 'WETH', units: 0.5, usd: 1240.5, measured: true });
-    expect(vi.mocked(applyFill).mock.calls[0]![1]).toEqual({ walletId: 'wallet-1', symbol: 'WETH', units: -0.5, usd: -1240.5 });
+    expect(vi.mocked(applyFill).mock.calls[0]![1]).toEqual({
+      walletId: 'wallet-1',
+      symbol: 'WETH',
+      units: -0.5,
+      usd: -1240.5,
+      // A close of one position, not a flatten: the two must not share a label.
+      attribution: { source: 'manual', id: null, label: 'Close' },
+    });
 
     const strategy = inserted('strategies')!;
     expect(strategy.text).toMatch(/\$3, 'ended'/);

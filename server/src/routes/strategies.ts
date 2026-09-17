@@ -25,6 +25,7 @@ import {
   type StrategyRow,
 } from '../executor/run.js';
 import { stackOn, stackSummary } from '../executor/stack.js';
+import { sleevesFor } from '../positions/sleeves.js';
 import {
   SETTLEMENT_SYMBOL,
   TOKENS as VENUE_TOKENS,
@@ -259,6 +260,24 @@ async function commitmentRefusal(
  * folding its zero into the total would read as having been considered and found free rather than
  * as not applying.
  */
+/**
+ * Who opened which part of a holding.
+ *
+ * The companion to `/strategies/stack/:symbol`: that one says what is RUNNING on a symbol, this
+ * one says what each of them has actually put there. Once several strategies stack on one token,
+ * the position row alone cannot answer either question.
+ *
+ * The parts that do not add up are returned rather than smoothed. `unattributedUnits` is what the
+ * book holds that no source here claims — a wallet funded outside the app, or a position older
+ * than this ledger — and `overAttributedUnits` is the reverse, which is what an outside transfer
+ * out looks like from in here. Dividing either among the sleeves would be a guess presented as a
+ * record.
+ */
+strategyRoutes.get('/positions/:symbol/sleeves', async (c) => {
+  const w = await requireWallet(c);
+  return c.json(await sleevesFor(w.id, c.req.param('symbol')));
+});
+
 strategyRoutes.get('/strategies/stack/:symbol', async (c) => {
   const w = await requireWallet(c);
   const symbol = c.req.param('symbol');

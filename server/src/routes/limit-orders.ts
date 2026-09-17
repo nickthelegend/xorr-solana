@@ -532,7 +532,13 @@ export async function takeLimitOrder(w: WalletRow, rawHash: string): Promise<Lim
         quotedUnits: measured === undefined ? null : size,
         signature: sent,
       });
-      await applyFill(client, { walletId: w.id, symbol: SELLS.symbol, units: received, usd });
+      await applyFill(client, {
+        walletId: w.id,
+        symbol: SELLS.symbol,
+        units: received,
+        usd,
+        attribution: { source: 'limit-order', id: null, label: 'Limit order' },
+      });
       // `spend()` counted it against the cap on chain; the executor's tally must agree.
       await recordSpend(w.id, usd, client);
       await append(

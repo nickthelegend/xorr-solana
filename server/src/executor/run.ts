@@ -863,6 +863,13 @@ async function runStrategyInner(
         symbol: intent.outSymbol === 'USDC' ? intent.inSymbol : intent.outSymbol,
         units: intent.outSymbol === 'USDC' ? -filledUnits : filledUnits,
         usd: intent.outSymbol === 'USDC' ? -recordedUsd : intent.usd,
+        /*
+         * Which strategy this sleeve belongs to.
+         *
+         * The label is captured now rather than joined later, so renaming or deleting the strategy
+         * does not rewrite the attribution of a fill that already happened.
+         */
+        attribution: { source: 'strategy', id: strategy.id, label: strategy.label },
       });
       // Closing is not spending, so it does not consume the day's allowance — the contract
       // agrees, and the two tallies must not disagree.
