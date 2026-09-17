@@ -129,7 +129,9 @@ export default function Assets() {
     <Screen tabBar>
       <Text variant="screenTitle">Assets</Text>
 
-      <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false} style={{ flex: 1, marginTop: space.s20 }}>
+      <ScrollView refreshControl={refresh.control} showsVerticalScrollIndicator={false} style={{ flex: 1, marginTop: space.s20 }}>
+        {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+        {refresh.notice}
         <Eyebrow small>Portfolio value</Eyebrow>
         {/* `money(balance.data ?? 0)` reported "$0.00" whenever the executor was
             unreachable — a confident number for a question we never got to ask. An em dash

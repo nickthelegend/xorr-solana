@@ -122,10 +122,12 @@ export default function Roster() {
         ) : readError && !data ? (
           <ErrorState error={readError} onRetry={reload} />
         ) : (
-          <ScrollView refreshControl={refresh}
+          <ScrollView refreshControl={refresh.control}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ gap: space.s12 }}
           >
+            {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+            {refresh.notice}
             {agents.map((a) => {
               const isHired = !!a.hired;
               const inFlight = busy === a.id;

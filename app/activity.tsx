@@ -282,11 +282,13 @@ export default function Activity() {
         ) : (
           <ScrollView
             ref={scroller}
-            refreshControl={refresh}
+            refreshControl={refresh.control}
             showsVerticalScrollIndicator={false}
             // The reader has taken over. The mark has done its job and stops following them.
             onScrollBeginDrag={() => askedFor && setReleased(askedFor)}
           >
+            {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+            {refresh.notice}
             {rows.map((r) => {
               const credit = activityAmountIsCredit(r.amount);
               return (
