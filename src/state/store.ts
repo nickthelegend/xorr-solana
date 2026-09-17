@@ -12,6 +12,7 @@ import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { remember as rememberRecent } from '@/markets/recents';
 import {
   CAP_MAX,
   CAP_MIN,
@@ -108,6 +109,16 @@ type AgentsSlice = {
 type ViewsSlice = {
   actFilter: number;
   lbSort: number;
+  /**
+   * Markets looked at recently, newest first — a device preference, not an account's.
+   *
+   * On the device rather than the executor deliberately: it is a convenience, not a record. Losing
+   * it costs a few taps, and sending "which markets is this person interested in" to a server that
+   * has no other reason to know would be collecting something for nothing. `markets/recents.ts`
+   * holds the rules.
+   */
+  recentMarkets: string[];
+  rememberMarket: (symbol: string) => void;
   btLook: number;
   btCapital: number;
   /**
@@ -298,6 +309,9 @@ export const useStore = create<Store>()(
       // ── views ──
       actFilter: 0,
       lbSort: 0,
+      recentMarkets: [],
+      rememberMarket: (symbol) =>
+        set((st) => ({ recentMarkets: rememberRecent(st.recentMarkets, symbol) })),
       btLook: 1,
       btCapital: 5000,
       balancesHidden: false,
@@ -350,6 +364,9 @@ export const useStore = create<Store>()(
         tab: s.tab,
         actFilter: s.actFilter,
         lbSort: s.lbSort,
+        // Survives a sign-out with the rest of the device's preferences: it says nothing about an
+        // account, and a shared phone's next user learns only which markets exist.
+        recentMarkets: s.recentMarkets,
         btLook: s.btLook,
         btCapital: s.btCapital,
         balancesHidden: s.balancesHidden,
