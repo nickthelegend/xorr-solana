@@ -137,6 +137,7 @@ describe('motion — animations.md', () => {
   //   AreaChart       the line revealed left to right     700ms  (arrival)
   //   Candlestick     the candles revealed left to right  700ms  (arrival)
   //   TabBar          the whole bar down and back up      250ms  (making way for the Messages drawer, 2026-09-16)
+  //   TradingTicker   the dot, while a run is in flight     900ms  (the skeleton's cadence; stops when the run does)
   //   FillReceipt     a confirmed fill's receipt arriving   420ms  (arrival; once, on the signature — never on mount)
   //   CloseResult     what a close realised, scaling in     250ms  (the one fill-confirmation scale-in; silent when unmeasured)
   //   AllocationDonut the ring sweeping clockwise on load    700ms  (arrival, the chart reveal beat — revealed, never resized)
@@ -163,6 +164,7 @@ describe('motion — animations.md', () => {
       'StopCurtain.tsx',
       'Switch.tsx',
       'TabBar.tsx',
+      'TradingTicker.tsx',
       'charts/AllocationDonut.tsx',
       'charts/AreaChart.tsx',
       'charts/Candlestick.tsx',
@@ -185,7 +187,7 @@ describe('motion — animations.md', () => {
       .filter(({ src }) => /withRepeat/.test(stripComments(src)))
       .map(({ rel }) => rel)
       .sort();
-    expect(looping).toEqual(['AgentOrb.tsx', 'States.tsx']);
+    expect(looping).toEqual(['AgentOrb.tsx', 'States.tsx', 'TradingTicker.tsx']);
   });
 
   /*
