@@ -2,7 +2,8 @@
  * End-to-end demo proof for Solana Deposits (via MoonPay sandbox) and Withdrawals (PLAN.md §5, §8.5, §10.6).
  *
  * Proves:
- *   1. MoonPay dev sandbox deposit URL generation targeting USDC on Solana (usdc_sol) with HMAC-SHA256 signature.
+ *   1. MoonPay dev sandbox HANDOFF: a correctly signed checkout URL targeting USDC on Solana
+ *      (usdc_sol) at the user's own address. NOT arrival — see the note on Part 1.
  *   2. MoonPay webhook handling creating an audit trail record for completed fiat on-ramp deposits.
  *   3. Solana balances read via ATA seam for USDC and native SOL.
  *   4. Withdrawal allowlist with Solana base58 validation and strict 24-hour cooling-off enforcement.
@@ -19,10 +20,19 @@ process.env.XORR_CHAIN = 'solana-fork';
 process.env.MOONPAY_API_KEY = 'pk_test_xorr_dev_sandbox';
 process.env.MOONPAY_SECRET_KEY = 'sk_test_dev_secret_key_proof';
 
-import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
 import {
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  Transaction,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
+import {
+  createAssociatedTokenAccountInstruction,
   createTransferInstruction,
+  getAccount,
   getAssociatedTokenAddressSync,
+  mintTo,
 } from '@solana/spl-token';
 import { Hono } from 'hono';
 
@@ -68,9 +78,24 @@ async function main() {
   console.log(`Active Cluster Switch:      ${process.env.XORR_CHAIN}\n`);
 
   // ----------------------------------------------------------------
-  // PART 1: MOONPAY FIAT ON-RAMP DEPOSIT (DEV SANDBOX SDK)
+  /*
+   * PART 1: MOONPAY HANDOFF — the checkout URL, not the money
+   *
+   * What this proves is that the app hands the user off correctly: the environment is strictly
+   * sandbox, the token is USDC on Solana, the amount and the destination are the user's own, and
+   * the URL is HMAC-signed with the secret key so MoonPay will honour it.
+   *
+   * What it does NOT prove is that USDC arrives. Completing a sandbox purchase means a human
+   * entering card details on MoonPay's site; there is no API that makes it happen, so there is
+   * nothing here to automate and nothing to assert about a balance. The heading and the assertions
+   * below say "handoff" rather than "deposit" for that reason — an earlier version read as though
+   * the money had landed, which is a claim this file cannot support.
+   *
+   * The webhook in Part 1b is the other half: what the app does when MoonPay says a purchase
+   * completed. That is real and is exercised.
+   */
   // ----------------------------------------------------------------
-  console.log('--- 1. MOONPAY DEV SANDBOX FIAT ON-RAMP (DEPOSIT) ---');
+  console.log('--- 1. MOONPAY DEV SANDBOX HANDOFF (signed checkout URL, not arrival) ---');
 
   const app = new Hono();
   app.route('/', moonpayRoutes);
@@ -97,7 +122,7 @@ async function main() {
   assert(urlRes.status === 200, 'POST /deposit/moonpay/url returns 200 OK');
   const urlData = (await urlRes.json()) as any;
   assert(urlData.status === 'ok', 'Status is ok');
-  assert(urlData.walletAddress === userAddress, 'URL target wallet matches user Solana address');
+  assert(urlData.walletAddress === userAddress, 'Checkout URL targets the user own Solana address');
   assert(urlData.url.includes('currencyCode=usdc_sol'), 'URL parameter specifies currencyCode=usdc_sol');
   assert(urlData.url.includes('baseCurrencyAmount=250'), 'URL parameter specifies baseCurrencyAmount=250');
   assert(urlData.url.includes('&signature='), 'URL is signed with HMAC-SHA256 signature using MOONPAY_SECRET_KEY');
@@ -180,7 +205,82 @@ async function main() {
   const withdrawAmountTokens = 50; // 50 USDC
   const withdrawAmountRaw = BigInt(withdrawAmountTokens * 10 ** 6);
 
-  // Build real SPL Token transfer instruction
+  /*
+   * This part used to sign and stop.
+   *
+   * It set `recentBlockhash` to a freshly generated public key — a random 32 bytes wearing a
+   * blockhash's shape — never broadcast, and printed the signature BYTES hex-encoded with a
+   * `'demo_sig'` fallback. So it proved authorisation and allowlist policy and called itself a
+   * withdrawal proof, while the chain had never seen the transaction and could not have: that
+   * blockhash does not exist, so the transaction was unsendable by construction.
+   *
+   * It settles now. The fork is stood up for the transfer — the user needs SOL for the fee and
+   * USDC to send, and the destination needs an account to receive into — and then the USER signs
+   * and the transaction is broadcast and confirmed. What is printed below is the signature the
+   * validator returned.
+   */
+  const { connection } = await import('../server/src/solana/connection');
+  const { payerKeypair } = await import('../server/src/solana/keys');
+  const payer = payerKeypair();
+
+  // Fee money for the signer. Without it the transfer cannot be paid for, let alone sent.
+  const airdropSig = await connection.requestAirdrop(userKeypair.publicKey, 2 * LAMPORTS_PER_SOL);
+  await connection.confirmTransaction(airdropSig, 'confirmed');
+  assert(
+    (await connection.getBalance(userKeypair.publicKey)) > 0,
+    'User funded with SOL on the fork to pay its own fee',
+  );
+
+  /*
+   * USDC for the user to withdraw, minted by the fork's own authority.
+   *
+   * `mintTo` creates the ATA's contents; the account itself is created by the helper. The mint
+   * authority on the fork is the payer — checked rather than assumed, because minting with the
+   * wrong authority fails with `owner does not match`, which reads like a bug in the transfer.
+   */
+  const usdcMintInfo = await import('@solana/spl-token').then((m) => m.getMint(connection, usdcMint));
+  if (usdcMintInfo.mintAuthority?.toBase58() !== payer.publicKey.toBase58()) {
+    throw new Error(
+      `Cannot fund the withdrawal: USDC mint authority on this fork is ${usdcMintInfo.mintAuthority?.toBase58() ?? 'none'}, not the payer ${payer.publicKey.toBase58()}.`,
+    );
+  }
+
+  const { getOrCreateAssociatedTokenAccount } = await import('@solana/spl-token');
+  const userTokenAccount = await getOrCreateAssociatedTokenAccount(
+    connection,
+    payer,
+    usdcMint,
+    userKeypair.publicKey,
+  );
+  await mintTo(connection, payer, usdcMint, userTokenAccount.address, payer, 200_000000n);
+  assert(
+    userTokenAccount.address.toBase58() === userAta.toBase58(),
+    'Funded account is the ATA the app derives, not a second account',
+  );
+
+  /*
+   * The destination must exist before it can be sent to.
+   *
+   * An SPL transfer to an address with no token account fails; a real withdrawal flow has to
+   * create it, and somebody has to pay the rent. The payer does here — on mainnet that is the
+   * user's own transaction, which is the same instruction with a different fee payer.
+   */
+  const destTokenAccount = await getOrCreateAssociatedTokenAccount(
+    connection,
+    payer,
+    usdcMint,
+    destKeypair.publicKey,
+  );
+  assert(
+    destTokenAccount.address.toBase58() === destAta.toBase58(),
+    'Destination ATA exists and matches the derived address',
+  );
+  void createAssociatedTokenAccountInstruction;
+
+  const beforeUser = await getAccount(connection, userAta);
+  const beforeDest = await getAccount(connection, destAta);
+  console.log(`  Before — user: ${Number(beforeUser.amount) / 1e6} USDC, dest: ${Number(beforeDest.amount) / 1e6} USDC`);
+
   const transferIx = createTransferInstruction(
     userAta,
     destAta,
@@ -189,24 +289,64 @@ async function main() {
   );
   assert(transferIx.keys.length === 3, 'Created SPL Token transfer instruction');
 
-  // Assemble and sign transaction with user Keypair
-  const tx = new Transaction().add(transferIx);
-  // Use a valid 32-byte base58 string for blockhash simulation
-  tx.recentBlockhash = Keypair.generate().publicKey.toBase58();
-  tx.feePayer = userKeypair.publicKey;
-  tx.sign(userKeypair);
+  // A real blockhash, from the chain that will accept it.
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ blockhash, lastValidBlockHeight, feePayer: userKeypair.publicKey }).add(
+    transferIx,
+  );
 
-  assert(tx.signatures.length > 0, 'Transaction signed with user Keypair authority');
+  /*
+   * The user signs, and only the user.
+   *
+   * `sendAndConfirmTransaction` takes the signer array, so this is not a claim about who signed —
+   * it is the set of keys the transaction was sent with. The executor's keys are not among them,
+   * which is the non-custodial property this whole file exists to demonstrate.
+   */
+  let signature: string;
+  try {
+    signature = await sendAndConfirmTransaction(connection, tx, [userKeypair], {
+      commitment: 'confirmed',
+    });
+  } catch (e) {
+    /*
+     * Loudly, with the chain's own words. A withdrawal proof that swallows a failure and prints a
+     * signature anyway is worse than no proof at all — it is the exact shape of the bug this
+     * rewrite removed.
+     */
+    console.error('\n  \x1b[31m✖ WITHDRAWAL DID NOT SETTLE\x1b[0m');
+    console.error(`  ${e instanceof Error ? e.message : String(e)}`);
+    failures++;
+    throw e;
+  }
+
   assert(
     tx.signatures[0]?.publicKey.toBase58() === userAddress,
     'Signer matches user wallet (non-custodial: user signs, not executor)',
   );
 
-  const signature = tx.signatures[0]?.signature ? Buffer.from(tx.signatures[0].signature).toString('hex') : 'demo_sig';
-  console.log(`  User Transaction Signature: ${signature.slice(0, 48)}...`);
-  console.log(`  Amount: ${withdrawAmountTokens} USDC (${withdrawAmountRaw} raw units)`);
-  console.log(`  From:   ${userAddress}`);
-  console.log(`  To:     ${destAddress}`);
+  const confirmed = await connection.getTransaction(signature, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  });
+  assert(confirmed !== null, 'Transaction is in the ledger, read back by signature');
+  assert(confirmed?.meta?.err === null, 'Ledger records no error for the withdrawal');
+
+  const afterUser = await getAccount(connection, userAta);
+  const afterDest = await getAccount(connection, destAta);
+  const userDelta = beforeUser.amount - afterUser.amount;
+  const destDelta = afterDest.amount - beforeDest.amount;
+
+  assert(destDelta === withdrawAmountRaw, `Destination balance rose by exactly ${withdrawAmountTokens} USDC`);
+  assert(userDelta === withdrawAmountRaw, `Source balance fell by exactly ${withdrawAmountTokens} USDC`);
+  assert(userDelta === destDelta, 'What left the source is what arrived at the destination');
+
+  console.log(`  WITHDRAW SIGNATURE: ${signature}`);
+  console.log(`  SLOT:               ${confirmed?.slot}`);
+  console.log(`  Amount:             ${withdrawAmountTokens} USDC (${withdrawAmountRaw} raw units)`);
+  console.log(`  From:               ${userAddress}`);
+  console.log(`  To:                 ${destAddress}`);
+  console.log(`  After — user: ${Number(afterUser.amount) / 1e6} USDC, dest: ${Number(afterDest.amount) / 1e6} USDC`);
+  console.log(`  Verify:             solana confirm -v ${signature} --url http://127.0.0.1:8899`);
 
   console.log('\n================================================================');
   if (failures === 0) {

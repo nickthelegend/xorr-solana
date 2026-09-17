@@ -14,6 +14,7 @@ import { log } from '../http/request-id.js';
 import { runStrategy, type StrategyRow } from './run.js';
 import { autonomousAgentSweep } from '../bot/autonomous.js';
 import { basketSweep } from '../bot/basket.js';
+import { observeSweep } from '../market/observe.js';
 import { evaluateAlerts } from '../alerts/evaluate.js';
 import { anchorSweep } from '../audit/anchor-sweep.js';
 import { sweepCorporateActions } from '../venues/corporate-actions.js';
@@ -39,6 +40,24 @@ export function schedulerHeartbeat(): { tickMs: number; lastTickAt: number | nul
 
 export async function tick(now: Date = new Date()): Promise<number> {
   lastTickAt = now.getTime();
+
+  /*
+   * Write down what the xStocks cost, before anything decides anything from it.
+   *
+   * The agent's range strategies need recorded readings before a high and a low count as a band,
+   * and `price_observations` only ever filled as a side effect of somebody opening a screen — so
+   * an asset nobody had looked at had no band and the range branches stood down. Found by driving
+   * the demo end to end: NVDAx had five readings and TSLAx two.
+   *
+   * First in the tick, so the decisions below see this tick's reading rather than the last one's.
+   * Paced internally (`OBSERVE_EVERY_MS`), and it does not contribute to `ran`: looking at a price
+   * is not work this tick did on anyone's behalf.
+   */
+  try {
+    await observeSweep(now);
+  } catch (e) {
+    log.error('[scheduler] observe sweep failed:', e instanceof Error ? e.message : e);
+  }
   const due = await query<StrategyRow>(
     `SELECT * FROM strategies
      WHERE state IN ('live','watch') AND next_run_at IS NOT NULL AND next_run_at <= $1
