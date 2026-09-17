@@ -8,6 +8,23 @@
  *
  * Recorded in `schema_migrations`, so re-running this is free. That is what makes it safe to put
  * in a start script rather than a wiki page.
+ *
+ * ## Naming a new migration
+ *
+ *     npx tsx src/db/new-migration.ts watchlist-order
+ *     -> server/src/db/migrations/20260917T084512-watchlist-order.sql
+ *
+ * New migrations are named for the UTC second they were created, not for the next free number.
+ * A number has to be read from the directory, and with several branches open it is stale the
+ * moment it is read: two people both see 033, both write 034, both pass their own tests, and the
+ * collision exists only once the branches meet. That happened three times. A timestamp needs no
+ * knowledge of any other branch and cannot collide unless two migrations are created in the same
+ * second.
+ *
+ * The existing numbered files keep their names. Bookkeeping below is by FILENAME, so renaming an
+ * applied migration would make a migrated database run it again — and plain filename sort already
+ * orders the two schemes correctly, because `034-` sorts before `2026…`. `migration-names.ts` has
+ * the details and `migration-order.test.ts` enforces them.
  */
 import fs from 'node:fs';
 import path from 'node:path';
