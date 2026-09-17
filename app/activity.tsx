@@ -13,11 +13,10 @@
  */
 import React, { useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
-import { useRouter } from 'expo-router';
 import {
   BackButton,
   Button,
-  EmptyState,
+  EmptyList,
   ErrorState,
   Fill,
   LoadingRows,
@@ -94,7 +93,6 @@ function ExplorerLink({ explorer }: { explorer: string }) {
 
 export default function Activity() {
   const goBack = useGoBack();
-  const router = useRouter();
   const actFilter = useStore((s) => s.actFilter);
   const setActFilter = useStore((s) => s.setActFilter);
   const trail = useAsync(() => repos.activity.list(), []);
@@ -172,13 +170,9 @@ export default function Activity() {
         ) : rows.length === 0 ? (
           (data ?? []).length > 0 ? (
             /* The trail has rows, just none of this kind: "Nothing yet." and a push to start buying would deny the rest. */
-            <EmptyState text={NONE_UNDER[actFilter] ?? 'Nothing here.'} />
+            <EmptyList list="activity" text={NONE_UNDER[actFilter] ?? 'Nothing here.'} />
           ) : (
-            <EmptyState
-              text="Nothing yet."
-              actionLabel="Set up a recurring buy"
-              onAction={() => router.push('/strategy/dca')}
-            />
+            <EmptyList list="activity" />
           )
         ) : (
           <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>

@@ -14,7 +14,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import {
   BackButton,
   Button,
-  EmptyState,
+  EmptyList,
   Fill,
   LoadingRows,
   NoteStrip,
@@ -193,7 +193,7 @@ export default function Alerts() {
               this app cannot trade, counted in the header as though the user had set them. An
               empty list now says it is empty; the button that fixes that is below the list.
             */}
-            {(data ?? []).length === 0 ? <EmptyState text="No alerts yet." /> : null}
+            {(data ?? []).length === 0 ? <EmptyList list="alerts" /> : null}
             {(data ?? []).map((a) => (
               <SwitchRow
                 key={a.id}

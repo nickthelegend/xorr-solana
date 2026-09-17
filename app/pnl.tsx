@@ -16,7 +16,7 @@ import React from 'react';
 import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
 import {
-  EmptyState,
+  EmptyList,
   ErrorState,
   Fill,
   HeaderBar,
@@ -53,7 +53,7 @@ export default function Pnl() {
         ) : loading && !data ? (
           <LoadingRows count={5} height={size.rowLg} />
         ) : rows.length === 0 ? (
-          <EmptyState text="Nothing has been sold yet, so nothing is realised." />
+          <EmptyList list="realised" />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}

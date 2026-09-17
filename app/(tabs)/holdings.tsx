@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { assetGradient } from '@/design/gradients';
 import {
   AssetMark,
-  EmptyState,
+  EmptyList,
   Eyebrow,
   FigureSpan,
   LoadingRows,
@@ -218,11 +218,7 @@ export default function Assets() {
            */
           <ErrorState error={positions.error} onRetry={positions.reload} />
         ) : holdings.length === 0 ? (
-          <EmptyState
-            text="Nothing held yet."
-            actionLabel="Start a recurring buy"
-            onAction={() => router.push('/strategy/dca')}
-          />
+          <EmptyList list="positions" />
         ) : (
           holdings.map((h) => (
             <Row
@@ -274,7 +270,7 @@ export default function Assets() {
         ) : tokens.loading && !tokens.data ? (
           <LoadingRows count={2} height={size.rowLg} />
         ) : tokenRows.length === 0 ? (
-          <EmptyState text="No tokens." />
+          <EmptyList list="walletTokens" />
         ) : (
           tokenRows.map((t) => (
             <Row

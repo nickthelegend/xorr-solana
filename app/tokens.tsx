@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   AssetMark,
-  EmptyState,
+  EmptyList,
   ErrorState,
   Fill,
   HeaderBar,
@@ -66,7 +66,7 @@ export default function Tokens() {
             <LoadingRows count={6} height={size.rowLg} />
           </View>
         ) : rows.length === 0 ? (
-          <EmptyState text="Nothing can be traded here right now." />
+          <EmptyList list="tradable" />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}

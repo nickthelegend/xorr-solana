@@ -19,6 +19,7 @@ import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   Button,
+  EmptyList,
   EmptyState,
   ErrorState,
   Fill,
@@ -124,11 +125,7 @@ export default function LimitOrders() {
         ) : data && !data.settles ? (
           <EmptyState text="No limit orders on this network." />
         ) : orders.length === 0 ? (
-          <EmptyState
-            text="No limit orders yet."
-            actionLabel="Look again"
-            onAction={reload}
-          />
+          <EmptyList list="limitOrders" />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}

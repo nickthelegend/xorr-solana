@@ -20,7 +20,7 @@ import { useGoBack } from '@/nav/useGoBack';
 import { assetGradient } from '@/design/gradients';
 import {
   AssetMark,
-  EmptyState,
+  EmptyList,
   ErrorState,
   Eyebrow,
   Fill,
@@ -105,7 +105,7 @@ export default function Watchlist() {
         ) : watchable.loading && !watchable.data ? (
           <LoadingRows count={4} height={ROW_H} spark />
         ) : !group ? (
-          <EmptyState text="Nothing to follow here yet." />
+          <EmptyList list="watchlist" />
         ) : (
           <ScrollView showsVerticalScrollIndicator={false}>
             {symbols.map((sym) => {

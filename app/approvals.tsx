@@ -14,7 +14,7 @@ import type { Address } from 'viem';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   Button,
-  EmptyState,
+  EmptyList,
   ErrorState,
   Fill,
   HeaderBar,
@@ -60,7 +60,7 @@ export default function Approvals() {
             <LoadingRows count={5} height={size.rowLg} />
           </View>
         ) : !approvals || approvals.tokens.length === 0 ? (
-          <EmptyState text="No approvable tokens on this chain." />
+          <EmptyList list="approvals" />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}

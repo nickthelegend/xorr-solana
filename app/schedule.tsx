@@ -14,7 +14,7 @@ import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
-  EmptyState,
+  EmptyList,
   ErrorState,
   Fill,
   HeaderBar,
@@ -72,7 +72,7 @@ export default function Schedule() {
         ) : loading && !data ? (
           <LoadingRows count={5} height={size.rowLg} />
         ) : rows.length === 0 ? (
-          <EmptyState text="Nothing is scheduled." />
+          <EmptyList list="schedule" />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}

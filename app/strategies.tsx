@@ -16,7 +16,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import {
   BackButton,
   Button,
-  EmptyState,
+  EmptyList,
   ErrorState,
   Fill,
   LoadingRows,
@@ -126,7 +126,7 @@ export default function Strategies() {
               <ErrorState error={error} onRetry={reload} />
             ) : shown.length === 0 ? (
               <View style={{ gap: space.s16, paddingTop: space.s10 }}>
-                <EmptyState text="Nothing running yet." />
+                <EmptyList list="strategies" />
                 <Text variant="secondarySm" align="center">
                   A recurring buy is the simplest place to start.
                 </Text>

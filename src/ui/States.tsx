@@ -18,6 +18,7 @@
  */
 import React, { useEffect } from 'react';
 import { View, type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
+import { useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 /*
  * The one import this layer takes from outside itself. `apiError.ts` is pure by construction —
@@ -27,6 +28,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } fr
  */
 import { NotSignedIn, errorRef, errorText, isRetryable } from '@/data/apiError';
 import { Button } from './Button';
+import { emptyList, type EmptyListKey } from './emptyActions';
 import { Press } from './Press';
 import { SignInPrompt } from './SignIn';
 import { Text } from './Text';
@@ -229,5 +231,36 @@ export function EmptyState({
         </Press>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * One of the app's lists, empty, with the exit written for it in `emptyActions.ts`.
+ *
+ * The screens were each writing their own sentence and their own `router.push`, which is how three of them
+ * ended at "Nothing here yet." with no action at all. A screen names the list; where that list's exit goes is
+ * one table, and one test checks every route in it still exists.
+ *
+ * `text` overrides the sentence for the cases where the screen knows something the table cannot — a filter
+ * that matched nothing is not an empty trail — and the action stays, because it is still the right next thing.
+ */
+export function EmptyList({
+  list,
+  text,
+  testID,
+}: {
+  list: EmptyListKey;
+  text?: string;
+  testID?: string;
+}) {
+  const router = useRouter();
+  const copy = emptyList(list);
+  return (
+    <EmptyState
+      text={text ?? copy.text}
+      actionLabel={copy.actionLabel}
+      onAction={() => router.push(copy.href)}
+      testID={testID}
+    />
   );
 }
