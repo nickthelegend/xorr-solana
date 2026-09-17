@@ -34,6 +34,7 @@
  */
 import type { Href } from 'expo-router';
 import { ApiError, NotSignedIn, TimedOut, apiProse, apiReason, errorRef } from './apiError';
+import { SessionExpired } from '@/auth/expiry';
 
 /**
  * What KIND of failure this is — what the screen has to do about it, not where it came from.
@@ -275,6 +276,26 @@ export function classify(e: unknown): Failure {
    */
   if (e instanceof NotSignedIn) {
     return { kind: 'signed-out', message: e.message, retryable: false, outcomeUnknown: false };
+  }
+
+  /*
+   * A session that ended while the app was open, which is the same KIND as being signed out and a
+   * different event: nothing was wrong, the app was working a moment ago, and the reader is owed
+   * that distinction rather than "This needs you to be signed in" appearing on a screen they were
+   * already using.
+   *
+   * `api.ts` raises this only after a 401 survived a retry with a token Privy had just minted, so
+   * by the time it reaches here the claim has been earned.
+   */
+  if (e instanceof SessionExpired) {
+    return {
+      kind: 'signed-out',
+      message: e.message,
+      // Repeating it answers the same way until they sign in. The fix is the route, not the retry.
+      retryable: false,
+      fix: { label: 'Sign in', href: '/' },
+      outcomeUnknown: false,
+    };
   }
 
   if (e instanceof TimedOut) {
