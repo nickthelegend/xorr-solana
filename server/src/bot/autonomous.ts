@@ -20,6 +20,8 @@ import { readDelegation } from '../solana/delegation.js';
 import { delegateKeypair } from '../solana/keys.js';
 import { PublicKey } from '@solana/web3.js';
 import type { PersonaId } from './personas.js';
+import { assessCorporateAction, type CorporateActionAssessment } from '../venues/corporate-actions.js';
+import { evaluateOffHoursGuard, type OffHoursGuardVerdict } from '../market/nasdaq.js';
 
 export type StrategyKind = 'momentum' | 'event-driven' | 'dca' | 'grid';
 
@@ -35,6 +37,9 @@ export type CandidateSetup = {
   targetPrice: number;
   reason: string;
   marketCondition: string;
+  corporateAction?: CorporateActionAssessment;
+  offHoursGuard?: OffHoursGuardVerdict;
+  suggestedSlippageBps?: number;
 };
 
 export type AutonomousTradeResult =
@@ -63,6 +68,8 @@ async function analyzeStock(
   rangePosition: number;
   daysToEarnings: number | null;
   earningsConfirmed: boolean;
+  corporateAction: CorporateActionAssessment;
+  offHoursGuard: OffHoursGuardVerdict;
 }> {
   // Check SEC EDGAR earnings calendar
   let daysToEarnings: number | null = null;
@@ -77,6 +84,15 @@ async function analyzeStock(
     // EDGAR lookup optional
   }
 
+  // Check Corporate Action schedule & multiplier
+  const corporateAction = await assessCorporateAction(stock.symbol);
+
+  // Check Nasdaq market session & off-hours oracle spread
+  const offHoursGuard = evaluateOffHoursGuard({
+    symbol: stock.symbol,
+    onChainPrice: currentPrice,
+  });
+
   // Estimated synthetic 30-day range around current price for signal derivation
   const rangeHigh = currentPrice * 1.08;
   const rangeLow = currentPrice * 0.92;
@@ -88,6 +104,8 @@ async function analyzeStock(
     rangePosition,
     daysToEarnings,
     earningsConfirmed,
+    corporateAction,
+    offHoursGuard,
   };
 }
 
@@ -103,22 +121,34 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
 
     const analysis = await analyzeStock(stock, price);
 
+    // If off-hours guard mandates a HOLD (spread > 1.5%), skip candidates for this stock
+    if (analysis.offHoursGuard.action === 'hold') {
+      continue;
+    }
+
+    const offHoursPenalty = analysis.offHoursGuard.session === 'closed' ? 15 : 0;
+    const caPenalty = analysis.corporateAction.recommendation === 'avoid_entry' ? analysis.corporateAction.scoreAdjustment : 0;
+
     // 1. Event-Driven candidate: Earnings run-up within 3-10 days
     if (analysis.daysToEarnings !== null && analysis.daysToEarnings >= 3 && analysis.daysToEarnings <= 10) {
       const stop = price * 0.94;
       const target = price * 1.12;
+      const baseScore = 95 - Math.abs(analysis.daysToEarnings - 6);
       candidates.push({
         symbol: stock.symbol,
         stock,
         strategyKind: 'event-driven',
         persona: 'earnings-desk',
         personaName: 'Earnings Desk',
-        score: 95 - Math.abs(analysis.daysToEarnings - 6), // Peak score around 6 days out
+        score: Math.max(10, baseScore + caPenalty),
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} scheduled report is approaching in ${analysis.daysToEarnings} days. Riding pre-earnings momentum before print.`,
+        reason: `${stock.symbol} scheduled report is approaching in ${analysis.daysToEarnings} days. Riding pre-earnings momentum before print.${caPenalty !== 0 ? ` [Warning: ${analysis.corporateAction.reason}]` : ''}`,
         marketCondition: `Pre-earnings window (${analysis.daysToEarnings}d away)`,
+        corporateAction: analysis.corporateAction,
+        offHoursGuard: analysis.offHoursGuard,
+        suggestedSlippageBps: analysis.offHoursGuard.suggestedSlippageBps,
       });
     }
 
@@ -127,18 +157,23 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
       const stop = Math.max(price * 0.95, analysis.rangeHigh * 0.94);
       const risk = price - stop;
       const target = price + risk * 2;
+      const baseScore = Math.round(75 + analysis.rangePosition * 20);
+      const adjustedScore = Math.max(10, baseScore + caPenalty - offHoursPenalty);
       candidates.push({
         symbol: stock.symbol,
         stock,
         strategyKind: 'momentum',
         persona: 'momentum-scout',
         personaName: 'Momentum Scout',
-        score: Math.round(75 + analysis.rangePosition * 20),
+        score: adjustedScore,
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} breaking out near upper trading band. Trend filter confirmed.`,
+        reason: `${stock.symbol} breaking out near upper trading band. Trend filter confirmed.${caPenalty !== 0 ? ` [Corporate Action: ${analysis.corporateAction.reason}]` : ''}${offHoursPenalty > 0 ? ` [Off-hours penalty applied: ${analysis.offHoursGuard.reason}]` : ''}`,
         marketCondition: `Bullish breakout (${(analysis.rangePosition * 100).toFixed(0)}th percentile)`,
+        corporateAction: analysis.corporateAction,
+        offHoursGuard: analysis.offHoursGuard,
+        suggestedSlippageBps: analysis.offHoursGuard.suggestedSlippageBps,
       });
     }
 
@@ -146,18 +181,22 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
     if (analysis.rangePosition < 0.4) {
       const stop = price * 0.92;
       const target = price * 1.10;
+      const caBonus = analysis.corporateAction.recommendation === 'position_dca' ? 10 : 0;
       candidates.push({
         symbol: stock.symbol,
         stock,
         strategyKind: 'dca',
         persona: 'yield-keeper',
         personaName: 'Yield Keeper',
-        score: Math.round(70 + (0.4 - analysis.rangePosition) * 20),
+        score: Math.round(70 + (0.4 - analysis.rangePosition) * 20 + caBonus),
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} trading at discount within lower band. Accumulating position.`,
+        reason: `${stock.symbol} trading at discount within lower band. Accumulating position.${caBonus > 0 ? ` [Dividend capture: ${analysis.corporateAction.reason}]` : ''}`,
         marketCondition: `Oversold dip (${(analysis.rangePosition * 100).toFixed(0)}th percentile)`,
+        corporateAction: analysis.corporateAction,
+        offHoursGuard: analysis.offHoursGuard,
+        suggestedSlippageBps: analysis.offHoursGuard.suggestedSlippageBps,
       });
     }
 
@@ -170,12 +209,15 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
       strategyKind: 'momentum',
       persona: 'momentum-scout',
       personaName: 'Momentum Scout',
-      score: 60,
+      score: Math.max(10, 60 + caPenalty - offHoursPenalty),
       currentPrice: price,
       stopPrice: defaultStop,
       targetPrice: defaultTarget,
       reason: `${stock.symbol} liquid equity with steady volume.`,
       marketCondition: 'Stable trend',
+      corporateAction: analysis.corporateAction,
+      offHoursGuard: analysis.offHoursGuard,
+      suggestedSlippageBps: analysis.offHoursGuard.suggestedSlippageBps,
     });
   }
 
@@ -266,6 +308,7 @@ export async function runAutonomousCycle(
     usd: sizeUsd,
     symbol: bestSetup.symbol,
     venue: 'jupiter',
+    slippageBps: bestSetup.suggestedSlippageBps ?? 50,
     because: `Autonomous ${bestSetup.strategyKind} entry on ${bestSetup.symbol}: ${bestSetup.reason}`,
     agentName: bestSetup.personaName,
   });
@@ -309,6 +352,10 @@ export async function runAutonomousCycle(
         opening: openingLine,
         reason: bestSetup.reason,
         marketCondition: bestSetup.marketCondition,
+        corporateAction: bestSetup.corporateAction?.imminentAction ?? null,
+        nasdaqSession: bestSetup.offHoursGuard?.session ?? 'regular',
+        spreadBps: bestSetup.offHoursGuard?.spreadBps ?? 0,
+        suggestedSlippageBps: bestSetup.suggestedSlippageBps ?? 50,
       }),
     ],
   ).catch((e) => console.error('[autonomous] failed to insert proposal:', e));

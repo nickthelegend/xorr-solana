@@ -79,6 +79,14 @@ describe('autonomous xStocks trading agent', () => {
       expect(best!.stopPrice).toBeLessThan(best!.currentPrice);
       expect(best!.targetPrice).toBeGreaterThan(best!.currentPrice);
     });
+
+    it('attaches corporate action and off-hours metadata to candidate setup', async () => {
+      const best = await evaluateBestSetup();
+      expect(best).not.toBeNull();
+      expect(best!.corporateAction).toBeDefined();
+      expect(best!.offHoursGuard).toBeDefined();
+      expect(best!.suggestedSlippageBps).toBeGreaterThanOrEqual(50);
+    });
   });
 
   describe('runAutonomousCycle', () => {

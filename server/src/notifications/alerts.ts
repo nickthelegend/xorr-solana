@@ -49,21 +49,25 @@ export async function notifyEntry(params: EntryAlertParams): Promise<void> {
   const body = `Bought ${units.toFixed(4)} ${symbol} (${notionalStr} at ${priceStr}) via ${strategyKind}.${rationale ? ` ${rationale}` : ''}`;
 
   // 1. Send push notification to all registered devices
-  await send(walletId, {
-    title,
-    body,
-    route: '/activity',
-    kind: 'dca-executed',
-    data: {
-      action: 'entry',
-      symbol,
-      strategyKind,
-      notionalUsd,
-      units,
-      price,
-      signature,
-    },
-  }).catch((e) => console.warn('[alerts] push send failed:', e instanceof Error ? e.message : e));
+  try {
+    await send(walletId, {
+      title,
+      body,
+      route: '/activity',
+      kind: 'dca-executed',
+      data: {
+        action: 'entry',
+        symbol,
+        strategyKind,
+        notionalUsd,
+        units,
+        price,
+        signature,
+      },
+    });
+  } catch (e) {
+    console.warn('[alerts] push send failed:', e instanceof Error ? e.message : e);
+  }
 
   // 2. Persist message in messages table for chat/drawer
   await query(
@@ -99,22 +103,26 @@ export async function notifyExit(params: ExitAlertParams): Promise<void> {
   const body = `Closed ${units.toFixed(4)} ${symbol} at ${priceStr} for ${proceedsStr}${pnlStr}. ${reason}`;
 
   // 1. Send push notification
-  await send(walletId, {
-    title,
-    body,
-    route: '/portfolio',
-    kind: 'alert-fired',
-    data: {
-      action: 'exit',
-      symbol,
-      reason,
-      units,
-      price,
-      proceedsUsd,
-      pnlUsd,
-      signature,
-    },
-  }).catch((e) => console.warn('[alerts] push send failed:', e instanceof Error ? e.message : e));
+  try {
+    await send(walletId, {
+      title,
+      body,
+      route: '/portfolio',
+      kind: 'alert-fired',
+      data: {
+        action: 'exit',
+        symbol,
+        reason,
+        units,
+        price,
+        proceedsUsd,
+        pnlUsd,
+        signature,
+      },
+    });
+  } catch (e) {
+    console.warn('[alerts] push send failed:', e instanceof Error ? e.message : e);
+  }
 
   // 2. Persist message
   await query(
@@ -147,17 +155,21 @@ export async function notifyKill(params: KillAlertParams): Promise<void> {
   const body = `Kill switch engaged. All automated trading paused and on-chain delegation revoked. ${reason ?? ''}`.trim();
 
   // 1. Send push notification
-  await send(walletId, {
-    title,
-    body,
-    route: '/safety',
-    kind: 'panic-flatten',
-    data: {
-      action: 'kill',
-      reason,
-      signature,
-    },
-  }).catch((e) => console.warn('[alerts] push send failed:', e instanceof Error ? e.message : e));
+  try {
+    await send(walletId, {
+      title,
+      body,
+      route: '/safety',
+      kind: 'panic-flatten',
+      data: {
+        action: 'kill',
+        reason,
+        signature,
+      },
+    });
+  } catch (e) {
+    console.warn('[alerts] push send failed:', e instanceof Error ? e.message : e);
+  }
 
   // 2. Persist message
   await query(
