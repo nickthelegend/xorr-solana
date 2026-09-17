@@ -138,10 +138,15 @@ describe('the check cannot be raced by another branch', () => {
     }
   });
 
-  it('keeps the frozen list and the directory in step', () => {
+  it('allows every numbered file on disk', () => {
+    /*
+     * A subset check, not equality. The list is an allowlist rather than an inventory: it may name
+     * a numbered migration still in flight on another branch, so the two can merge in either
+     * order. What must never happen is a file on disk that the list does not name.
+     */
     const onDisk = files.filter((f) => /^\d{3}-/.test(f));
-    // A numbered file deleted or renamed without updating the list would make the list a fiction.
-    expect([...LEGACY_MIGRATIONS].sort()).toEqual(onDisk.sort());
+    const unlisted = onDisk.filter((f) => !LEGACY_MIGRATIONS.has(f));
+    expect(unlisted, `numbered migrations not in the frozen list: ${unlisted.join(', ')}`).toEqual([]);
   });
 
   it('accepts two timestamped migrations written by different branches', () => {

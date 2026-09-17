@@ -59,7 +59,12 @@ export const MAX_LEGACY_NUMBER = 199;
  * every time, no matter what else is in flight. There is nothing left to race for: the next free
  * number is not a resource because no new file may take a number at all.
  *
- * Nothing is added here. A new migration is timestamped.
+ * The list may name a file that has not landed yet. It is an allowlist, not an inventory: a
+ * numbered migration already in flight on another branch when the scheme changed is named here so
+ * the two can merge in either order. An entry permits exactly one filename, so a different branch
+ * taking the same number is still refused.
+ *
+ * Nothing else is added here. A new migration is timestamped.
  */
 export const LEGACY_MIGRATIONS: ReadonlySet<string> = new Set([
   '001-alert-firing.sql',
@@ -96,6 +101,9 @@ export const LEGACY_MIGRATIONS: ReadonlySet<string> = new Set([
   '032-xstock-basket.sql',
   '033-multiplier-observations.sql',
   '034-position-sleeves.sql',
+  // In flight on another branch when numbers closed (worker 23). Listed so that branch and this
+  // one can merge in either order; it is the last numbered migration this repo will have.
+  '035-watchlist-order.sql',
 ]);
 
 export type MigrationName =
