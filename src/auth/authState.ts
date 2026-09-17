@@ -12,6 +12,8 @@
  * request goes out, exactly as it always did: at worst it 401s, which is visible, recoverable and
  * honest. Silence is none of those.
  */
+import { clearSessionEnded } from './reauth';
+
 export type AuthKnowledge = 'unknown' | 'signed-in' | 'signed-out';
 
 let state: AuthKnowledge = 'unknown';
@@ -26,6 +28,14 @@ const known = new Promise<void>((resolve) => {
 export function setAuthKnowledge(next: AuthKnowledge): void {
   state = next;
   if (next !== 'unknown') settled?.();
+  /*
+   * A session again means the expiry prompt has done its job.
+   *
+   * Cleared on Privy reporting `signed-in` rather than on the user tapping the button: tapping only
+   * opens a screen, and being signed in is what actually ends the state. Note that `api.ts` sets
+   * `signed-out` itself when it detects an expiry, which is why this only clears on the way in.
+   */
+  if (next === 'signed-in') clearSessionEnded();
 }
 
 /**

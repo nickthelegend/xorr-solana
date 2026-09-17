@@ -8,6 +8,7 @@ import { accessToken } from '@/auth/token';
 import { isPublicPath } from './publicPaths';
 import { authKnowledge, setAuthKnowledge, whenAuthKnown } from '@/auth/authState';
 import { SessionExpired, sessionVerdict, shouldRetryWithToken } from '@/auth/expiry';
+import { noteSessionEnded } from '@/auth/reauth';
 import { API_BASE } from './apiBase';
 import { ApiError, NotSignedIn, TimedOut, markReplayed, retryAfterSeconds } from './apiError';
 import { noteRateLimited } from '@/net/throttleStore';
@@ -173,6 +174,14 @@ async function send<T>(
        * refused — `send` refuses to ask a question it knows it cannot answer.
        */
       setAuthKnowledge('signed-out');
+      /*
+       * Recorded once for the whole app, not left to each screen.
+       *
+       * Six mounted screens make six reads, so six of them would report the same sentence — and
+       * none of them can act on it, because the fix is signing in rather than anything on that
+       * screen. The screens keep their own error; the prompt is drawn in one place.
+       */
+      noteSessionEnded();
       throw new SessionExpired(path);
     }
     /*

@@ -15,15 +15,21 @@
  * the kill switch is signed on chain rather than through us and works with the executor entirely
  * down, and covering the app with a dialog would take that away at the moment it matters most.
  */
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { View } from 'react-native';
-import { Press, Text, colors, radius, size, space } from '@/ui';
+import { Press, Text, colors, radius, signIn, size, space } from '@/ui';
 import { useNow } from '@/state/useNow';
 import { executorHealth } from '@/data/health';
 import { CHAIN_KEY, chainMoney, chainSentenceName } from '@/chain';
 import { compareChains, type ChainMatch } from './chainMatch';
 import { openBreakers, throttleBanner, type ThrottleState } from './throttle';
 import { reconnectBanner, retryDelayMs, type ReconnectState } from './reconnect';
+import {
+  SESSION_ENDED_DETAIL,
+  SESSION_ENDED_TITLE,
+  sessionEndedAt,
+  subscribeSessionEnded,
+} from '@/auth/reauth';
 import { useThrottle } from './throttleStore';
 import { ChainMismatchScreen } from './ChainMismatch';
 
@@ -188,6 +194,17 @@ function BottomBanner({
   onRetryNow: () => void;
 }) {
   const now = useNow(state.reachable ? 60_000 : 1_000);
+
+  /*
+   * A dead session outranks both.
+   *
+   * Nothing authenticated will load at all until they sign in, so a sentence about a rate limit or
+   * a countdown to the next health check would be about a smaller problem — and the connection may
+   * be perfectly fine, which makes "can't reach xorr" actively wrong.
+   */
+  const endedAt = useSyncExternalStore(subscribeSessionEnded, sessionEndedAt, sessionEndedAt);
+  if (endedAt !== null) return <SessionEndedBanner />;
+
   const banner = reconnectBanner(state, now);
   if (!banner) return <ThrottleBanner />;
 
@@ -294,6 +311,56 @@ function LiveThrottleBanner({
       <Text variant="footnote" color={colors.ink40}>
         {banner.detail}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * The session ended while the app was open.
+ *
+ * Said in one place with the one control that helps. Every screen still raises its own
+ * `SessionExpired` — a screen that silently showed nothing would be back to the emptiness problem
+ * the offline banner exists to prevent — but the prompt is not theirs to draw, because the fix is
+ * not on any of them.
+ *
+ * A banner rather than a modal, for the same reason as the others: a dead session does not touch
+ * the delegation, which lives on chain and is revoked by a signature the user makes themselves. The
+ * kill switch still works, and covering the app would take that away at the moment someone might
+ * most want it.
+ */
+function SessionEndedBanner() {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: space.s16,
+        right: space.s16,
+        bottom: space.s26,
+        backgroundColor: colors.surfaceAlt,
+        borderRadius: radius.card,
+        paddingHorizontal: space.s16,
+        paddingVertical: space.s12,
+        gap: space.s4,
+      }}
+      accessibilityLiveRegion="polite"
+    >
+      <Text variant="rowPrimary" color={colors.ink}>
+        {SESSION_ENDED_TITLE}
+      </Text>
+      <Text variant="footnote" color={colors.ink40}>
+        {SESSION_ENDED_DETAIL}
+      </Text>
+      <Press
+        onPress={signIn}
+        accessibilityRole="button"
+        accessibilityLabel="Sign in again"
+        hitHeight={size.hit}
+        style={{ alignSelf: 'flex-start' }}
+      >
+        <Text variant="footnote" color={colors.ink}>
+          Sign in ›
+        </Text>
+      </Press>
     </View>
   );
 }
