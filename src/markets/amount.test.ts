@@ -10,8 +10,9 @@ import {
   decimalsTyped,
 } from './amount';
 
-const check = (text: string, rest: Parameters<typeof checkAmount>[0] extends infer _ ? Omit<Parameters<typeof checkAmount>[0], 'text'> : never = {}) =>
-  checkAmount({ text, ...rest });
+type Rest = Omit<Parameters<typeof checkAmount>[0], 'text'>;
+
+const check = (text: string, rest: Rest = {}) => checkAmount({ text, ...rest });
 
 describe('an amount still being typed is not an amount being got wrong', () => {
   it('says nothing about an empty field', () => {
