@@ -9,6 +9,7 @@ import { isPublicPath } from './publicPaths';
 import { authKnowledge, whenAuthKnown } from '@/auth/authState';
 import { API_BASE } from './apiBase';
 import { ApiError, NotSignedIn, TimedOut, markReplayed, retryAfterSeconds } from './apiError';
+import { noteRateLimited } from '@/net/throttleStore';
 import { keyHeaders, type Keyed } from './intentKey';
 /*
  * Re-exported, not redefined.
@@ -142,13 +143,23 @@ async function send<T>(path: string, signal: AbortSignal, requestId: string, ini
     } catch {
       parsed = undefined;
     }
+    // Both headers are on the CORS expose list (`server/src/index.ts`), so they are readable from the app.
+    const retryAfterSec = retryAfterSeconds(res.headers.get('retry-after'));
+    /*
+     * A 429 is not one screen's problem.
+     *
+     * Every screen that reads a market polls, so walking into the limiter fails all of them at once, and
+     * each one rendering its own "that did not load" composes into "the app is broken" — a much worse
+     * description of a sixty-second window than the truth. Recorded here, where every request passes, so
+     * one banner can say it once (`net/throttle.ts`).
+     */
+    if (res.status === 429) noteRateLimited(retryAfterSec);
     throw new ApiError(
       res.status,
       `${res.status} ${res.statusText}${text ? `: ${text}` : ''}`,
       parsed,
       requestId,
-      // Both headers are on the CORS expose list (`server/src/index.ts`), so they are readable from the app.
-      retryAfterSeconds(res.headers.get('retry-after')),
+      retryAfterSec,
       res.headers.get('idempotent-replay') === 'true',
     );
   }

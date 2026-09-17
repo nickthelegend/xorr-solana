@@ -221,6 +221,12 @@ export type Health = {
   uptimeSec: number;
   dependencies: HealthDependency[];
   db?: string;
+  /**
+   * Every upstream host the HTTP lane has seen, with its consecutive failures and when a breaker closes
+   * (`server/src/http/get.ts`). Absent from an executor older than the field — which is not a claim that
+   * none is open, only that it did not say.
+   */
+  breakers?: { host: string; failures: number; openUntil: number; open?: boolean }[];
   publicSurface?: { paths: string[] };
   /** Whether a language model can write the agents' replies. Absent from an executor older than the field. */
   voice?: { configured: boolean };

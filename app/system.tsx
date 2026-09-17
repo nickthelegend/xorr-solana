@@ -35,6 +35,7 @@ import { useAsync } from '@/data/useAsync';
 import { system, type HealthDependency } from '@/data/system';
 import { shortAddress } from '@/format';
 import { useNow } from '@/state/useNow';
+import { openBreakers, type Breaker } from '@/net/throttle';
 
 const DOT = 8;
 /** A timestamp as the executor writes one into a detail: ISO 8601, UTC, optionally after "at". */
@@ -85,6 +86,8 @@ export default function Status() {
   const now = useNow(15_000);
 
   const deps = data?.dependencies ?? [];
+  /* The hosts the circuit breaker has shut out right now, as the executor reported them. */
+  const open = openBreakers(data?.breakers ?? [], now);
   const criticalDown = deps.filter((d) => d.critical && d.status !== 'up').length;
 
   return (
@@ -133,6 +136,40 @@ export default function Status() {
             {deps.map((d) => (
               <DependencyRow key={d.name} dep={d} now={now} />
             ))}
+
+            {/*
+              Which upstreams the executor is refusing to call right now.
+              
+              The `upstreams` dependency above says only whether any breaker is open. This is the detail
+              behind it: which host, how many failures opened it, and when it tries again. While one is open
+              prices and quotes come from fewer sources, and a screen showing a dash instead of a number is
+              showing the truth about that host rather than a fault of its own.
+            */}
+            {open.length > 0 ? (
+              <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
+                <Text variant="footnote" color={colors.ink55}>
+                  ROUTING AROUND
+                </Text>
+                {open.map((b) => (
+                  <View
+                    key={b.host}
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      gap: space.s10,
+                      marginTop: space.s8,
+                    }}
+                  >
+                    <Text variant="secondary" color={colors.ink} style={{ flex: 1 }} selectable>
+                      {b.host}
+                    </Text>
+                    <Text variant="footnote" color={colors.ink55}>
+                      {breakerDetail(b, now)}
+                    </Text>
+                  </View>
+                ))}
+              </SheetCard>
+            ) : null}
           </ScrollView>
         )}
       </Fill>
@@ -177,4 +214,12 @@ function DependencyRow({ dep, now }: { dep: HealthDependency; now: number }) {
       ) : null}
     </SheetCard>
   );
+}
+
+/** One open breaker, in the two facts worth knowing: how many failures opened it, and when it tries again. */
+function breakerDetail(b: Breaker, now: number): string {
+  const failures = `${b.failures} ${b.failures === 1 ? 'failure' : 'failures'}`;
+  const seconds = Math.ceil((b.openUntil - now) / 1000);
+  // A breaker already past its window is one the executor has not yet reported closing: said, not guessed at.
+  return seconds > 0 ? `${failures} · retries in ${seconds}s` : `${failures} · retrying`;
 }

@@ -18,9 +18,12 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Text, colors, radius, space } from '@/ui';
+import { useNow } from '@/state/useNow';
 import { executorHealth } from '@/data/health';
 import { CHAIN_KEY, chainMoney, chainSentenceName } from '@/chain';
 import { compareChains, type ChainMatch } from './chainMatch';
+import { openBreakers, throttleBanner, type ThrottleState } from './throttle';
+import { useThrottle } from './throttleStore';
 import { ChainMismatchScreen } from './ChainMismatch';
 
 /** How often to re-check while down. Slow enough not to hammer a server that may be struggling. */
@@ -56,6 +59,8 @@ export function ReachabilityProvider({ children }: { children: React.ReactNode }
       const beat = await executorHealth();
       if (!alive) return;
       setReachable(beat.reachable);
+      // Which upstreams the executor is routing around right now, from the report it already answers with.
+      useThrottle.getState().reportBreakers(beat.breakers);
       setChain(
         compareChains({
           app: CHAIN_KEY,
@@ -90,7 +95,13 @@ export function ReachabilityProvider({ children }: { children: React.ReactNode }
   return (
     <ReachabilityContext.Provider value={reachable}>
       {children}
-      {reachable ? null : <OfflineBanner />}
+      {/*
+        One banner at a time, in order of how much it takes away.
+
+        Unreachable first: nothing is loading at all, and a sentence about a throttle would be about a
+        smaller problem than the one in front of the reader.
+      */}
+      {reachable ? <ThrottleBanner /> : <OfflineBanner />}
     </ReachabilityContext.Provider>
   );
 }
@@ -126,6 +137,66 @@ function OfflineBanner() {
         Screens may be out of date, and anything you start will not go through. Your funds and your
         permission are on chain and unaffected — stopping your agents still works, because that is
         signed by you, not by us.
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * Being rate limited, or an upstream being routed around.
+ *
+ * Same shape as the offline banner and for the same reason: it does not block anything. Both of these are
+ * temporary, neither is the user's fault, and neither is worth taking the app away over — a throttle that
+ * covered the screen would be a worse outage than the throttle.
+ *
+ * It re-renders on a timer while one is live, because the sentence carries a number of seconds and the whole
+ * point of that number is that it goes down. `useNow` is the app's existing clock for exactly this.
+ */
+function ThrottleBanner() {
+  const limitedUntil = useThrottle((s) => s.limitedUntil);
+  const breakers = useThrottle((s) => s.breakers);
+  /*
+   * The clock only runs while there is a number counting down.
+   *
+   * `limitedUntil` clears itself when its window closes (`throttleStore.ts`), so this mounts for the length
+   * of a limit and not for the rest of the session. A breaker banner names no seconds, so it ticks at the
+   * default minute — enough to notice `/health` has stopped reporting one.
+   */
+  if (limitedUntil === 0 && openBreakers(breakers).length === 0) return null;
+  return <LiveThrottleBanner limitedUntil={limitedUntil} breakers={breakers} />;
+}
+
+function LiveThrottleBanner({
+  limitedUntil,
+  breakers,
+}: {
+  limitedUntil: number;
+  breakers: ThrottleState['breakers'];
+}) {
+  const now = useNow(limitedUntil > 0 ? 1_000 : 60_000);
+  const banner = throttleBanner({ limitedUntil, breakers }, now);
+  if (!banner) return null;
+  return (
+    <View
+      style={{
+        pointerEvents: 'none',
+        position: 'absolute',
+        left: space.s16,
+        right: space.s16,
+        bottom: space.s26,
+        backgroundColor: colors.surfaceAlt,
+        borderRadius: radius.card,
+        paddingHorizontal: space.s16,
+        paddingVertical: space.s12,
+        gap: space.s4,
+      }}
+      accessibilityLiveRegion="polite"
+    >
+      <Text variant="rowPrimary" color={colors.ink}>
+        {banner.title}
+      </Text>
+      <Text variant="footnote" color={colors.ink40}>
+        {banner.detail}
       </Text>
     </View>
   );
