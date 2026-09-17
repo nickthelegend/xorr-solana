@@ -851,10 +851,28 @@ export type SetupRead<T> = { data: T | undefined; error: unknown };
 /** What of a permission decides whether the bot can use it — the fields Safety decides that from. */
 export type SetupPermission = { revoked: boolean; expiresAt?: number; delegateIsCurrent?: boolean };
 
-export type SetupStepKey = 'fund' | 'permit' | 'strategy';
+export type SetupStepKey = 'fund' | 'permit' | 'trade';
 
-/** `unknown` is a step whose read failed: never counted as done, and never as still to do. */
-export type SetupStepState = 'done' | 'todo' | 'unknown';
+/**
+ * What a setup step can be.
+ *
+ * Four, not two, and the difference between the last three is the whole point of this module.
+ *
+ *   `done`     the chain or the executor says so.
+ *   `todo`     it has genuinely not been done.
+ *   `checking` the read is still out. NOT the same as "not done": a step drawn as to-do before its read answers
+ *              tells a wallet that has funded and granted that it has done neither.
+ *   `unknown`  the read came back and could not answer. NOT the same as "still checking": one resolves itself, the
+ *              other will not, and telling someone to wait for an answer that is not coming is its own small lie.
+ */
+export type SetupStepState = 'done' | 'todo' | 'checking' | 'unknown';
+
+/**
+ * The chain's own account of the permission, as `standingOnChain` reports it (`src/wallet/delegationChain.ts`).
+ *
+ * Named here as plain strings so this module stays free of the wallet layer. `undefined` is a read still out.
+ */
+export type SetupStanding = 'live' | 'revoked' | 'expired' | 'none' | 'unreadable';
 
 export type SetupStep = {
   key: SetupStepKey;
@@ -865,56 +883,113 @@ export type SetupStep = {
 };
 
 /**
- * The three things a wallet needs before the bot can trade for it (FEATURES.md #14): money in, a permission, a strategy.
+ * The three things that have to be true before this app has done what it says (FEATURES.md #14): money in, a
+ * permission the chain agrees exists, and a trade that actually filled.
  *
- * `null` means Home shows nothing, and it stands for three different facts. Nobody is signed in, so there is no wallet to
- * set up. A read is still out, and a step drawn before it answers is a guess — the card would flash "to do" at a wallet
- * that has done it. Or every step is done. A read that FAILED keeps the card, with that one step unknown: a card that
- * disappeared on a failure would be telling a new wallet it was ready to trade.
+ * `null` means one thing only: nobody is signed in, so there is no wallet to set up. Every other case draws the card,
+ * including one where nothing has answered yet — those steps say they are being checked. It used to return `null`
+ * while any read was in flight, on the reading that a step drawn before its read answers is a guess. That was right
+ * about the guess and wrong about the remedy: the card vanished for as long as the executor took, on the one screen a
+ * new wallet is looking at to find out what to do next. A step that says it is checking is not guessing.
  *
- * The permission counts only while the bot can use it, by the helpers Safety decides that with: not revoked, not past its
- * end, and granted to the key the executor signs with. A strategy counts in any state. The step is having made one, and
- * where nothing settles every strategy is watched, so a step that waited for a live one could never be finished there.
+ * ## Where each step's answer comes from
+ *
+ * **Fund** — the wallet's real balance. A balance nobody gave is not a zero.
+ *
+ * **Permit** — **the chain**, whenever it can be asked. Not a stored flag and not the executor's record of what it
+ * once wrote: both drift the moment anything happens elsewhere, and this app has already shipped a green LIVE badge
+ * over a permission the contract said was revoked. The executor's record is the fallback for where the chain cannot be
+ * reached at all, and it is only ever a fallback.
+ *
+ * **Trade** — a fill the executor recorded. Not a strategy created, which is an intention: the demo's claim, and the
+ * product's, is that the bot *traded*, and the step that says so must not be satisfied by anything less.
  */
 export function setupSteps(input: {
   signedOut: boolean;
   balance: SetupRead<{ total: number } | null>;
+  /** The chain's answer, and `undefined` while the read is out. Preferred over `permission` whenever it is present. */
+  standing?: SetupRead<SetupStanding>;
+  /** The executor's record of the permission — the fallback for where the chain could not be asked. */
   permission: SetupRead<SetupPermission | null>;
-  strategies: SetupRead<readonly unknown[]>;
+  /** The recorded runs. A `filled` one among them is the trade. */
+  fills: SetupRead<readonly { status: string }[]>;
   now?: number;
 }): SetupStep[] | null {
-  const { signedOut, balance, permission, strategies, now = Date.now() } = input;
+  const { signedOut, balance, standing, permission, fills, now = Date.now() } = input;
   if (signedOut) return null;
-  if ([balance, permission, strategies].some((read) => read.data === undefined && !read.error)) return null;
 
-  const steps: SetupStep[] = [
+  return [
     { key: 'fund', label: 'Fund', href: '/deposit', state: fundState(balance) },
-    { key: 'permit', label: 'Permit', href: '/delegate', state: permitState(permission, now) },
-    { key: 'strategy', label: 'First strategy', href: '/strategies', state: strategyState(strategies) },
+    { key: 'permit', label: 'Permit', href: '/delegate', state: permitState(standing, permission, now) },
+    { key: 'trade', label: 'First trade', href: '/strategies', state: tradeState(fills) },
   ];
-  return steps.every((step) => step.state === 'done') ? null : steps;
+}
+
+/** Whether every step is done — what a caller uses to decide there is nothing left to show. */
+export function setupComplete(steps: SetupStep[] | null): boolean {
+  return steps !== null && steps.every((step) => step.state === 'done');
+}
+
+/** A read still out, as every step decides it: no answer and no failure. */
+function stillReading(read: SetupRead<unknown> | undefined): boolean {
+  return read !== undefined && read.data === undefined && read.error === undefined;
 }
 
 function fundState(read: SetupRead<{ total: number } | null>): SetupStepState {
+  if (stillReading(read)) return 'checking';
   // A balance the executor did not give is not a zero, whatever shape the absence took.
   if (read.error || !read.data || !Number.isFinite(read.data.total)) return 'unknown';
   return read.data.total > 0 ? 'done' : 'todo';
 }
 
-function permitState(read: SetupRead<SetupPermission | null>, now: number): SetupStepState {
-  if (read.error) return 'unknown';
+/**
+ * The permission, from the chain where the chain can be asked.
+ *
+ * `unreadable` is the contract's address being unreachable, which is unknown rather than ungranted — the one mistake
+ * this step must never make is reporting a live permission as absent, or an absent one as live.
+ */
+function permitState(
+  standing: SetupRead<SetupStanding> | undefined,
+  permission: SetupRead<SetupPermission | null>,
+  now: number,
+): SetupStepState {
+  if (standing !== undefined) {
+    if (stillReading(standing)) return 'checking';
+    if (standing.error) return 'unknown';
+    switch (standing.data) {
+      case 'live':
+        return 'done';
+      case 'none':
+      case 'revoked':
+      case 'expired':
+        return 'todo';
+      // The chain was asked and would not say. Falling through to the executor's record here would answer a question
+      // about the chain with something that is not the chain.
+      default:
+        return 'unknown';
+    }
+  }
+
+  if (stillReading(permission)) return 'checking';
+  if (permission.error) return 'unknown';
   // Null is the executor's own answer that nothing was ever granted.
-  if (!read.data) return 'todo';
-  const permission = read.data;
+  if (!permission.data) return 'todo';
+  const p = permission.data;
   // `killed` is false because those helpers stand aside for a stop, and here a stop is simply `revoked`.
-  const usable =
-    !permission.revoked && !delegationExpired(permission, false, now) && !delegateUnusable(permission, false);
+  const usable = !p.revoked && !delegationExpired(p, false, now) && !delegateUnusable(p, false);
   return usable ? 'done' : 'todo';
 }
 
-function strategyState(read: SetupRead<readonly unknown[]>): SetupStepState {
+/**
+ * A trade that filled — the executor's own record of one, not a strategy that might one day make one.
+ *
+ * A strategy is an intention. This product's claim is that the bot traded, and the step that says so is not satisfied
+ * by anything less than a fill the executor wrote down.
+ */
+function tradeState(read: SetupRead<readonly { status: string }[]>): SetupStepState {
+  if (stillReading(read)) return 'checking';
   if (read.error || !Array.isArray(read.data)) return 'unknown';
-  return read.data.length > 0 ? 'done' : 'todo';
+  return read.data.some((run) => run.status === 'filled') ? 'done' : 'todo';
 }
 
 // ── Stored records as rows (/risk, /strategy/[id]) ───────────────────────────

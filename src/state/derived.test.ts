@@ -932,10 +932,10 @@ describe('cap and term rings', () => {
 });
 
 /*
- * The steps a new wallet has left, on Home (FEATURES.md #14).
+  * The steps a new wallet has left, on Home (FEATURES.md #14).
  *
- * Every combination of the three reads is walked, signed in and out, because the rule that matters is the one a hand-picked
- * case misses: a read that failed is unknown — never done and never still to do — and nothing is drawn while a read is out.
+ * Every combination of the reads is walked, because the rule that matters is the one a hand-picked case misses: the
+ * four states are genuinely four, and three of them are ways of not being done that must never be confused.
  */
 describe('setup progress — FEATURES.md #14', () => {
   const HOUR = 3_600_000;
@@ -945,6 +945,8 @@ describe('setup progress — FEATURES.md #14', () => {
   type Outcome = (typeof OUTCOMES)[number];
 
   const usable: d.SetupPermission = { revoked: false, expiresAt: now + 72 * HOUR, delegateIsCurrent: true };
+  const filled = [{ status: 'filled' }];
+  const unfilled = [{ status: 'blocked' }];
 
   function read<T>(outcome: Outcome, done: T, todo: T): d.SetupRead<T> {
     if (outcome === 'out') return { data: undefined, error: undefined };
@@ -952,85 +954,143 @@ describe('setup progress — FEATURES.md #14', () => {
     return { data: outcome === 'done' ? done : todo, error: undefined };
   }
 
-  const stepsFor = (balance: Outcome, permission: Outcome, strategies: Outcome, signedOut = false) =>
+  /** What each outcome becomes as a step state: a read still out is `checking`, a failed one `unknown`. */
+  const expected = (o: Outcome) => (o === 'out' ? 'checking' : o === 'failed' ? 'unknown' : o);
+
+  const stepsFor = (balance: Outcome, permission: Outcome, fills: Outcome, signedOut = false) =>
     d.setupSteps({
       signedOut,
       balance: read(balance, { total: 250 }, { total: 0 }),
       permission: read<d.SetupPermission | null>(permission, usable, null),
-      strategies: read<readonly unknown[]>(strategies, [{ id: 'dca-1' }], []),
+      fills: read<readonly { status: string }[]>(fills, filled, unfilled),
       now,
     });
 
-  it('draws nothing while a read is out, nothing once all three are done, and otherwise each step as its read said', () => {
+  it('says of every step what its own read said, in all sixty-four combinations', () => {
     for (const balance of OUTCOMES) {
       for (const permission of OUTCOMES) {
-        for (const strategies of OUTCOMES) {
-          const outcomes = [balance, permission, strategies];
+        for (const fills of OUTCOMES) {
+          const outcomes = [balance, permission, fills];
           const label = outcomes.join(' / ');
-          const steps = stepsFor(balance, permission, strategies);
-          if (outcomes.includes('out') || outcomes.every((o) => o === 'done')) {
-            expect(steps, label).toBeNull();
-            continue;
-          }
-          expect(
-            steps?.map((s) => s.state),
-            label,
-          ).toEqual(outcomes.map((o) => (o === 'failed' ? 'unknown' : o)));
+          expect(stepsFor(balance, permission, fills)?.map((s) => s.state), label).toEqual(outcomes.map(expected));
         }
       }
     }
   });
 
-  it('draws nothing signed out, whatever the reads said', () => {
+  /*
+   * The card used to vanish while any read was out, so it disappeared for as long as the executor took — on the one
+   * screen a new wallet is looking at to find out what to do next. A step that says it is being checked is not a guess.
+   */
+  it('keeps the card while reads are still out, saying so', () => {
+    expect(stepsFor('out', 'out', 'out')?.map((s) => s.state)).toEqual(['checking', 'checking', 'checking']);
+  });
+
+  it('draws nothing signed out, whatever the reads said — there is no wallet to set up', () => {
     for (const balance of OUTCOMES) {
       for (const permission of OUTCOMES) {
-        for (const strategies of OUTCOMES) {
-          expect(stepsFor(balance, permission, strategies, true), [balance, permission, strategies].join(' / ')).toBeNull();
+        for (const fills of OUTCOMES) {
+          expect(stepsFor(balance, permission, fills, true), [balance, permission, fills].join(' / ')).toBeNull();
         }
       }
     }
   });
 
-  it('keeps the card when the only step not done is one it could not read', () => {
-    // Hiding it would say the wallet is ready. A dash says what is known: that it could not be checked.
-    expect(stepsFor('done', 'done', 'failed')?.map((s) => s.state)).toEqual(['done', 'done', 'unknown']);
-    expect(stepsFor('failed', 'failed', 'failed')?.map((s) => s.state)).toEqual(['unknown', 'unknown', 'unknown']);
+  /* Still checking resolves itself; could-not-read does not. Telling someone to wait for an answer that is not coming. */
+  it('never confuses a read still out with one that failed', () => {
+    expect(stepsFor('out', 'done', 'done')?.[0]!.state).toBe('checking');
+    expect(stepsFor('failed', 'done', 'done')?.[0]!.state).toBe('unknown');
   });
 
   it('names the three steps in order, each opening the screen it is taken on', () => {
     expect(stepsFor('todo', 'todo', 'todo')).toEqual([
       { key: 'fund', label: 'Fund', href: '/deposit', state: 'todo' },
       { key: 'permit', label: 'Permit', href: '/delegate', state: 'todo' },
-      { key: 'strategy', label: 'First strategy', href: '/strategies', state: 'todo' },
+      { key: 'trade', label: 'First trade', href: '/strategies', state: 'todo' },
     ]);
   });
 
-  describe('a permission counts only while the bot can use it', () => {
-    const permitWith = (permission: d.SetupPermission | null) =>
+  it('is complete only when every step is done', () => {
+    expect(d.setupComplete(stepsFor('done', 'done', 'done'))).toBe(true);
+    expect(d.setupComplete(stepsFor('done', 'done', 'out'))).toBe(false);
+    expect(d.setupComplete(stepsFor('done', 'done', 'failed'))).toBe(false);
+    expect(d.setupComplete(null)).toBe(false);
+  });
+
+  describe('the trade step is a fill, not an intention', () => {
+    const tradeWith = (data: readonly { status: string }[]) =>
+      d
+        .setupSteps({
+          signedOut: false,
+          balance: { data: { total: 250 }, error: undefined },
+          permission: { data: usable, error: undefined },
+          fills: { data, error: undefined },
+          now,
+        })
+        ?.find((s) => s.key === 'trade')?.state;
+
+    /*
+     * A strategy created is an intention. The product's claim — and the demo's — is that the bot TRADED, so the step
+     * that says so must not be satisfied by runs that were blocked, skipped or are still pending.
+     */
+    it('is done only once a run actually filled', () => {
+      expect(tradeWith(filled)).toBe('done');
+      expect(tradeWith([{ status: 'blocked' }, { status: 'skipped' }, { status: 'pending' }])).toBe('todo');
+      expect(tradeWith([])).toBe('todo');
+    });
+
+    it('finds the fill among runs that were not', () => {
+      expect(tradeWith([{ status: 'blocked' }, { status: 'filled' }])).toBe('done');
+    });
+  });
+
+  describe('the permission comes from the chain when the chain can be asked', () => {
+    const permitWith = (standing?: d.SetupRead<d.SetupStanding>, permission: d.SetupPermission | null = null) =>
       d
         .setupSteps({
           signedOut: false,
           balance: { data: { total: 0 }, error: undefined },
+          standing,
           permission: { data: permission, error: undefined },
-          strategies: { data: [], error: undefined },
+          fills: { data: [], error: undefined },
           now,
         })
         ?.find((s) => s.key === 'permit')?.state;
 
-    it('is done when live, and to do when never granted', () => {
-      expect(permitWith(usable)).toBe('done');
-      expect(permitWith(null)).toBe('todo');
+    it('takes the chain over the executor, whichever way they disagree', () => {
+      // The failure this exists for: a green LIVE badge over a permission the contract said was revoked.
+      expect(permitWith({ data: 'revoked', error: undefined }, usable)).toBe('todo');
+      expect(permitWith({ data: 'live', error: undefined }, null)).toBe('done');
     });
 
-    it('is to do once revoked, past its end, or granted to a key the executor does not sign with', () => {
-      expect(permitWith({ ...usable, revoked: true })).toBe('todo');
-      expect(permitWith({ ...usable, expiresAt: now - HOUR })).toBe('todo');
-      expect(permitWith({ ...usable, delegateIsCurrent: false })).toBe('todo');
+    it('reads every standing the chain can report', () => {
+      expect(permitWith({ data: 'live', error: undefined })).toBe('done');
+      for (const kind of ['none', 'revoked', 'expired'] as const) {
+        expect(permitWith({ data: kind, error: undefined }), kind).toBe('todo');
+      }
     });
 
-    it('is not failed for what an older executor cannot say', () => {
-      // Absent is not expired and not a moved key — the rule `delegationExpired` and `delegateUnusable` already keep.
-      expect(permitWith({ revoked: false })).toBe('done');
+    /*
+     * Unreachable is not ungranted. Falling back to the executor here would answer a question about the chain with
+     * something that is not the chain, and the one mistake this step must never make is calling a live permission absent.
+     */
+    it('says unknown when the chain would not answer, rather than falling back', () => {
+      expect(permitWith({ data: 'unreadable', error: undefined }, usable)).toBe('unknown');
+      expect(permitWith({ data: undefined, error: failure }, usable)).toBe('unknown');
+    });
+
+    it('is checking while the chain read is out', () => {
+      expect(permitWith({ data: undefined, error: undefined }, usable)).toBe('checking');
+    });
+
+    it('falls back to the executor only where there is no chain read at all', () => {
+      expect(permitWith(undefined, usable)).toBe('done');
+      expect(permitWith(undefined, null)).toBe('todo');
+      expect(permitWith(undefined, { ...usable, revoked: true })).toBe('todo');
+      expect(permitWith(undefined, { ...usable, expiresAt: now - HOUR })).toBe('todo');
+      expect(permitWith(undefined, { ...usable, delegateIsCurrent: false })).toBe('todo');
+      // Absent is not expired and not a moved key — the rule the two helpers already keep.
+      expect(permitWith(undefined, { revoked: false })).toBe('done');
     });
   });
 
@@ -1041,7 +1101,7 @@ describe('setup progress — FEATURES.md #14', () => {
           signedOut: false,
           balance,
           permission: { data: null, error: undefined },
-          strategies: { data: [], error: undefined },
+          fills: { data: [], error: undefined },
           now,
         })
         ?.find((s) => s.key === 'fund')?.state;
@@ -1049,16 +1109,5 @@ describe('setup progress — FEATURES.md #14', () => {
     expect(fundWith({ data: { total: Number.NaN }, error: undefined })).toBe('unknown');
     expect(fundWith({ data: { total: 0 }, error: undefined })).toBe('todo');
     expect(fundWith({ data: { total: 0.42 }, error: undefined })).toBe('done');
-  });
-
-  it('counts a strategy in any state, since a watched one is all a network that settles nothing can have', () => {
-    const steps = d.setupSteps({
-      signedOut: false,
-      balance: { data: { total: 250 }, error: undefined },
-      permission: { data: usable, error: undefined },
-      strategies: { data: [{ state: 'watch' }], error: undefined },
-      now,
-    });
-    expect(steps).toBeNull();
   });
 });
