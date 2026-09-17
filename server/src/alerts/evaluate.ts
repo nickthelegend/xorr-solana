@@ -209,6 +209,14 @@ export async function evaluateAlerts(): Promise<AlertOutcome[]> {
         body: v.because ?? a.detail,
         route: '/alerts',
         kind: 'alert-fired',
+        /*
+         * The instrument, so the tap opens it rather than the list of alerts.
+         *
+         * An alert is a statement about a price, and what someone does next is look at the chart or
+         * buy. Landing on a list of alert rules is landing one screen short of both. An alert with
+         * no symbol — a portfolio drawdown — sends none, and the app falls back to `/alerts`.
+         */
+        ...(a.symbol ? { data: { symbol: a.symbol } } : {}),
       }).catch(() => undefined);
       outcomes.push({ id: a.id, name: a.name, action: 'fired', detail: v.because ?? a.detail });
       continue;

@@ -58,11 +58,22 @@ export type JupiterQuoteResponse = {
   inAmount: string;
   outputMint: string;
   outAmount: string;
+  /** The floor at `slippageBps`: what the venue guarantees to deliver, not what it expects to. */
   otherAmountThreshold: string;
   swapMode: string;
   slippageBps: number;
   priceImpactPct: string;
-  routePlan?: Array<{ swapInfo: { label: string; inAmount: string; outAmount: string } }>;
+  /**
+   * What the aggregator itself takes, when a referral account is configured. `null` is the honest
+   * and usual answer here — this deployment sets none — and a breakdown must report that rather
+   * than quietly omitting the line, which reads the same as not having checked.
+   */
+  platformFee?: { amount: string; feeBps: number } | null;
+  routePlan?: Array<{
+    swapInfo: { label: string; inAmount: string; outAmount: string };
+    /** How much of the input this hop carries. A split route has several, summing to 100. */
+    percent?: number;
+  }>;
 };
 
 /**

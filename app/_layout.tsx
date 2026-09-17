@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppPrivyProvider } from '@/auth/PrivyProvider';
 import { PhoneFrame, colors } from '@/ui';
 import { useRegisterDevice } from '@/notifications/useRegisterDevice';
+import { useNotificationRoute } from '@/notifications/useNotificationRoute';
 import { useHydrateWallet } from '@/wallet/useHydrateWallet';
 import { useHydrateDelegation } from '@/wallet/useHydrateDelegation';
 import { ReachabilityProvider } from '@/net/Reachability';
@@ -35,6 +36,22 @@ void SplashScreen.preventAutoHideAsync().catch(() => undefined);
  */
 function DeviceRegistration() {
   useRegisterDevice();
+  return null;
+}
+
+/**
+ * A tapped notification opens the thing it is about — PLAN.md 10.10.
+ *
+ * `push.ts` has always attached a route to every message and nothing ever read it, so a tap opened
+ * the app wherever it had last been left: "A trade was stopped" landed on the home screen, and
+ * finding out which trade was the user's problem. `useNotificationRoute` handles both the cold tap
+ * that launched the app and the warm one that arrived while it was open.
+ *
+ * At the root and inside the Stack's provider, because it navigates: a hook that pushes a route
+ * needs a router, and the router does not exist above `<Stack>`.
+ */
+function NotificationRouting() {
+  useNotificationRoute();
   return null;
 }
 
@@ -129,6 +146,7 @@ export default function RootLayout() {
           <Stack.Screen name="portfolio" options={{ presentation: 'modal' }} />
           <Stack.Screen name="profile" options={{ presentation: 'modal' }} />
           <Stack.Screen name="order/[symbol]" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="xstock/[symbol]" options={{ presentation: 'modal' }} />
           <Stack.Screen name="auto-close/[id]" options={{ presentation: 'modal' }} />
           {/* The reasons behind a trade rise over the trail row they belong to, not away from it. */}
           <Stack.Screen name="explain/[seq]" options={{ presentation: 'modal' }} />
@@ -141,6 +159,8 @@ export default function RootLayout() {
           {/* Swap rises from the bottom, from the tab bar's centre: a sheet over the screen it was asked from. */}
           <Stack.Screen name="swap" options={{ presentation: 'modal' }} />
         </Stack>
+        {/* After the Stack, so `useRouter` resolves against a mounted navigator. */}
+        <NotificationRouting />
         <ChatDrawer />
         </PhoneFrame>
         </ReachabilityProvider>

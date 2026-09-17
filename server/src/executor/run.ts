@@ -797,6 +797,16 @@ async function runStrategyInner(
      * One transaction, because a position without an audit entry is an unexplained holding and an
      * audit entry without a position is a trade the portfolio does not know about.
      */
+    /*
+     * The audit row's own id, carried out of the transaction for the push below.
+     *
+     * A notification saying "Bought 0.1234 NVDAx" used to open the top of the activity log and
+     * leave the reader to find the row it meant. With the id the tap opens ON it
+     * (`src/notifications/routes.ts`). Declared out here because `append` runs inside the
+     * transaction and the push is deliberately outside it.
+     */
+    let auditSeq: string | undefined;
+
     await tx(async (client) => {
       await client.query(
         `UPDATE strategy_runs
@@ -849,7 +859,7 @@ async function runStrategyInner(
       // Closing is not spending, so it does not consume the day's allowance — the contract
       // agrees, and the two tallies must not disagree.
       if (!isClose) await recordSpend(walletId, intent.usd, client);
-      await append(
+      const auditRow = await append(
         {
           walletId,
           agent: agentForKind(strategy.kind),
@@ -874,6 +884,15 @@ async function runStrategyInner(
         },
         client,
       );
+      /*
+       * Optional, and deliberately so.
+       *
+       * This id exists to make a notification land on the right row. It is not part of the fill,
+       * and reading it must never be able to throw inside the transaction that recorded one — the
+       * surrounding code already holds that line for the push itself ("a push that fails must never
+       * roll back a trade that settled"), and the id it carries is held to the same one.
+       */
+      auditSeq = auditRow?.seq === undefined ? undefined : String(auditRow.seq);
       /*
        * Carry the strategy's state forward, in the SAME transaction as the fill.
        *
@@ -913,6 +932,16 @@ async function runStrategyInner(
         : `${filledUnits.toFixed(4)} at $${price.toLocaleString('en-US', { maximumFractionDigits: 2 })}. ${intent.because}`,
       route: '/activity',
       kind: 'dca-executed',
+      /*
+       * What the tap should open: the row this fill wrote, and the instrument it was in.
+       *
+       * `seq` is the id `/activity` puts on the row, so the app can open the list on it rather
+       * than at the top. Both are absent rather than guessed if the write did not report one.
+       */
+      data: {
+        ...(auditSeq === undefined ? {} : { seq: auditSeq }),
+        symbol: intent.outSymbol === 'USDC' ? intent.inSymbol : intent.outSymbol,
+      },
     }).catch(() => undefined);
 
     return { status: 'filled', runId, signature, units: filledUnits, price };
@@ -1283,6 +1312,9 @@ async function finishBlocked(
   reason: string,
   detail: string,
 ): Promise<RunOutcome> {
+  // The row the push below should open. See the same pattern on the fill path above.
+  let auditSeq: string | undefined;
+
   await tx(async (client) => {
     await client.query(
       `UPDATE strategy_runs SET status='blocked', error=$2, finished_at=now() WHERE id=$1`,
@@ -1291,7 +1323,7 @@ async function finishBlocked(
     // The period is spent either way; a schedule left due was re-selected on every tick.
     await settleSchedule(client, strategy, new Date());
     // A non-action is logged exactly like an action. That is the point of the trail.
-    await append(
+    const auditRow = await append(
       {
         walletId,
         agent: agentForKind(strategy.kind),
@@ -1302,6 +1334,8 @@ async function finishBlocked(
       },
       client,
     );
+    // Optional for the same reason as on the fill path: a row id is for a tap, not for the run.
+    auditSeq = auditRow?.seq === undefined ? undefined : String(auditRow.seq);
   });
 
   /*
@@ -1316,6 +1350,17 @@ async function finishBlocked(
     body: detail,
     route: '/activity',
     kind: 'strategy-blocked',
+    /*
+     * Which row, and which instrument.
+     *
+     * This is the push that most needs to land somewhere precise: it says a trade did not happen,
+     * and "which one" is the first thing anybody reading it wants. The trail is filed under
+     * "Blocked", so the app widens the filter to reach the row rather than showing an empty list.
+     */
+    data: {
+      ...(auditSeq === undefined ? {} : { seq: auditSeq }),
+      symbol: strategy.symbol,
+    },
   }).catch(() => undefined);
 
   return { status: 'blocked', runId, reason, detail };
