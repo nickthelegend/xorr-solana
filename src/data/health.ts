@@ -1,5 +1,5 @@
 /**
- * Is the executor answering at all?
+ * Is the executor answering at all, and which chain does it say it serves?
  *
  * Lives in the data layer because that is where network access lives — the repository-boundary
  * test enforces it, and the rule is a good one: a component that reaches the network directly is
@@ -8,11 +8,44 @@
  *
  * `/health` and not a real route, so this reports on the NETWORK rather than the session. A
  * signed-out user is not offline, and telling them they are would be its own wrong answer.
+ *
+ * The chain comes back from the same request. It was being asked for twice a minute already and the answer
+ * carries `chain` (`server/src/routes/ops.ts`), so checking that the executor serves the chain this build
+ * signs on costs nothing beyond reading a field that was on the wire the whole time.
  */
 import { API_BASE } from './apiBase';
 
+export type HealthBeat = {
+  /** The executor answered its health check. */
+  reachable: boolean;
+  /**
+   * The chain key it says it serves, where it said one.
+   *
+   * Undefined covers two different things, and both have to be treated the same way: an executor older than
+   * the field, and an executor that did not answer at all. Neither is evidence of a mismatch.
+   */
+  chain?: string;
+};
+
+export async function executorHealth(): Promise<HealthBeat> {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { method: 'GET' });
+    /*
+     * A 503 still carries the report. `/health` answers 503 when a critical dependency is down, and its body
+     * is the whole thing — chain included. Reading the chain only from a 200 would drop the check exactly
+     * when a deployment is in the state most likely to have been pointed somewhere new.
+     */
+    const body = (await res.json().catch(() => undefined)) as { chain?: unknown } | undefined;
+    return {
+      reachable: res.ok,
+      chain: typeof body?.chain === 'string' && body.chain.trim() ? body.chain.trim() : undefined,
+    };
+  } catch {
+    return { reachable: false };
+  }
+}
+
+/** Just the reachability, for the callers that only ever wanted that. */
 export async function executorReachable(): Promise<boolean> {
-  return fetch(`${API_BASE}/health`, { method: 'GET' })
-    .then((r) => r.ok)
-    .catch(() => false);
+  return (await executorHealth()).reachable;
 }
