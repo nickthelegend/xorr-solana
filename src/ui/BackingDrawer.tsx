@@ -23,6 +23,7 @@ import {
 } from '../data/backingDetail';
 import { ReservesHistoryChart } from './charts/ReservesHistoryChart';
 import type { ReservesHistory } from '../data/reservesHistory';
+import { yieldLine, type YieldWindow } from '../data/dividendYield';
 
 /** A label and either a value or, honestly, the absence of one. */
 function Field({ label, value }: { label: string; value: string | null }) {
@@ -50,10 +51,13 @@ function short(address: string | null): string | null {
 export function BackingDrawer({
   detail,
   history,
+  income,
 }: {
   detail?: BackingDetail | null;
   /** `undefined` while loading, `null` where it could not be read. */
   history?: ReservesHistory | null;
+  /** What the token has paid, derived from its multiplier. */
+  income?: YieldWindow;
 }) {
   if (detail === undefined) {
     return (
@@ -157,6 +161,35 @@ export function BackingDrawer({
               label="TRANSFER ALLOW-LIST"
               value={issuer.transferHookProgram ? short(issuer.transferHookProgram) : 'None configured'}
             />
+          </View>
+
+          {/* What the multiplier has actually paid out, where we have watched long enough to say. */}
+          <View style={{ gap: space.s8 }}>
+            <Text variant="eyebrow" color={colors.ink30}>
+              REINVESTED DIVIDENDS
+            </Text>
+            {income && yieldLine(income) !== null ? (
+              <>
+                <Text variant="footnoteSm" color={colors.up}>
+                  {yieldLine(income)}
+                </Text>
+                {income.status === 'measured' && income.excluded.length > 0 ? (
+                  <Text variant="footnoteSm" color={colors.ink30}>
+                    {`${income.excluded.length} corporate action${
+                      income.excluded.length === 1 ? '' : 's'
+                    } excluded from this figure — a split hands you more tokens, not more value.`}
+                  </Text>
+                ) : null}
+              </>
+            ) : (
+              /*
+               * No line at all, rather than 0.00%. A window we have not watched long enough is not
+               * a window in which the token paid nothing.
+               */
+              <Text variant="footnoteSm" color={colors.ink30}>
+                {income?.status === 'unmeasured' ? income.reason : 'Reading dividend history…'}
+              </Text>
+            )}
           </View>
 
           {/* The multiplier, which is how a split or a dividend reaches a holding. */}
