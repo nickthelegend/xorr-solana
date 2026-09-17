@@ -208,6 +208,49 @@ export async function backingHistory(symbol: string, limit = 30): Promise<Reserv
   }));
 }
 
+/**
+ * The attestations we have on record for a symbol, with enough context to draw them honestly.
+ *
+ * `observations` is the count, and it is reported rather than left for a reader to infer from the
+ * shape of a line. Two points a day apart and two hundred over a month make very different claims
+ * about how steady a token's backing has been, and a chart alone cannot tell them apart.
+ *
+ * Nothing is interpolated or backfilled: gaps stay gaps. We started recording when this feature
+ * shipped, so an empty or short series means "we have not watched this for long", never "this
+ * token had no backing before now".
+ */
+export async function backingSeries(
+  symbol: string,
+  limit = 180,
+): Promise<{
+  symbol: string;
+  observations: number;
+  points: { ratio: number; sharesHeld: number; circulatingSupply: number; asOf: string }[];
+  /** The span actually covered, or null with fewer than two points. */
+  from: string | null;
+  to: string | null;
+}> {
+  const history = await backingHistory(symbol, limit);
+  // Oldest first, which is the order a chart draws in.
+  const points = history
+    .slice()
+    .reverse()
+    .map((h) => ({
+      ratio: h.ratio,
+      sharesHeld: h.sharesHeld,
+      circulatingSupply: h.circulatingSupply,
+      asOf: h.asOf,
+    }));
+
+  return {
+    symbol,
+    observations: points.length,
+    points,
+    from: points.length > 1 ? points[0]!.asOf : null,
+    to: points.length > 1 ? points[points.length - 1]!.asOf : null,
+  };
+}
+
 /** Drop the memo so the next read goes upstream. */
 export function clearBackingCache(): void {
   cache = undefined;

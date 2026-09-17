@@ -31,7 +31,7 @@ import {
 } from '../executor/run.js';
 import { TOKENS as VENUE_TOKENS, canonicalSymbol } from '../venues/oneinch.js';
 import { nextRuns, type Cadence } from '../executor/schedule.js';
-import { backingFor } from '../venues/proof-of-reserves.js';
+import { backingFor, backingSeries } from '../venues/proof-of-reserves.js';
 import { backingDetail } from '../venues/backing-detail.js';
 import { checkEligibility } from '../solana/eligibility.js';
 import { XSTOCKS, xStockKey } from '../venues/xstocks.js';
@@ -696,6 +696,23 @@ routes.get('/positions', async (c) => {
  * than zero — the screen renders that difference in words. The attestation carries its own age
  * so the drawer can say how stale it is instead of implying it is current.
  */
+/**
+ * How an xStock's backing has moved, from attestations we have actually recorded.
+ *
+ * `observations` is on the wire deliberately: a chart drawn from two points and one drawn from two
+ * hundred look similar and mean very different things, and the screen has to be able to say which
+ * it is holding. Nothing is interpolated — gaps stay gaps, and a short series means we have not
+ * been watching long, not that the token was unbacked before we started.
+ */
+routes.get('/xstocks/:symbol/reserves/history', async (c) => {
+  const symbol = c.req.param('symbol');
+  const stock = XSTOCKS[xStockKey(symbol) ?? symbol];
+  if (!stock) {
+    return c.json({ error: 'unknown_symbol', message: `${symbol} is not an xStock this executor knows.` }, 404);
+  }
+  return c.json(await backingSeries(stock.symbol));
+});
+
 routes.get('/xstocks/:symbol/backing/detail', async (c) => {
   const symbol = c.req.param('symbol');
   const detail = await backingDetail(symbol);
