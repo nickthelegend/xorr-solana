@@ -23,6 +23,7 @@ import { PERSONAS, type PersonaId } from '../bot/personas.js';
 import { NO_TRADES, agentRecords, type AgentRecord } from './leaderboard.js';
 import { notifyKill } from '../notifications/alerts.js';
 import { agentPreview } from '../bot/preview.js';
+import { readBasket, validateTargets, type BasketRow } from '../bot/basket.js';
 import {
   DEFAULT_RISK_PROFILE,
   RISK_BLURB,
@@ -202,6 +203,132 @@ async function setStopped(c: Context, stopped: boolean) {
   }
   return c.json(await stoppedState(id));
 }
+
+/**
+ * The target basket, and where it actually sits right now.
+ *
+ * The live weights are read on every request rather than cached: a drifted basket is the entire
+ * point of the screen, and a cached weight is a claim about a portfolio as it was. A sleeve that
+ * cannot be priced comes back as `usd: null` rather than zero, and the screen says so — counting
+ * it as nothing would make every other sleeve look over-weight.
+ */
+agents.get('/agents/basket', async (c) => {
+  const w = await currentWallet(c);
+  if (!w) return c.json({ error: 'no_wallet' }, 400);
+
+  const row = await one<BasketRow>(
+    `SELECT wallet_id, targets, band_pct, cadence, enabled FROM agent_baskets WHERE wallet_id = $1`,
+    [w.id],
+  );
+
+  if (!row || Object.keys(row.targets ?? {}).length === 0) {
+    return c.json({ configured: false, targets: {}, bandPct: 5, cadence: 'daily', enabled: false });
+  }
+
+  const { sleeves, totalUsd, unpriced } = await readBasket(w.address, row.targets);
+  return c.json({
+    configured: true,
+    targets: row.targets,
+    bandPct: Number(row.band_pct),
+    cadence: row.cadence,
+    enabled: row.enabled,
+    sleeves,
+    totalUsd,
+    unpriced,
+  });
+});
+
+const BasketInput = z.object({
+  targets: z.record(z.string(), z.number()),
+  bandPct: z.number().min(0.5).max(50).optional(),
+  cadence: z.enum(['daily', 'weekly', 'biweekly', 'monthly']).optional(),
+  enabled: z.boolean().optional(),
+});
+
+/**
+ * Set it.
+ *
+ * The weights are validated against the same rule the planner uses — real equities, positive, and
+ * summing to 100 — because a basket the planner will refuse to act on is worse stored than
+ * rejected: it looks configured and does nothing.
+ */
+agents.post('/agents/basket', async (c) => {
+  const w = await currentWallet(c);
+  if (!w) return c.json({ error: 'no_wallet' }, 400);
+
+  const parsed = BasketInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: 'bad_basket', detail: 'Send targets as { SYMBOL: percent }.' }, 400);
+  }
+  const { targets, bandPct = 5, cadence = 'daily', enabled = true } = parsed.data;
+
+  const problem = validateTargets(targets);
+  if (problem) return c.json({ error: 'bad_targets', detail: problem }, 400);
+
+  await query(
+    `INSERT INTO agent_baskets (wallet_id, targets, band_pct, cadence, enabled, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (wallet_id) DO UPDATE
+        SET targets = $2, band_pct = $3, cadence = $4, enabled = $5, updated_at = now()`,
+    [w.id, JSON.stringify(targets), bandPct, cadence, enabled],
+  );
+
+  /*
+   * On the trail, because this is a standing instruction to trade.
+   *
+   * A basket is not a preference; it is a set of weights the executor will buy and sell to reach,
+   * on its own, for as long as it is enabled. That belongs in the record beside the trades it
+   * will produce.
+   */
+  await append({
+    walletId: w.id,
+    agent: 'Basket',
+    action: enabled ? 'Basket targets set' : 'Basket paused',
+    detail: `${Object.entries(targets).map(([s, p]) => `${p}% ${s}`).join(', ')}, rebalanced ${cadence} once a sleeve is ${bandPct}% out.`,
+    kind: 'risk',
+    payload: { targets, bandPct, cadence, enabled },
+  }).catch(() => undefined);
+
+  return c.json({ configured: true, targets, bandPct, cadence, enabled });
+});
+
+/** The rebalances that have run, including the ones that decided to do nothing. */
+agents.get('/agents/basket/runs', async (c) => {
+  const w = await currentWallet(c);
+  if (!w) return c.json({ error: 'no_wallet' }, 400);
+
+  const rows = await query<{
+    id: string;
+    period_key: string;
+    status: string;
+    symbol: string | null;
+    side: string | null;
+    usd: string | null;
+    drift_pct: string | null;
+    detail: string;
+    signature: string | null;
+    started_at: Date;
+  }>(
+    `SELECT id, period_key, status, symbol, side, usd, drift_pct, detail, signature, started_at
+       FROM basket_runs WHERE wallet_id = $1 ORDER BY started_at DESC LIMIT 50`,
+    [w.id],
+  );
+
+  return c.json(
+    rows.map((r) => ({
+      id: r.id,
+      periodKey: r.period_key,
+      status: r.status,
+      symbol: r.symbol,
+      side: r.side,
+      usd: r.usd === null ? null : Number(r.usd),
+      driftPct: r.drift_pct === null ? null : Number(r.drift_pct),
+      detail: r.detail,
+      signature: r.signature,
+      at: new Date(r.started_at).toISOString(),
+    })),
+  );
+});
 
 /**
  * How much risk the agent may take, and what each choice actually changes.
