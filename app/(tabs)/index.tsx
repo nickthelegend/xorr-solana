@@ -58,7 +58,19 @@ import { useSignedOut } from '@/auth/useSignedOut';
 import { useHasHydrated, useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
 import type { Agent, Instrument } from '@/data/types';
-import { nothingSettles, setupSteps, type SetupStep, type SetupStepKey, type SetupStepState } from '@/state/derived';
+import {
+  nothingSettles,
+  setupComplete,
+  setupSteps,
+  type SetupStanding,
+  type SetupStep,
+  type SetupStepKey,
+  type SetupStepState,
+} from '@/state/derived';
+import type { Address } from 'viem';
+import { pinnedDelegation } from '@/chain';
+import { chainAccess } from '@/wallet/chainAccess';
+import { standingOnChain } from '@/wallet/delegationChain';
 
 type SheetTab = 'agents' | 'gainers' | 'stocks' | 'futures';
 
@@ -143,6 +155,7 @@ const STEP_RING = 1.5;
 const STEP_SAID: Readonly<Record<SetupStepState, string>> = {
   done: 'done',
   todo: 'not done yet',
+  checking: 'checking',
   unknown: 'couldn’t check',
 };
 
@@ -150,7 +163,7 @@ const STEP_SAID: Readonly<Record<SetupStepState, string>> = {
 const STEP_OPENS: Readonly<Record<SetupStepKey, string>> = {
   fund: 'Deposit',
   permit: 'the limits',
-  strategy: 'Strategies',
+  trade: 'Strategies',
 };
 
 /**
@@ -199,6 +212,17 @@ function SetupCard({ steps, onOpen }: { steps: readonly SetupStep[]; onOpen: (hr
                   borderWidth: STEP_RING,
                   borderColor: colors.ink40,
                 }}
+              />
+            ) : step.state === 'checking' ? (
+              /*
+                Still being read. The skeleton's own block, at the mark's size: it is the app's one way of saying "still
+                coming", and this is that — not a step that is unknown, and certainly not one that is still to do.
+              */
+              <Placeholder
+                width={STEP_MARK}
+                height={STEP_MARK}
+                color={colors.switchOff}
+                style={{ borderRadius: STEP_MARK / 2 }}
               />
             ) : (
               <Text variant="secondarySm" color={colors.ink55}>
@@ -318,16 +342,31 @@ export default function Home() {
    * `null` both before its read and after one that found nothing, and keeps no failure at all.
    */
   const permission = useAsync(() => repos.wallet.delegation(), []);
-  const strategies = useAsync(() => repos.strategies.list(), []);
+  /*
+   * The chain's own account of the permission, which is what the Permit step is decided from.
+   *
+   * Not the executor's record and not the stored flag. Both drift the moment anything happens elsewhere — another
+   * device, a reload after site data is cleared — and this app has already shipped a green LIVE badge over a permission
+   * the contract said was revoked. `standingOnChain` answers `unreadable` where it could not ask, which the step shows
+   * as unknown rather than quietly falling back to something that is not the chain.
+   */
+  const standing = useAsync<SetupStanding>(async () => {
+    const owner = wallet?.address as Address | undefined;
+    if (!owner) return 'none';
+    return (await standingOnChain(chainAccess, owner, pinnedDelegation, Date.now())).kind;
+  }, [wallet?.address]);
+  /* The trade step is a fill the executor recorded, not a strategy somebody created. */
+  const recordedRuns = useAsync(() => system.runs(50), []);
   const signedOut = useSignedOut();
   const now = useNow();
   const setup = setupSteps({
     // Refused for want of a session is not a failed read: nobody's wallet was asked about.
     signedOut:
-      signedOut || [balance.error, permission.error, strategies.error].some((e) => e instanceof NotSignedIn),
+      signedOut || [balance.error, permission.error, recordedRuns.error].some((e) => e instanceof NotSignedIn),
     balance,
+    standing,
     permission,
-    strategies,
+    fills: recordedRuns,
     now,
   });
 
@@ -337,7 +376,7 @@ export default function Home() {
    * re-read on every return; and not on the first focus, which is the mount and has its own reads. The limits come too,
    * or the dot beside the tabs would go on saying "Not trading" beside a permission the card has just ticked.
    */
-  const settingUp = setup !== null;
+  const settingUp = setup !== null && !setupComplete(setup);
   const setupShowing = useRef(settingUp);
   useEffect(() => {
     setupShowing.current = settingUp;
@@ -346,7 +385,8 @@ export default function Home() {
   const { reload: reloadBalance } = balance;
   const { reload: reloadLimits } = limits;
   const { reload: reloadPermission } = permission;
-  const { reload: reloadStrategies } = strategies;
+  const { reload: reloadRuns } = recordedRuns;
+  const { reload: reloadStanding } = standing;
   useFocusEffect(
     useCallback(() => {
       if (firstFocus.current) {
@@ -357,8 +397,9 @@ export default function Home() {
       reloadBalance();
       reloadLimits();
       reloadPermission();
-      reloadStrategies();
-    }, [reloadBalance, reloadLimits, reloadPermission, reloadStrategies]),
+      reloadStanding();
+      reloadRuns();
+    }, [reloadBalance, reloadLimits, reloadPermission, reloadStanding, reloadRuns]),
   );
 
   /*
@@ -489,7 +530,7 @@ export default function Home() {
           What is left before the bot can trade. Under the watch-only note, because Permit asks for a permission and PLAN.md
           4.3 wants that note said first. Nothing until every read has answered; gone once the last step is done.
         */}
-        {setup ? (
+        {setup && !setupComplete(setup) ? (
           <Rise index={2} style={{ marginTop: space.s16, paddingHorizontal: space.gutter }}>
             <SetupCard steps={setup} onOpen={(href) => router.push(href)} />
           </Rise>
