@@ -230,6 +230,9 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(body), headers: keyHeaders(write) }),
   patch: <T,>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  /** For a write that REPLACES a whole resource — a saved order, not a change to one. */
+  put: <T,>(path: string, body: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   del: <T,>(path: string) => request<T>(path, { method: 'DELETE' }),
   async getText(path: string): Promise<string> {
     // Waits for the session as `request` does: on a cold start the answer is briefly unknown, and a file asked for in that
