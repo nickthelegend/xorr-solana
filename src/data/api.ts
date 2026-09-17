@@ -6,7 +6,8 @@
  */
 import { accessToken } from '@/auth/token';
 import { isPublicPath } from './publicPaths';
-import { authKnowledge, whenAuthKnown } from '@/auth/authState';
+import { authKnowledge, setAuthKnowledge, whenAuthKnown } from '@/auth/authState';
+import { SessionExpired, sessionVerdict, shouldRetryWithToken } from '@/auth/expiry';
 import { API_BASE } from './apiBase';
 import { ApiError, NotSignedIn, TimedOut, markReplayed, retryAfterSeconds } from './apiError';
 import { noteRateLimited } from '@/net/throttleStore';
@@ -102,7 +103,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return withDeadline(path, timeoutMs, requestId, (signal) => send<T>(path, signal, requestId, init));
 }
 
-async function send<T>(path: string, signal: AbortSignal, requestId: string, init?: RequestInit): Promise<T> {
+async function send<T>(
+  path: string,
+  signal: AbortSignal,
+  requestId: string,
+  init?: RequestInit,
+  /**
+   * How many times this request has already been retried after a 401.
+   *
+   * A Privy access token is short-lived, and an expired one is not a fault — the session is
+   * usually still good and Privy will mint a new token on ask. Retrying once turns a routine
+   * expiry into something the user never sees.
+   *
+   * Safe for a write as much as a read, and only because of where the refusal comes from:
+   * `authMiddleware` runs before any handler, so a 401 means the request was rejected before it
+   * could do anything at all. Nothing was placed, so nothing can be placed twice.
+   */
+  reauthAttempt = 0,
+): Promise<T> {
   /*
    * Do not ask a question we KNOW we cannot answer — and only then.
    *
@@ -122,6 +140,7 @@ async function send<T>(path: string, signal: AbortSignal, requestId: string, ini
     if (know === 'signed-out') throw new NotSignedIn(path);
   }
 
+  const token = await accessToken();
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     signal,
@@ -129,10 +148,40 @@ async function send<T>(path: string, signal: AbortSignal, requestId: string, ini
       'content-type': 'application/json',
       accept: 'application/json',
       'x-request-id': requestId,
-      ...(await authHeaders()),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });
+
+  /*
+   * A 401: is the token merely stale, or is the session over?
+   *
+   * Until now both arrived at every screen as `ApiError(401, "401 Unauthorized")` — a raw status
+   * code drawn as a failure, on every list at once, for something that is not a fault. Asking
+   * Privy for a token tells the two apart, and it costs one round trip.
+   */
+  if (res.status === 401 && !isPublicPath(path)) {
+    const fresh = await accessToken();
+    if (shouldRetryWithToken({ attempt: reauthAttempt, previous: token, fresh })) {
+      return send<T>(path, signal, requestId, init, reauthAttempt + 1);
+    }
+    if (sessionVerdict({ retried: reauthAttempt > 0, fresh }) === 'over') {
+      /*
+       * Said once, here, rather than fifteen times on fifteen screens.
+       *
+       * Marking the app signed out also stops every other authenticated read from going out to be
+       * refused — `send` refuses to ask a question it knows it cannot answer.
+       */
+      setAuthKnowledge('signed-out');
+      throw new SessionExpired(path);
+    }
+    /*
+     * Inconclusive: no fresh token, so "expired" and "Privy could not be reached" are
+     * indistinguishable. Falls through to the ordinary error below rather than signing someone out
+     * for a moment of bad signal.
+     */
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     // A refusal often carries a REASON — the policy engine's own sentence, the one the user
