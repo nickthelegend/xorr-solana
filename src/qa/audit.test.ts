@@ -148,14 +148,22 @@ describe('13.6 motion audit — animations.md', () => {
     expect(offenders, offenders.join('\n')).toEqual([]);
   });
 
-  it('the tab bar moves only to make way for Messages — nothing on it animates while you read the screen', () => {
+  /*
+   * TWO animated views, and the rule they both keep is that neither moves while you read the screen: the bar answers
+   * the Messages drawer, and the mark under Home answers navigation. Nothing on the bar is ambient. A third would need
+   * to make the same argument, which is why the count is pinned and not only the properties.
+   */
+  it('the tab bar moves only to answer the drawer and the selection — nothing on it is ambient', () => {
     const tabBar = stripComments(fs.readFileSync(path.join(UI, 'TabBar.tsx'), 'utf8'));
-    // No loop and no spring, and no animated item: the bar's one animated view is the whole bar (2026-09-16).
+    // No loop and no spring: nothing on the bar breathes, and nothing overshoots.
     expect(tabBar).not.toMatch(/withRepeat|withSpring/);
-    expect(tabBar.match(/<Animated\.View/g) ?? []).toHaveLength(1);
+    expect(tabBar.match(/<Animated\.View/g) ?? []).toHaveLength(2);
     // One property, driven by one input: down while the Messages drawer is up, back when it is not.
     expect(tabBar).toMatch(/withTiming\(hidden \? travel : 0/);
     expect(tabBar).toMatch(/transform: \[\{ translateY: y\.value \}\]/);
+    // And one property for the mark under the open place: it grows in and shrinks away, it does not slide or fade.
+    expect(tabBar).toMatch(/withTiming\(selected \? 1 : MARK_FROM/);
+    expect(tabBar).toMatch(/transform: \[\{ scale: mark\.value \}\]/);
   });
 
   it('arrival motion honours reduced motion — the builder and the wrapper both ask', () => {

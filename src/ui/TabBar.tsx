@@ -15,8 +15,20 @@
  * The glyphs are drawn here, solid where the icon set is stroked, because a filled shape is what makes three items read
  * at a glance.
  *
- * One thing on the bar moves: the bar itself, down out of view while the Messages drawer is up, and back as it goes
- * down — the drawer takes the bar's place rather than covering it (animations.md, "The tab bar gives way to Messages").
+ * Two things on the bar move, and neither of them while you are reading the screen.
+ *
+ * The bar itself goes down out of view while the Messages drawer is up, and comes back as it goes down — the drawer
+ * takes the bar's place rather than covering it (animations.md, "The tab bar gives way to Messages").
+ *
+ * And the mark under Home — the raised pill that says which place you are in — grows into shape when you arrive there
+ * and shrinks away when you leave (FEATURES.md #48). It used to appear and vanish between two frames, which on the one
+ * control whose whole job is to answer navigation reads as a redraw rather than an answer. One property,
+ * `transform: scale`, over the 150ms the segmented thumb takes, because selection must feel instant and 150 is the
+ * floor. No slide and no travelling indicator: there is one place on this bar, and Swap and Messages are actions that
+ * are never selected, so there is nothing for an indicator to travel between.
+ *
+ * The glyph's colour still snaps. It is the state, and it has to be right in the frame the tap lands — including under
+ * reduced motion, where the mark is simply there or not and the colour carries the whole thing on its own.
  *
  * The bottom padding is the real inset, floored so a device that reports none still clears the edge.
  */
@@ -37,6 +49,8 @@ export const TAB_ORDER: readonly TabKey[] = ['home'];
 
 const BAR_H = 60;
 const ITEM_H = 50;
+/** Where the mark under the open place starts and ends: nothing, to itself. */
+const MARK_FROM = 0;
 const GLYPH = 26;
 const STROKE = 2.1;
 const BADGE_H = 17;
@@ -150,7 +164,7 @@ export function TabBar({ active, onHome, onSwap, onMessages, unread = 0, hidden 
           borderColor: colors.ghostBorder,
         }}
       >
-        <Item label="Home" place selected={home} onPress={onHome}>
+        <Item label="Home" place selected={home} onPress={onHome} reduced={reduced}>
           <HomeGlyph color={home ? colors.ink : colors.ink55} />
         </Item>
         <Item label="Swap" onPress={onSwap}>
@@ -169,6 +183,7 @@ function Item({
   place = false,
   selected = false,
   badge,
+  reduced = false,
   onPress,
   children,
 }: {
@@ -178,9 +193,18 @@ function Item({
   place?: boolean;
   selected?: boolean;
   badge?: string;
+  /** The OS setting, from the bar: the mark is simply there or not, with no growth. */
+  reduced?: boolean;
   onPress: () => void;
   children: React.ReactNode;
 }) {
+  /* The mark under the selected place. Drawn always and scaled to nothing when it is not this item's turn. */
+  const mark = useSharedValue(selected ? 1 : MARK_FROM);
+  useEffect(() => {
+    mark.value = withTiming(selected ? 1 : MARK_FROM, timing(duration.fast, reduced));
+  }, [selected, reduced, mark]);
+  const grows = useAnimatedStyle(() => ({ transform: [{ scale: mark.value }] }));
+
   return (
     <Press
       onPress={onPress}
@@ -199,9 +223,25 @@ function Item({
         borderRadius: ITEM_H / 2,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: selected ? colors.control : 'transparent',
       }}
     >
+      {place ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              borderRadius: ITEM_H / 2,
+              backgroundColor: colors.control,
+            },
+            grows,
+          ]}
+        />
+      ) : null}
       <View>
         {children}
         {badge ? (
