@@ -647,6 +647,16 @@ export const system = {
   /** What a strategy can follow here, settleable or not — where nothing settles, a portfolio is watched over these. */
   watchable: () => api.get<TradableToken[]>('/market/watchable'),
   /**
+   * The order this wallet's owner put their watchlist in, and saving it.
+   *
+   * A preference applied to `watchable`, never a copy of it — `markets/watchOrder.ts` holds both
+   * halves of that rule: a saved symbol the executor no longer offers keeps its place rather than
+   * being forgotten, and a newly watchable one appears rather than being hidden.
+   */
+  watchOrder: () => api.get<string[]>('/watchlist/order'),
+  saveWatchOrder: (symbols: string[]) =>
+    api.put<{ symbols: string[] }>('/watchlist/order', { symbols }),
+  /**
    * One swap, placed now (PLAN.md 3.9). A refusal (409) or a failure (502, 503) carries the executor's own
    * sentence in its body, so it is returned for the screen to show rather than thrown as a status code.
    *

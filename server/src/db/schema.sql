@@ -229,3 +229,14 @@ CREATE TABLE IF NOT EXISTS agent_keys (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS agent_keys_live_idx ON agent_keys(token_hash) WHERE revoked = false;
+
+-- The order a user puts their own watchlist in (migration 032). The LIST is the executor's
+-- (`/market/watchable`); this is the preference applied to it, which is why a symbol that stops
+-- being watchable keeps its place here rather than being forgotten.
+CREATE TABLE IF NOT EXISTS watchlist_order (
+  wallet_id  TEXT NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+  symbol     TEXT NOT NULL,
+  position   INTEGER NOT NULL,
+  PRIMARY KEY (wallet_id, symbol)
+);
+CREATE INDEX IF NOT EXISTS watchlist_order_idx ON watchlist_order(wallet_id, position);
