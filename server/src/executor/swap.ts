@@ -182,8 +182,11 @@ async function convert(w: WalletRow, from: string, to: string, req: SwapRequest)
     const action = `Swapped ${shown(units)} ${from} for ${shown(received)} ${to}`;
 
     await tx(async (client) => {
-      await applyFill(client, { walletId: w.id, symbol: from, units: -units, usd: -receivedUsd });
-      if (!intoSettlement) await applyFill(client, { walletId: w.id, symbol: to, units: received, usd: receivedUsd });
+      const swapped = { source: 'manual' as const, id: null, label: 'Swap' };
+      await applyFill(client, { walletId: w.id, symbol: from, units: -units, usd: -receivedUsd, attribution: swapped });
+      if (!intoSettlement) {
+        await applyFill(client, { walletId: w.id, symbol: to, units: received, usd: receivedUsd, attribution: swapped });
+      }
       const runId = await recordSale(client, {
         walletId: w.id,
         symbol: from,

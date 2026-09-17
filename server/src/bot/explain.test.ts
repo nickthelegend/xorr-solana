@@ -2,7 +2,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const oneMock = vi.fn<(sql: string, params?: unknown[]) => Promise<unknown>>();
 
-vi.mock('../db/index.js', () => ({ one: (sql: string, p?: unknown[]) => oneMock(sql, p) }));
+vi.mock('../db/index.js', () => ({
+  one: (sql: string, p?: unknown[]) => oneMock(sql, p),
+  query: vi.fn(async () => []),
+}));
+const sleevesForMock = vi.fn();
+vi.mock('../positions/sleeves.js', () => ({ sleevesFor: (...a: unknown[]) => sleevesForMock(...a) }));
 
 const { explainTrade } = await import('./explain.js');
 
@@ -46,6 +51,14 @@ describe('explaining a trade from the trail', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     oneMock.mockResolvedValue(null);
+    sleevesForMock.mockResolvedValue({
+      symbol: 'NVDAx',
+      sleeves: [],
+      heldUnits: 0,
+      attributedUnits: 0,
+      unattributedUnits: 0,
+      overAttributedUnits: 0,
+    });
   });
 
   it('reads the decision record back off the row', async () => {
@@ -109,5 +122,49 @@ describe('explaining a trade from the trail', () => {
     expect(await explainTrade('wallet-1', '1; DROP TABLE audit_log')).toBeNull();
     expect(await explainTrade('wallet-1', 'abc')).toBeNull();
     expect(oneMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('the trade, in the context of what else holds the symbol', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    oneMock.mockResolvedValue(row(RECORD));
+    sleevesForMock.mockResolvedValue({
+      symbol: 'NVDAx',
+      sleeves: [
+        { source: 'agent', sourceId: 'p1', label: 'Momentum Scout', units: 0.11, costUsd: 25, openedAt: 1 },
+        { source: 'strategy', sourceId: 's1', label: 'Recurring buy', units: 4, costUsd: 800, openedAt: 2 },
+      ],
+      heldUnits: 4.11,
+      attributedUnits: 4.11,
+      unattributedUnits: 0,
+      overAttributedUnits: 0,
+    });
+  });
+
+  /*
+   * Several strategies can stack on one token, so "the agent bought NVDAx" is half an answer. The
+   * other half is what else is in there.
+   */
+  it('carries the sleeve breakdown for the symbol it traded', async () => {
+    const out = await explainTrade('wallet-1', '42');
+    if (out?.status !== 'explained') throw new Error('expected an explanation');
+
+    expect(sleevesForMock).toHaveBeenCalledWith('wallet-1', 'NVDAx');
+    expect(out.sleeves?.sleeves.map((s) => s.label)).toEqual(['Momentum Scout', 'Recurring buy']);
+  });
+
+  /*
+   * An empty breakdown says "nothing else holds this symbol", which is a claim. A failed read is
+   * the absence of one, and must not be dressed as the other.
+   */
+  it('reports null rather than an empty breakdown when the read fails', async () => {
+    sleevesForMock.mockRejectedValue(new Error('db down'));
+
+    const out = await explainTrade('wallet-1', '42');
+    if (out?.status !== 'explained') throw new Error('expected an explanation');
+    expect(out.sleeves).toBeNull();
+    // The explanation itself still stands: the decision record does not depend on the breakdown.
+    expect(out.record.symbol).toBe('NVDAx');
   });
 });

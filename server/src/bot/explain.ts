@@ -19,6 +19,7 @@
  */
 import { one } from '../db/index.js';
 import { explorerTx } from '../solana/connection.js';
+import { sleevesFor, type SleeveBreakdown } from '../positions/sleeves.js';
 import type { AuditKind } from '../audit/log.js';
 import type { DecisionRecord } from './autonomous.js';
 
@@ -33,6 +34,18 @@ export type TradeExplanation =
       /** Where to go and check it, or a `fork:`/`local:` label where there is nowhere to go. */
       explorer: string | null;
       record: DecisionRecord;
+      /**
+       * Who holds which part of this symbol now, this trade's source included.
+       *
+       * Several strategies can stack on one token, so "the agent bought NVDAc" is only half an
+       * answer — the other half is what else is in there. Read at explain time rather than stored,
+       * because unlike the decision this is a fact about NOW: the question is what the position
+       * looks like today, not what it looked like when the trade was placed.
+       *
+       * Null when the breakdown could not be read. Not an empty breakdown, which would read as
+       * "nothing else holds this" — a different and much stronger claim.
+       */
+      sleeves: SleeveBreakdown | null;
     }
   | {
       /**
@@ -119,5 +132,11 @@ export async function explainTrade(
   const payload = row.payload ?? {};
   if (!isDecisionRecord(payload)) return { status: 'no_record', ...base };
 
-  return { status: 'explained', ...base, record: payload };
+  /*
+   * Null rather than an empty breakdown when the read fails. An empty one would say "nothing else
+   * holds this symbol", which is a claim, and a failed read is the absence of one.
+   */
+  const sleeves = await sleevesFor(walletId, payload.symbol).catch(() => null);
+
+  return { status: 'explained', ...base, record: payload, sleeves };
 }

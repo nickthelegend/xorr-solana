@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { one, query } from '../db/index.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
+import { recordSleeve, type FillAttribution } from './sleeves.js';
 import { priceOf } from '../market/prices.js';
 import { chainUnitsOf } from '../evm/balances.js';
 import { readChain } from '../http/chain-read.js';
@@ -80,8 +81,31 @@ export type Position = {
  */
 export async function applyFill(
   client: PoolClient,
-  params: { walletId: string; symbol: string; units: number; usd: number },
+  params: {
+    walletId: string;
+    symbol: string;
+    units: number;
+    usd: number;
+    /**
+     * Who did this, when the caller knows.
+     *
+     * Optional because not every caller has an answer, and a caller with no answer must not be
+     * made to invent one — an unattributed fill shows up in the breakdown as exactly that. See
+     * `positions/sleeves.ts`.
+     */
+    attribution?: FillAttribution;
+  },
 ): Promise<void> {
+  // Written inside the caller's transaction: a position and its attribution are one fact.
+  if (params.attribution) {
+    await recordSleeve(client, {
+      walletId: params.walletId,
+      symbol: params.symbol,
+      units: params.units,
+      usd: params.usd,
+      attribution: params.attribution,
+    });
+  }
   if (params.units >= 0) {
     await client.query(
       `INSERT INTO positions (id, wallet_id, symbol, side, units, cost_usd)

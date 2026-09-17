@@ -257,6 +257,7 @@ panic.post('/panic/flatten', async (c) => {
           symbol: h.symbol,
           units: -soldUnits,
           usd: -proceedsUsd,
+          attribution: { source: 'flatten', id: null, label: 'Sell everything' },
         });
         const runId = await recordSale(client, {
           walletId: w.id,
@@ -487,7 +488,20 @@ export async function closeHolding(params: {
     const action = full ? `Sold all ${symbol}` : `Sold ${Math.round(fraction * 100)}% of ${symbol}`;
 
     await tx(async (client) => {
-      await applyFill(client, { walletId: w.id, symbol, units: -soldUnits, usd: -proceedsUsd });
+      await applyFill(client, {
+        walletId: w.id,
+        symbol,
+        units: -soldUnits,
+        usd: -proceedsUsd,
+        /*
+         * A close of ONE position, which is not a flatten.
+         *
+         * `/panic/flatten` sells everything and is attributed as such; this is a person closing a
+         * single holding they chose. Sharing a label between the two would put "Sell everything"
+         * against a sale that sold one thing.
+         */
+        attribution: { source: 'manual', id: null, label: 'Close' },
+      });
       const runId = await recordSale(client, {
         walletId: w.id,
         symbol,
