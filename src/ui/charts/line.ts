@@ -74,9 +74,16 @@ export function nearestIndex(f: LineFrame, x: number): number | null {
   return Math.min(f.count - 1, Math.max(0, at));
 }
 
-/** The line's path, and the area under it closed along the bottom of the box. Empty for an empty series. */
+/**
+ * The line's path, and the area under it closed along the bottom of the box.
+ *
+ * Empty for an empty series, and **empty for a series of one**. A lone reading has no line: `M x,y` with nothing after
+ * it draws nothing at all in SVG, and the area closed from a single x is a zero-width sliver. Rather than emit two
+ * shapes that happen to be invisible, this says there is no path, and the caller draws the reading as the point it is.
+ * A line needs two observations; one is a fact without a direction.
+ */
 export function linePaths(f: LineFrame, data: readonly number[]): { line: string; area: string } {
-  if (data.length === 0) return { line: '', area: '' };
+  if (data.length < 2) return { line: '', area: '' };
   const points = data.map((v, i) => `${lineX(f, i)},${lineY(f, v)}`);
   const line = `M ${points.join(' L ')}`;
   return {

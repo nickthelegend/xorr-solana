@@ -152,7 +152,14 @@ export default function AssetDetail() {
   const spans = useMemo(() => (drawn?.candles ?? []).map(({ start, end }) => ({ start, end })), [drawn]);
   // The line from the window's first open, so it covers the range its pill names and a fill anywhere in it has a place.
   const line = useMemo(() => closeLine(series, spans), [series, spans]);
-  const hasSeries = series.length > 1;
+  /*
+   * One reading is enough to draw (FEATURES.md #41). This was `> 1`, so a symbol with exactly one recorded price fell
+   * through to "No chart yet" — the same thing a symbol with NO recorded prices shows. One observation is not no
+   * observations, and the chart says which by drawing the point and captioning it below.
+   */
+  const hasSeries = series.length > 0;
+  /** Exactly one reading: a point, never a trend, and never candles — a single candle drawn wide reads as a range. */
+  const lone = series.length === 1;
   // From the window's first open, so the change covers the whole range its label names.
   const seriesPct = hasSeries ? ((series.at(-1)!.close - series[0]!.open) / series[0]!.open) * 100 : 0;
 
@@ -413,7 +420,7 @@ export default function AssetDetail() {
         }}
       >
         {hasSeries && drawn ? (
-          candleView ? (
+          candleView && !lone ? (
             <Candlestick
               series={series}
               projection={tightProjection(series, inCandles.map((m) => m.price))}
@@ -450,6 +457,16 @@ export default function AssetDetail() {
           </Text>
         ) : null}
       </View>
+
+      {/*
+        A lone reading says so. The point above is real and is drawn, but one observation has no direction, and a
+        chart that leaves the reader to infer a trend from a single dot has only moved the guess rather than removed it.
+      */}
+      {hasSeries && lone ? (
+        <Text variant="footnote" color={colors.ink45} align="center" style={{ marginTop: space.s8 }}>
+          One reading in this range. There is no trend to draw until there is a second.
+        </Text>
+      ) : null}
 
       <PillRow style={{ marginTop: space.s16 }} contentPadding={space.gutter}>
         {RANGES.map((r) => (
