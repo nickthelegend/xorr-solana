@@ -230,7 +230,7 @@ CREATE TABLE IF NOT EXISTS agent_keys (
 );
 CREATE INDEX IF NOT EXISTS agent_keys_live_idx ON agent_keys(token_hash) WHERE revoked = false;
 
--- The order a user puts their own watchlist in (migration 036). The LIST is the executor's
+-- The order a user puts their own watchlist in (migration 20260917T094120-watchlist-order). The LIST is the executor's
 -- (`/market/watchable`); this is the preference applied to it, which is why a symbol that stops
 -- being watchable keeps its place here rather than being forgotten.
 CREATE TABLE IF NOT EXISTS watchlist_order (
