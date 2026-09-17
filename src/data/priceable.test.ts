@@ -9,7 +9,19 @@
 import { describe, expect, it } from 'vitest';
 import { resolvePriceable } from './tradable';
 
-const known = new Set(['BTC', 'ETH', 'WETH', 'USDC', 'CBBTC', 'XAUT', 'NVDAc', 'TSLAc']);
+const known = new Set([
+  'BTC',
+  'ETH',
+  'WETH',
+  'USDC',
+  'CBBTC',
+  'XAUT',
+  'NVDAc',
+  'TSLAc',
+  // The xStocks, priced by the Jupiter route that would fill them (`server/src/market/feeds.ts`).
+  'NVDAx',
+  'TSLAx',
+]);
 
 describe('resolvePriceable', () => {
   it('accepts a symbol the price sources know', () => {
@@ -23,6 +35,22 @@ describe('resolvePriceable', () => {
     expect(resolvePriceable('nvdac', known)).toBe('NVDAc');
     expect(resolvePriceable('NVDAC', known)).toBe('NVDAc');
     expect(resolvePriceable('weth', known)).toBe('WETH');
+  });
+
+  it('accepts a tokenized equity on Solana', () => {
+    /*
+     * The executor prices these through Jupiter, and the field used to refuse them: the client's
+     * list asked `/market/symbols` and `/market/stocks` and never `/market/xstocks`, so an alert on
+     * NVDAx was rejected with "nothing prices it" while the executor was pricing it all day.
+     */
+    expect(resolvePriceable('NVDAx', known)).toBe('NVDAx');
+    expect(resolvePriceable('nvdax', known)).toBe('NVDAx');
+  });
+
+  it('keeps the two spellings of the same company apart', () => {
+    // NVIDIA on two chains, under two registries, priced by two venues.
+    expect(resolvePriceable('NVDAx', known)).toBe('NVDAx');
+    expect(resolvePriceable('NVDAc', known)).toBe('NVDAc');
   });
 
   it('refuses a symbol nothing prices', () => {

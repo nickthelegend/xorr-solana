@@ -226,6 +226,16 @@ export interface ActivityRepository {
    * each.
    */
   exportDisposals(): Promise<string>;
+  /**
+   * A receipt for every trade that actually settled — and nothing that did not.
+   *
+   * The third document, narrower than either of the others. The trail records what the bot DID,
+   * including the runs a cap blocked and the ones with nothing to do; disposals record what the
+   * user OWES. This records what moved: date, asset, size, price, venue and the transaction it
+   * settled in. Only a run that reached `filled` and carries a signature appears, because a
+   * receipt for something that did not happen is not a weaker receipt — it is a false one.
+   */
+  exportFills(): Promise<string>;
 }
 
 export interface NewsRepository {

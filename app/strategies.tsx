@@ -38,6 +38,12 @@ import { quantity } from '@/format';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
+import {
+  KILL_SWITCH_LINK,
+  KILL_SWITCH_ROUTE,
+  PAUSE_IS_NOT_THE_KILL_SWITCH,
+  stateBadge,
+} from '@/strategies/pauseCopy';
 import { useGoBack } from '@/nav/useGoBack';
 import { useRefreshControl } from '@/ui/useRefreshControl';
 import { STRATEGY_LADDER, labelFigure } from '@/strategies/ladder';
@@ -133,7 +139,12 @@ export default function Strategies() {
                 <Button label="Set up a recurring buy" onPress={() => router.push('/strategy/dca')} />
               </View>
             ) : (
-              shown.map((s) => <StrategyRow key={s.id} s={s} onChanged={reload} />)
+              <>
+                {shown.map((s) => (
+                  <StrategyRow key={s.id} s={s} onChanged={reload} />
+                ))}
+                <PauseIsNotTheKillSwitch onOpenSafety={() => router.push(KILL_SWITCH_ROUTE as never)} />
+              </>
             )
           ) : (
             <View style={{ gap: space.s12, paddingTop: space.s6 }}>
@@ -199,6 +210,7 @@ export default function Strategies() {
 function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
   const [busy, setBusy] = useState<'run' | 'pause' | undefined>();
   const [note, setNote] = useState<string>();
+  const isPaused = s.state === 'paused';
 
   const next = s.nextRunAt
     ? new Date(s.nextRunAt).toLocaleDateString('en-US', {
@@ -213,7 +225,16 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
     setNote(undefined);
     try {
       if (kind === 'pause') {
-        await repos.strategies.setState(s.id, s.state === 'paused' ? 'live' : 'paused');
+        /*
+         * `resume()`, not `setState(id, 'live')`.
+         *
+         * A resume is "undo the pause", and the state to undo INTO is the one the pause was taken
+         * out of — which the executor stored on the row (`paused_from`). Naming `live` from here
+         * put a watching strategy, whose whole purpose is to move nothing, back able to spend.
+         * The client does not get to answer that question any more.
+         */
+        if (isPaused) await repos.strategies.resume(s.id);
+        else await repos.strategies.pause(s.id);
       } else {
         const r = await repos.strategies.runNow(s.id);
         /*
@@ -261,7 +282,6 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
     }
   }
 
-  const isPaused = s.state === 'paused';
   return (
     <View>
       <Row
@@ -269,7 +289,8 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
         titleFigure={labelFigure(s.kind)}
         secondary={`${s.state === 'watch' ? 'Watching · ' : ''}Next run ${next}`}
         value={<Price>{money(s.dailyAllocationUsd, { decimals: 0 })}</Price>}
-        delta={isPaused ? 'Paused' : s.state === 'live' ? 'Live' : 'Watch'}
+        // A paused row says what a resume will make it, since that is not always what it was.
+        delta={stateBadge(s.state, s.pausedFrom)}
         // `Watch` and `Paused` are not losses — the P&L colours are reserved.
         deltaTone={!isPaused && s.state === 'live' ? 'up' : 'neutral'}
         height={size.rowLg}
@@ -302,6 +323,37 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
           {note}
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * The difference between the three stops, under the rows that offer the smallest one.
+ *
+ * Someone who paused a strategy and believed they had pulled the kill switch has a wrong model of
+ * what their money is exposed to, and would find out at the worst possible time. It sits here
+ * rather than in a help page because here is where the Pause button is.
+ *
+ * Under the list, not above it: it explains a control the reader has just seen, and a warning ahead
+ * of the thing it is about reads as a warning about the screen.
+ */
+function PauseIsNotTheKillSwitch({ onOpenSafety }: { onOpenSafety: () => void }) {
+  return (
+    <View style={{ marginTop: space.s10, marginBottom: space.s20, gap: space.s6 }}>
+      <Text variant="footnote" color={colors.ink55}>
+        {PAUSE_IS_NOT_THE_KILL_SWITCH}
+      </Text>
+      <Press
+        onPress={onOpenSafety}
+        accessibilityRole="button"
+        accessibilityLabel={KILL_SWITCH_LINK}
+        hitHeight={size.hit}
+        style={{ alignSelf: 'flex-start' }}
+      >
+        <Text variant="footnote" color={colors.ink}>
+          {KILL_SWITCH_LINK} ›
+        </Text>
+      </Press>
     </View>
   );
 }

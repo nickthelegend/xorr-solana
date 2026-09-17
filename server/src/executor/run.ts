@@ -86,6 +86,13 @@ export type StrategyRow = {
   retry_attempts?: number;
   /** The hired agent that runs this strategy, when one does — its limits apply (PLAN.md 2.15). */
   agent_id?: string | null;
+  /**
+   * The state a pause was taken out of, so a resume returns to it. Migration 031.
+   *
+   * Null on any row that is not paused, and on a row paused before the column existed —
+   * `executor/resume.ts` says why null reads as `live`.
+   */
+  paused_from?: string | null;
 };
 
 /**
