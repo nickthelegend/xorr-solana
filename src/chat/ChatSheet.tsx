@@ -38,7 +38,8 @@ import { arrival, duration, space, timing, useReducedMotion } from '@/ui';
 import { Chat } from './Chat';
 import { Messages } from './Messages';
 import { agentByName, useMadeAgents } from './agents';
-import { useChatTheme } from './chatTheme';
+import { useChatRoom } from './chatTheme';
+import { RoomFade } from './RoomFade';
 import { applyChatTheme, chat } from './theme';
 import { useChatDrawer } from './chatDrawer';
 import { useProposalSeed } from './useProposalSeed';
@@ -68,9 +69,10 @@ export interface ChatSheetProps {
 }
 
 export function ChatSheet({ open, onClose }: ChatSheetProps) {
-  const theme = useChatTheme((s) => s.theme);
+  // The room this person chose here, or the one the phone asks for. It changes under a drawer left open, too.
+  const { room } = useChatRoom();
   // Before anything below reads a colour: the room this draw is in.
-  applyChatTheme(theme);
+  applyChatTheme(room);
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
   /*
@@ -296,7 +298,10 @@ export function ChatSheet({ open, onClose }: ChatSheetProps) {
         </GestureDetector>
 
         {/* Keyed by the room, so everything inside draws again from the palette just put in place. */}
-        <DrawerContent key={theme} onClose={close} footerInset={Math.max(insets.bottom, space.s14)} />
+        <DrawerContent key={room} onClose={close} footerInset={Math.max(insets.bottom, space.s14)} />
+
+        {/* And the room just left, over the one that arrived, on its way out. Last, so it covers what it replaces. */}
+        <RoomFade room={room} />
       </Animated.View>
     </View>
   );

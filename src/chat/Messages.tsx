@@ -28,7 +28,7 @@ import type { ThreadMessage } from '@/bot/message';
 import { useChatAgents, useMadeAgents, type ChatAgent } from './agents';
 import { listTime, searchMessages, summaries, type ConversationSummary } from './conversations';
 import { GLASS, GlassButton } from './parts';
-import { useChatTheme } from './chatTheme';
+import { useChatRoom, useChatTheme } from './chatTheme';
 import { chat, chatShadow, chatType } from './theme';
 
 const AVATAR = GLASS;
@@ -68,8 +68,13 @@ export function Messages({ onClose, onOpen, onOpenScreen, footerInset }: Message
   const agents = useChatAgents();
   const remember = useMadeAgents((s) => s.remember);
   const [mode, setMode] = useState<Mode>('list');
-  const theme = useChatTheme((s) => s.theme);
-  const toggleTheme = useChatTheme((s) => s.toggle);
+  /*
+   * The room showing, and whether the phone is the one deciding it. The button names the room it would move to, and
+   * says when it is taking over from the phone — a control that silently overrides an OS setting is how someone ends up
+   * wondering why one app stopped following dusk.
+   */
+  const { room, following } = useChatRoom();
+  const pickRoom = useChatTheme((s) => s.pick);
   const [query, setQuery] = useState('');
 
   useEffect(() => {
@@ -142,9 +147,11 @@ export function Messages({ onClose, onOpen, onOpenScreen, footerInset }: Message
           </Press>
           <View style={{ flex: 1 }} />
           <GlassButton
-            icon={theme === 'black' ? 'sun' : 'moon'}
-            label={theme === 'black' ? 'Use the light theme' : 'Use the black theme'}
-            onPress={toggleTheme}
+            icon={room === 'black' ? 'sun' : 'moon'}
+            label={`${room === 'black' ? 'Use the light theme' : 'Use the black theme'}${
+              following ? '. Messages currently follows your phone' : ''
+            }`}
+            onPress={() => pickRoom(room)}
           />
           <GlassButton icon="search" label="Search agents and messages" onPress={() => setMode('search')} />
           <GlassButton icon="plus" label="Make an agent" onPress={signedOut ? goSignIn : makeAgent} />

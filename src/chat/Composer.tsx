@@ -15,7 +15,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Icon, type IconName } from '@/design/Icon';
 import { Press, Text } from '@/ui';
-import { useChatTheme } from './chatTheme';
+import { useChatRoom } from './chatTheme';
 import { chat, chatShadowLg, chatType } from './theme';
 import type { Dictation } from './useDictation';
 
@@ -67,7 +67,7 @@ export function Composer({
   dictation,
   footerInset,
 }: ComposerProps) {
-  const theme = useChatTheme((s) => s.theme);
+  const { room } = useChatRoom();
   const empty = draft.trim().length === 0;
   const canSend = !empty && !busy;
 
@@ -83,7 +83,7 @@ export function Composer({
         }}
       >
         {/* The blur takes the room's own tint: a light one over the black room drew the card grey. */}
-        <BlurView intensity={40} tint={theme === 'black' ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+        <BlurView intensity={40} tint={room === 'black' ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: chat.glass }]} />
 
         <View style={ABOVE}>
