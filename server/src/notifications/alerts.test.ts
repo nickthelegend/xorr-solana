@@ -1,15 +1,36 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import type { PushMessage } from './push.js';
 
-const sendMock = vi.fn();
-const queryMock = vi.fn();
+/*
+ * Typed to the signatures they stand in for, rather than `(...args: unknown[])`.
+ *
+ * `unknown[]` made every read of a recorded call `any`, which is how destructuring the first call
+ * straight out of the array came to be written here: under `noUncheckedIndexedAccess` that index
+ * is possibly-undefined and does not compile. With real parameter types the recorded calls carry
+ * their own shape, so `pushMsg.title` is checked rather than merely assumed.
+ */
+const sendMock = vi.fn<(walletId: string, msg: PushMessage) => Promise<void>>();
+const queryMock = vi.fn<(sql: string, params: unknown[]) => Promise<unknown[]>>();
 
 vi.mock('./push.js', () => ({
-  send: (...args: unknown[]) => sendMock(...args),
+  send: (walletId: string, msg: PushMessage) => sendMock(walletId, msg),
 }));
 
 vi.mock('../db/index.js', () => ({
-  query: (...args: unknown[]) => queryMock(...args),
+  query: (sql: string, params: unknown[]) => queryMock(sql, params),
 }));
+
+/**
+ * The arguments of a call that must have happened, or a sentence saying it did not.
+ *
+ * Reaching through a possibly-undefined index with `!` asserts the very thing the assertion on the
+ * next line is there to check. This states it once, and fails legibly when it is wrong.
+ */
+function firstCall<Args extends unknown[]>(fn: { mock: { calls: Args[] } }, what: string): Args {
+  const [call] = fn.mock.calls;
+  if (!call) throw new Error(`${what} was never called`);
+  return call;
+}
 
 const { notifyEntry, notifyExit, notifyKill } = await import('./alerts.js');
 
@@ -34,7 +55,7 @@ describe('notifications alerts', () => {
     });
 
     expect(sendMock).toHaveBeenCalledTimes(1);
-    const [walletId, pushMsg] = sendMock.mock.calls[0];
+    const [walletId, pushMsg] = firstCall(sendMock, 'send');
     expect(walletId).toBe('wallet-123');
     expect(pushMsg.title).toContain('Momentum Scout Traded');
     expect(pushMsg.body).toContain('NVDAx');
@@ -49,13 +70,12 @@ describe('notifications alerts', () => {
     });
 
     expect(queryMock).toHaveBeenCalledTimes(1);
-    const [sql, params] = queryMock.mock.calls[0];
+    const [sql, params] = firstCall(queryMock, 'query');
     expect(sql).toContain('INSERT INTO messages');
     expect(params[1]).toBe('wallet-123');
     expect(params[2]).toBe('Momentum Scout');
-    const parsedBody = JSON.parse(params[3]);
-    expect(parsedBody.symbol).toBe('NVDAx');
-    expect(parsedBody.notionalUsd).toBe(50);
+    const parsedBody: unknown = JSON.parse(String(params[3]));
+    expect(parsedBody).toMatchObject({ symbol: 'NVDAx', notionalUsd: 50 });
   });
 
   it('notifyExit sends exit notification with pnl and proceeds', async () => {
@@ -71,7 +91,7 @@ describe('notifications alerts', () => {
     });
 
     expect(sendMock).toHaveBeenCalledTimes(1);
-    const [walletId, pushMsg] = sendMock.mock.calls[0];
+    const [walletId, pushMsg] = firstCall(sendMock, 'send');
     expect(walletId).toBe('wallet-123');
     expect(pushMsg.title).toBe('xorr: Position Closed');
     expect(pushMsg.body).toContain('TSLAx');
@@ -86,7 +106,7 @@ describe('notifications alerts', () => {
     });
 
     expect(queryMock).toHaveBeenCalledTimes(1);
-    const [sql, params] = queryMock.mock.calls[0];
+    const [sql, params] = firstCall(queryMock, 'query');
     expect(sql).toContain('INSERT INTO messages');
     expect(params[1]).toBe('wallet-123');
   });
@@ -99,7 +119,7 @@ describe('notifications alerts', () => {
     });
 
     expect(sendMock).toHaveBeenCalledTimes(1);
-    const [walletId, pushMsg] = sendMock.mock.calls[0];
+    const [walletId, pushMsg] = firstCall(sendMock, 'send');
     expect(walletId).toBe('wallet-123');
     expect(pushMsg.title).toBe('xorr: Trading Stopped');
     expect(pushMsg.body).toContain('Delegation permission revoked');
@@ -109,7 +129,7 @@ describe('notifications alerts', () => {
     });
 
     expect(queryMock).toHaveBeenCalledTimes(1);
-    const [sql, params] = queryMock.mock.calls[0];
+    const [sql, params] = firstCall(queryMock, 'query');
     expect(sql).toContain('INSERT INTO messages');
     expect(params[1]).toBe('wallet-123');
   });

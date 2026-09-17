@@ -11,9 +11,18 @@
  * - Closed:        20:00 - 04:00 ET (Overnight) & Friday 20:00 - Monday 04:00 ET (Weekend)
  *
  * Off-hours slippage guard:
- * When the underlying exchange is closed, Jupiter pool spreads can decouple from Nasdaq close / oracle.
- * This module measures the oracle-vs-Nasdaq spread to dynamically widen slippage or hold execution.
+ * When the underlying exchange is closed, Jupiter pool spreads can decouple from the underlying
+ * equity's value. This module measures that spread to widen slippage or hold execution.
+ *
+ * The session half needs no network — it is a clock and a calendar. The spread half needs a price
+ * for the underlying share from somewhere OTHER than the pool being checked, and that comes from
+ * the issuer's own public feed (`market/backed.ts`). The two are deliberately separate functions:
+ * `evaluateOffHoursGuard` is pure and takes the reference price it was given, `offHoursGuard`
+ * fetches it. A table of hardcoded "reference prices" used to stand in for the feed here; see
+ * `backed.ts` for why four numbers in a source file are worse than no number at all.
  */
+
+import { underlyingQuoteUsd } from './backed.js';
 
 export type NasdaqSessionType = 'regular' | 'extended' | 'closed';
 
@@ -29,24 +38,16 @@ export type NasdaqSessionDetail = {
 
 export type OffHoursGuardVerdict = {
   session: NasdaqSessionType;
-  spreadBps: number;
-  spreadPct: number;
+  /**
+   * How far the pool has drifted from the underlying share, or `null` when there was no reference
+   * price to measure against. `0` would read as "the two agree exactly", which is a claim nobody
+   * made, so the unmeasured case gets its own value.
+   */
+  spreadBps: number | null;
+  spreadPct: number | null;
   action: 'normal' | 'widen_slippage' | 'hold';
   suggestedSlippageBps: number;
   reason: string;
-};
-
-/** Reference prices for underlying US equities (used when Nasdaq feed is closed/offline). */
-export const NASDAQ_REFERENCE_PRICES: Record<string, number> = {
-  NVDA: 216.5,
-  TSLA: 360.9,
-  AAPL: 334.6,
-  MSFT: 496.0,
-  // xStocks aliases
-  NVDAx: 216.5,
-  TSLAx: 360.9,
-  AAPLx: 334.6,
-  MSFTx: 496.0,
 };
 
 /**
@@ -167,29 +168,64 @@ export function underlyingTicker(symbol: string): string {
 }
 
 /**
- * Evaluates the off-hours slippage guard comparing on-chain price with Nasdaq reference / oracle.
+ * Evaluates the off-hours slippage guard: the pool price against the underlying share.
  *
- * Rules:
- * - Regular session: Normal 50 bps slippage, no hold.
- * - Extended session: Normal or slightly widened (75 bps) if spread < 0.5%.
- * - Closed (weekend / overnight):
- *     spread <= 0.5%: Widen slippage to 100 bps (allow trade with buffer).
- *     0.5% < spread <= 1.5%: Widen slippage to 150 bps.
- *     spread > 1.5%: HOLD execution — DEX pool has decoupled from underlying equity value.
+ * Pure and synchronous. `referencePrice` is passed IN rather than fetched here, so the rules below
+ * are testable against an exact spread and so the one network read this guard needs lives in one
+ * place (`offHoursGuard`).
+ *
+ * Rules, with a reference price to compare against:
+ * - Regular session: normal 50 bps. The listing is open; the pool has something to track.
+ * - Extended session: 75 bps, or HOLD above a 1.2% spread.
+ * - Closed (weekend / overnight): 120 bps, or HOLD above a 1.5% spread — beyond that the pool has
+ *   decoupled from the equity it is supposed to represent and a fill would be at a made-up price.
+ *
+ * Without one (`referencePrice: null` — the feed did not answer):
+ * - Regular session: normal 50 bps. Nothing is being checked, and nothing needs to be: the
+ *   exchange itself is open and arbitrage is holding the pool to it.
+ * - Extended or closed: HOLD. The whole purpose of the guard outside regular hours is to catch a
+ *   pool that has drifted, and it cannot do that blind. Refusing to trade is the honest response;
+ *   substituting a number and calling the spread 0% is not.
  */
-export function evaluateOffHoursGuard(params: {
+export type OffHoursGuardInput = {
   symbol: string;
+  /** What a fill would actually get, derived from the pool it would touch. */
   onChainPrice: number;
+  /**
+   * What one underlying share is worth according to something other than that pool — the issuer's
+   * own feed, in production (`underlyingQuoteUsd`). `null` when it had no answer.
+   */
+  referencePrice: number | null;
   now?: Date;
-  oraclePrice?: number;
-}): OffHoursGuardVerdict {
-  const { symbol, onChainPrice, now } = params;
+};
+
+export function evaluateOffHoursGuard(params: OffHoursGuardInput): OffHoursGuardVerdict {
+  const { onChainPrice, referencePrice, now } = params;
   const session = getNasdaqSession(now);
-  const ticker = underlyingTicker(symbol);
-  const referencePrice = params.oraclePrice ?? NASDAQ_REFERENCE_PRICES[ticker] ?? onChainPrice;
+
+  if (referencePrice === null || !(referencePrice > 0)) {
+    if (session.session === 'regular') {
+      return {
+        session: 'regular',
+        spreadBps: null,
+        spreadPct: null,
+        action: 'normal',
+        suggestedSlippageBps: 50,
+        reason: `Nasdaq regular hours active (${session.easternTime}). No reference quote for ${params.symbol}, but the listing is open and pricing the pool.`,
+      };
+    }
+    return {
+      session: session.session,
+      spreadBps: null,
+      spreadPct: null,
+      action: 'hold',
+      suggestedSlippageBps: 50,
+      reason: `Nasdaq is ${session.phase} and there is no reference quote for ${params.symbol} to check the pool against. Holding rather than trading against an unverified off-hours price.`,
+    };
+  }
 
   const diff = Math.abs(onChainPrice - referencePrice);
-  const spreadPct = diff / Math.max(referencePrice, 1e-6);
+  const spreadPct = diff / referencePrice;
   const spreadBps = Math.round(spreadPct * 10_000);
 
   if (session.session === 'regular') {
@@ -244,4 +280,19 @@ export function evaluateOffHoursGuard(params: {
     suggestedSlippageBps: 120,
     reason: `Nasdaq is closed (${session.phase}). Operating 24/7 on Solana with adjusted 120 bps slippage guard (spread ${(spreadPct * 100).toFixed(2)}%).`,
   };
+}
+
+/**
+ * The guard as the executor uses it: the same rules, with the reference price read from the issuer.
+ *
+ * One network read, cached for 30s by `http/get.ts`, and `null` on any failure — which the rules
+ * above turn into a HOLD outside regular hours rather than into a fabricated agreement.
+ */
+export async function offHoursGuard(params: {
+  symbol: string;
+  onChainPrice: number;
+  now?: Date;
+}): Promise<OffHoursGuardVerdict> {
+  const referencePrice = await underlyingQuoteUsd(underlyingTicker(params.symbol));
+  return evaluateOffHoursGuard({ ...params, referencePrice });
 }

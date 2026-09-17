@@ -9,6 +9,8 @@ const guardAndSpendMock = vi.fn();
 const armExitsMock = vi.fn();
 const notifyEntryMock = vi.fn();
 const earningsCalendarMock = vi.fn();
+const stockPriceUsdMock = vi.fn<(symbol: string) => Promise<number | null>>();
+const offHoursGuardMock = vi.fn();
 
 vi.mock('../db/index.js', () => ({
   one: (...args: unknown[]) => oneMock(...args),
@@ -44,6 +46,43 @@ vi.mock('./llm.js', () => ({
   speak: vi.fn(async () => ({ ok: true, text: 'Optimal entry setup.' })),
 }));
 
+/*
+ * The mark and the off-hours verdict are stated here, not fetched.
+ *
+ * This suite reached the live Jupiter API for every price and — once the guard started reading a
+ * real reference quote instead of a table of hardcoded ones — the issuer's feed as well, four
+ * symbols at a time. Two networks and the actual wall clock decided whether a strategy-selection
+ * assertion passed: outside Nasdaq hours a wide real spread makes the guard HOLD, which empties the
+ * candidate list and fails this file on nothing to do with the agent. `market/backed.test.ts` and
+ * `market/nasdaq.test.ts` cover the feed and the rules; this file covers the choice made from them.
+ */
+vi.mock('../venues/stocks.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../venues/stocks.js')>();
+  return {
+    ...actual,
+    stockPriceUsd: (symbol: string) => stockPriceUsdMock(symbol),
+  };
+});
+
+vi.mock('../market/nasdaq.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../market/nasdaq.js')>();
+  return {
+    ...actual,
+    offHoursGuard: (...args: unknown[]) => offHoursGuardMock(...args),
+  };
+});
+
+/** A projectable calendar `days` out, shaped like `market/edgar.ts` actually returns one. */
+const calendar = (symbol: string, days: number, errorDays = 1) => ({
+  symbol,
+  cik: 1_045_810,
+  reported: [Date.now() - 91 * 86_400_000, Date.now() - 182 * 86_400_000],
+  nextAt: Date.now() + days * 86_400_000,
+  gapDays: [91, 91],
+  medianGapDays: 91,
+  errorDays,
+});
+
 const { evaluateBestSetup, runAutonomousCycle, autonomousAgentSweep } = await import('./autonomous.js');
 
 const MOCK_SOLANA_OWNER = Keypair.generate().publicKey.toBase58();
@@ -54,21 +93,23 @@ describe('autonomous xStocks trading agent', () => {
     queryMock.mockResolvedValue([]);
     oneMock.mockResolvedValue(null);
     earningsCalendarMock.mockResolvedValue(null);
+    stockPriceUsdMock.mockResolvedValue(216.5);
+    offHoursGuardMock.mockResolvedValue({
+      session: 'closed',
+      spreadBps: 32,
+      spreadPct: 0.0032,
+      action: 'widen_slippage',
+      suggestedSlippageBps: 120,
+      reason: 'Nasdaq is closed (overnight).',
+    });
   });
 
   describe('evaluateBestSetup', () => {
     it('analyzes xStocks universe and selects highest scoring strategy setup', async () => {
-      // Mock NVDA having earnings in 6 days (peak event-driven score)
-      earningsCalendarMock.mockImplementation(async (symbol: string) => {
-        if (symbol === 'NVDAx') {
-          return {
-            symbol: 'NVDAx',
-            nextAt: Date.now() + 6 * 86_400_000,
-            confirmed: true,
-          };
-        }
-        return null;
-      });
+      // NVDA reports in 6 days (peak event-driven score), projected to within a day.
+      earningsCalendarMock.mockImplementation(async (symbol: string) =>
+        symbol === 'NVDAx' ? calendar('NVDAx', 6, 1) : null,
+      );
 
       const best = await evaluateBestSetup();
       expect(best).not.toBeNull();
@@ -86,6 +127,72 @@ describe('autonomous xStocks trading agent', () => {
       expect(best!.corporateAction).toBeDefined();
       expect(best!.offHoursGuard).toBeDefined();
       expect(best!.suggestedSlippageBps).toBeGreaterThanOrEqual(50);
+    });
+
+    it('keeps the earnings run-up inside the projection\u2019s own error margin', async () => {
+      /*
+       * Four days out, but the date is projected to \u00b13 days \u2014 so the print could already have
+       * happened, and an "approaching earnings" entry placed after it is the opposite of the
+       * strategy. EDGAR holds filings, not schedules; `errorDays` is how much it does not know.
+       */
+      earningsCalendarMock.mockImplementation(async (symbol: string) =>
+        symbol === 'NVDAx' ? calendar('NVDAx', 4, 3) : null,
+      );
+
+      const best = await evaluateBestSetup();
+      expect(best).not.toBeNull();
+      expect(best!.strategyKind).not.toBe('event-driven');
+    });
+
+    it('takes the same setup when the projection is tight', async () => {
+      earningsCalendarMock.mockImplementation(async (symbol: string) =>
+        symbol === 'NVDAx' ? calendar('NVDAx', 4, 1) : null,
+      );
+
+      const best = await evaluateBestSetup();
+      expect(best!.strategyKind).toBe('event-driven');
+      expect(best!.reason).toContain('\u00b11d');
+    });
+
+    it('skips a symbol with no price rather than pricing it at a guess', async () => {
+      stockPriceUsdMock.mockImplementation(async (symbol: string) =>
+        symbol === 'NVDAx' ? 216.5 : null,
+      );
+
+      const best = await evaluateBestSetup();
+      expect(best).not.toBeNull();
+      expect(best!.symbol).toBe('NVDAx');
+    });
+
+    it('finds nothing at all when no xStock has a price', async () => {
+      stockPriceUsdMock.mockResolvedValue(null);
+      expect(await evaluateBestSetup()).toBeNull();
+    });
+
+    it('drops a symbol whose off-hours guard says hold', async () => {
+      offHoursGuardMock.mockImplementation(async ({ symbol }: { symbol: string }) =>
+        symbol === 'TSLAx'
+          ? {
+              session: 'closed',
+              spreadBps: 32,
+              spreadPct: 0.0032,
+              action: 'widen_slippage',
+              suggestedSlippageBps: 120,
+              reason: 'ok',
+            }
+          : {
+              session: 'closed',
+              spreadBps: null,
+              spreadPct: null,
+              action: 'hold',
+              suggestedSlippageBps: 50,
+              reason: 'no reference quote',
+            },
+      );
+
+      const best = await evaluateBestSetup();
+      expect(best).not.toBeNull();
+      expect(best!.symbol).toBe('TSLAx');
     });
   });
 

@@ -12,5 +12,8 @@
     "types": ["node", "vitest/globals"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts"]
+  // `scripts/` too: the autonomous-agent demo drives the real executor path and calls the same
+  // functions the scheduler does, so a signature change that breaks it should break the build
+  // rather than the demo.
+  "include": ["src/**/*.ts", "scripts/**/*.ts"]
 }

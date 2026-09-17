@@ -157,8 +157,12 @@ export async function stockPriceUsd(symbol: string): Promise<number | null> {
 
     try {
       const { quoteJupiter } = await import('./jupiter.js');
+      const { SOLANA_MINTS } = await import('../solana/clusters.js');
       const q = await quoteJupiter({
-        inputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+        // The cluster's USDC, not a literal — a fork clones the real mint but `SOLANA_USDC_MINT`
+        // can point elsewhere, and `place.ts` prices and spends through `SOLANA_MINTS`. Two
+        // different USDC mints between the mark and the fill is a mispriced trade.
+        inputMint: SOLANA_MINTS.usdc,
         outputMint: stock.mint,
         amount: 10_000_000,
       });
@@ -171,18 +175,20 @@ export async function stockPriceUsd(symbol: string): Promise<number | null> {
         return price;
       }
     } catch {
-      // Fallback below
+      // Same answer as an empty route: there is no price. Falls through to `null` below.
     }
 
-    const referencePrices: Record<string, number> = {
-      NVDAx: 216.5,
-      TSLAx: 395.2,
-      AAPLx: 228.4,
-      MSFTx: 432.1,
-    };
-    const fallback = referencePrices[xKey] ?? 100;
-    cache.set(xKey, { at: Date.now(), price: fallback });
-    return fallback;
+    /*
+     * Nothing routes, so there is no price — and `null` is what that is.
+     *
+     * A table of four reference prices used to be returned here, with $100 for anything not in it.
+     * That is the Base path's mistake in reverse: `priceOf` refuses to invent an equity price and
+     * says "No route for NVDAc right now" instead (see market/stock-price.test.ts), and the Solana
+     * path was quietly answering $216.50 for an unroutable NVDAx — a number that sizes a trade,
+     * passes a cap check and gets written into a fill record. Nothing downstream could tell it
+     * apart from a real mark.
+     */
+    return null;
   }
 
   // 2. Base EVM stock path

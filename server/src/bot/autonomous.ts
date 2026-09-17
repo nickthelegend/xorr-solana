@@ -21,7 +21,8 @@ import { delegateKeypair } from '../solana/keys.js';
 import { PublicKey } from '@solana/web3.js';
 import type { PersonaId } from './personas.js';
 import { assessCorporateAction, type CorporateActionAssessment } from '../venues/corporate-actions.js';
-import { evaluateOffHoursGuard, type OffHoursGuardVerdict } from '../market/nasdaq.js';
+import { offHoursGuard as offHoursGuardFor, type OffHoursGuardVerdict } from '../market/nasdaq.js';
+import type { WalletRow } from '../routes/wallet-context.js';
 
 export type StrategyKind = 'momentum' | 'event-driven' | 'dca' | 'grid';
 
@@ -67,18 +68,27 @@ async function analyzeStock(
   rangeLow: number;
   rangePosition: number;
   daysToEarnings: number | null;
-  earningsConfirmed: boolean;
+  /**
+   * How far `daysToEarnings` could be off, in days.
+   *
+   * There is no `confirmed` flag to read here, and this used to try to read one. EDGAR holds
+   * filings, not schedules — every next-report date it yields is PROJECTED from the company's own
+   * observed cadence, and `errorDays` is the widest miss that cadence would have produced (see
+   * `market/edgar.ts`). A caller that treats the projection as a fixed date is the mistake the
+   * field exists to prevent.
+   */
+  earningsErrorDays: number;
   corporateAction: CorporateActionAssessment;
   offHoursGuard: OffHoursGuardVerdict;
 }> {
   // Check SEC EDGAR earnings calendar
   let daysToEarnings: number | null = null;
-  let earningsConfirmed = false;
+  let earningsErrorDays = 0;
   try {
     const cal = await earningsCalendar(stock.symbol);
     if (cal && cal.nextAt) {
       daysToEarnings = Math.round((cal.nextAt - Date.now()) / 86_400_000);
-      earningsConfirmed = cal.confirmed ?? false;
+      earningsErrorDays = cal.errorDays;
     }
   } catch {
     // EDGAR lookup optional
@@ -87,8 +97,8 @@ async function analyzeStock(
   // Check Corporate Action schedule & multiplier
   const corporateAction = await assessCorporateAction(stock.symbol);
 
-  // Check Nasdaq market session & off-hours oracle spread
-  const offHoursGuard = evaluateOffHoursGuard({
+  // Check Nasdaq market session & the pool-vs-underlying spread, against the issuer's own quote
+  const offHoursGuard = await offHoursGuardFor({
     symbol: stock.symbol,
     onChainPrice: currentPrice,
   });
@@ -103,7 +113,7 @@ async function analyzeStock(
     rangeLow,
     rangePosition,
     daysToEarnings,
-    earningsConfirmed,
+    earningsErrorDays,
     corporateAction,
     offHoursGuard,
   };
@@ -129,8 +139,18 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
     const offHoursPenalty = analysis.offHoursGuard.session === 'closed' ? 15 : 0;
     const caPenalty = analysis.corporateAction.recommendation === 'avoid_entry' ? analysis.corporateAction.scoreAdjustment : 0;
 
-    // 1. Event-Driven candidate: Earnings run-up within 3-10 days
-    if (analysis.daysToEarnings !== null && analysis.daysToEarnings >= 3 && analysis.daysToEarnings <= 10) {
+    /*
+     * 1. Event-Driven candidate: Earnings run-up within 3-10 days.
+     *
+     * The near edge carries the projection's own error margin. The date came from a filing cadence,
+     * not a schedule, so "6 days out, ±4" could already be past the print — and a run-up entered
+     * after the print is the opposite of this strategy. The whole margin has to fit in the window.
+     */
+    if (
+      analysis.daysToEarnings !== null &&
+      analysis.daysToEarnings - analysis.earningsErrorDays >= 3 &&
+      analysis.daysToEarnings <= 10
+    ) {
       const stop = price * 0.94;
       const target = price * 1.12;
       const baseScore = 95 - Math.abs(analysis.daysToEarnings - 6);
@@ -144,7 +164,7 @@ export async function evaluateBestSetup(): Promise<CandidateSetup | null> {
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} scheduled report is approaching in ${analysis.daysToEarnings} days. Riding pre-earnings momentum before print.${caPenalty !== 0 ? ` [Warning: ${analysis.corporateAction.reason}]` : ''}`,
+        reason: `${stock.symbol} scheduled report is approaching in ${analysis.daysToEarnings} days${analysis.earningsErrorDays > 0 ? ` (projected from its filing cadence, ±${analysis.earningsErrorDays}d)` : ''}. Riding pre-earnings momentum before print.${caPenalty !== 0 ? ` [Warning: ${analysis.corporateAction.reason}]` : ''}`,
         marketCondition: `Pre-earnings window (${analysis.daysToEarnings}d away)`,
         corporateAction: analysis.corporateAction,
         offHoursGuard: analysis.offHoursGuard,
@@ -238,15 +258,28 @@ export async function runAutonomousCycle(
     tone?: ToneId;
   } = {},
 ): Promise<AutonomousTradeResult> {
-  // 1. Check wallet status
-  const wallet = await one<{ id: string; address: string; agents_stopped?: boolean }>(
-    `SELECT id, address, agents_stopped FROM wallets WHERE id = $1`,
-    [walletId],
-  );
+  /*
+   * 1. Check wallet status.
+   *
+   * The whole row, because `armExits` below takes a `WalletRow` and this was handing it three
+   * columns cast to fit. A partial row that typechecks is a row whose missing fields are `undefined`
+   * at runtime, and `wallet-context.ts` is where the shape is decided.
+   */
+  const wallet = await one<WalletRow>(`SELECT * FROM wallets WHERE id = $1`, [walletId]);
   if (!wallet) {
     return { executed: false, reason: 'no_wallet', detail: 'Wallet not found.' };
   }
-  if (wallet.agents_stopped) {
+  /*
+   * Read once, then reason about it.
+   *
+   * `killed: wallet.agents_stopped === true` sat below this guard, where the flag is already
+   * narrowed to `false | undefined` — so the comparison could only ever be false and the rules
+   * engine was told `killed: false` unconditionally. It happened to be correct, because the early
+   * return above is what actually enforces the kill switch, but it read as a second check that was
+   * doing nothing. One name, stated where it is read.
+   */
+  const agentsStopped = wallet.agents_stopped === true;
+  if (agentsStopped) {
     return { executed: false, reason: 'agents_stopped', detail: 'Agents are stopped by user kill switch.' };
   }
 
@@ -271,7 +304,7 @@ export async function runAutonomousCycle(
     dailyCapUsd: dailyCap,
     delegationExpiresAt: new Date(Date.now() + 30 * 86_400_000),
     delegationRevoked: false,
-    killed: wallet.agents_stopped === true,
+    killed: agentsStopped,
   });
   if (!verdict.allowed) {
     return { executed: false, reason: verdict.reason, detail: verdict.detail };
