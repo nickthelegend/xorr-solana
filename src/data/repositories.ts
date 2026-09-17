@@ -339,8 +339,37 @@ export interface AlertRepository {
   setEnabled(id: string, enabled: boolean): Promise<void>;
 }
 
+/**
+ * One address on the signed-in account.
+ *
+ * `active` is the one every other route resolves to — the policy read, the balance, the strategies,
+ * the trail. The executor computes it from the same ordering it picks with, so this flag and what
+ * the money actually does cannot come apart.
+ */
+export type AccountWallet = {
+  id: string;
+  address: string;
+  /** `embedded` was made by Privy for this account; `connected` is a wallet the user brought. */
+  kind: 'embedded' | 'connected';
+  /** Where the row was created. History, not where the executor settles now. */
+  cluster: string;
+  active: boolean;
+  /** Absent on a row written before the executor recorded this. Never stood in for by `createdAt`. */
+  lastActiveAt?: number;
+  createdAt: number;
+};
+
 export interface WalletRepository {
   current(): Promise<Wallet | null>;
+  /**
+   * Every address on this account, the one in use first.
+   *
+   * A user having more than one is not hypothetical: web Privy lists any injected browser extension
+   * alongside the embedded wallet. Everything is scoped by wallet, so the other address has its own
+   * balance, strategies and trail — and until there was a switcher, nothing in the app could reach
+   * them or explain why the numbers looked wrong.
+   */
+  all(): Promise<AccountWallet[]>;
   createEmbedded(): Promise<Wallet>;
   connect(address: string): Promise<Wallet>;
   delegation(): Promise<Delegation | null>;

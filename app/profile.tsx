@@ -34,6 +34,17 @@ import { usePrivyIdentity } from '@/auth/usePrivyIdentity';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 import { system } from '@/data/system';
+import { errorText } from '@/data/apiError';
+import { useStore } from '@/state/store';
+import {
+  SWITCH_CONSEQUENCE,
+  kindLabel,
+  shortAddress,
+  switchedNote,
+  walletSubtitle,
+  worthSwitching,
+} from '@/accounts/switcher';
+import type { AccountWallet } from '@/data/repositories';
 
 const AVATAR = 84;
 const LINK_GLYPH = 18;
@@ -58,6 +69,16 @@ export default function Profile() {
     [address],
   );
   const [copied, setCopied] = useState(false);
+
+  /*
+   * Every address on this account, not just the one in use.
+   *
+   * Web Privy lists any injected browser extension alongside the embedded wallet, so an account
+   * that once connected through an extension has two rows — and everything here is scoped by
+   * wallet, so the other one has its own permission, balance, strategies and trail that nothing in
+   * the app could reach.
+   */
+  const accounts = useAsync(() => repos.wallet.all(), []);
 
   const short = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : undefined;
   const display = name.data ?? email ?? short;
@@ -143,8 +164,20 @@ export default function Profile() {
           )}
         </Rise>
 
+        {worthSwitching(accounts.data ?? []) ? (
+          <Rise index={1}>
+            <AccountSwitcher
+              wallets={accounts.data!}
+              onSwitched={() => {
+                accounts.reload();
+                wallet.reload();
+              }}
+            />
+          </Rise>
+        ) : null}
+
         <Rise
-          index={1}
+          index={2}
           style={{
             marginTop: space.s26,
             marginHorizontal: space.gutter,
@@ -179,14 +212,109 @@ export default function Profile() {
         </Rise>
 
         {wallet.data ? (
-          <Rise index={2}>
+          <Rise index={3}>
             <Text variant="footnote" color={colors.ink55} align="center" style={{ marginTop: space.s18 }}>
               {/* The kind of wallet in plain words: no vendor and no network on a main sheet (PLAN.md O3). */}
-              {wallet.data.kind === 'connected' ? 'Connected wallet' : 'Wallet made with your email'}
+              {kindLabel(wallet.data.kind === 'connected' ? 'connected' : 'embedded')}
             </Text>
           </Rise>
         ) : null}
       </ScrollView>
     </Screen>
+  );
+}
+
+/**
+ * The addresses on this account, and which one everything resolves to.
+ *
+ * Switching is `POST /wallet/connect` — the call that already exists and already asks Privy whether
+ * the address really belongs to the caller. A second endpoint that set the active flag directly
+ * would be a second door into the same room, and the second door is the one nobody remembers to lock.
+ *
+ * The consequence is stated above the rows rather than under them: someone about to change which
+ * permission and which history they are looking at should read that before the tap, not after.
+ */
+function AccountSwitcher({
+  wallets,
+  onSwitched,
+}: {
+  wallets: readonly AccountWallet[];
+  onSwitched: () => void;
+}) {
+  const setWallet = useStore((s) => s.setWallet);
+  const [busy, setBusy] = useState<string>();
+  const [note, setNote] = useState<string>();
+  const [failed, setFailed] = useState(false);
+
+  async function switchTo(w: AccountWallet) {
+    if (w.active || busy) return;
+    setBusy(w.id);
+    setNote(undefined);
+    setFailed(false);
+    try {
+      const next = await repos.wallet.connect(w.address);
+      /*
+       * The store too, not only the server.
+       *
+       * Every screen reads the active wallet from here, and leaving it on the old address would
+       * have the header naming one account while the executor answered about another.
+       */
+      setWallet(next);
+      setNote(switchedNote(w));
+      onSwitched();
+    } catch (e) {
+      // The executor refuses an address Privy does not list on this account, and says so. That
+      // sentence is more useful than anything this screen could invent.
+      setFailed(true);
+      setNote(errorText(e));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  return (
+    <View style={{ marginTop: space.s26, marginHorizontal: space.gutter }}>
+      <Text variant="secondarySm" color={colors.ink55}>
+        {SWITCH_CONSEQUENCE}
+      </Text>
+      <View
+        style={{
+          marginTop: space.s12,
+          paddingHorizontal: space.s16,
+          borderRadius: radius.panel,
+          backgroundColor: colors.surfaceAlt,
+        }}
+      >
+        {wallets.map((w, i) => (
+          <Row
+            key={w.id}
+            divider={i < wallets.length - 1}
+            onPress={w.active ? undefined : () => void switchTo(w)}
+            // An address is not money and is not masked: hiding it would make the switcher unusable
+            // in exactly the state — balances hidden — where someone most wants to check which one
+            // they are on.
+            title={shortAddress(w.address)}
+            secondary={busy === w.id ? 'Switching…' : walletSubtitle(w)}
+            right={
+              w.active ? (
+                <Icon name="check" size={16} color={colors.ink65} />
+              ) : (
+                <Icon name="chevron" size={16} color={colors.ink28} />
+              )
+            }
+          />
+        ))}
+      </View>
+      {note ? (
+        <Text
+          variant="footnote"
+          color={failed ? colors.down : colors.ink55}
+          style={{ marginTop: space.s10 }}
+          accessibilityLiveRegion="polite"
+        >
+          {note}
+        </Text>
+      ) : null}
+    </View>
   );
 }

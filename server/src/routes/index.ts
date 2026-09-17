@@ -50,7 +50,7 @@ import {
 import { requireUser } from '../auth/middleware.js';
 import { bindWallet, findLinkedWallet } from '../auth/walletBinding.js';
 import { freshWallets } from '../auth/privy.js';
-import { currentWallet, requireWallet, type WalletRow } from './wallet-context.js';
+import { currentWallet, requireWallet, walletsFor, type WalletRow } from './wallet-context.js';
 import { erc20Abi, formatUnits, getAddress } from 'viem';
 import type { Address, Hex } from 'viem';
 import { priceOf } from '../market/prices.js';
@@ -93,6 +93,41 @@ routes.get('/wallet', async (c) => {
    * about when they look at this line.
    */
   return c.json({ ...w, chain: CHAIN_KEY });
+});
+
+/**
+ * GET /wallets — every address on this account, the one in use first.
+ *
+ * A user having more than one is not hypothetical: web Privy lists any injected browser extension
+ * alongside the embedded wallet, so an account that once connected through an extension has both on
+ * file. Everything in this system is scoped by wallet — the policy, the balance, the strategies, the
+ * trail — so the other address had a whole second set of all of it that nothing in the app could
+ * reach, and no way to tell that was why the numbers looked wrong.
+ *
+ * `active` is computed from the SAME ordering `currentWallet` picks with, not recomputed here. A
+ * list whose idea of the current wallet could disagree with the executor's would show a ticked row
+ * while the money moved on a different address.
+ *
+ * Switching is `POST /wallet/connect`, which already exists and already asks Privy whether the
+ * address really belongs to the caller. A second endpoint that set `active_at` directly would be a
+ * second door into the same room, and the second door is the one nobody remembers to lock.
+ */
+routes.get('/wallets', async (c) => {
+  const rows = await walletsFor(c);
+  return c.json(
+    rows.map((w, i) => ({
+      id: w.id,
+      address: w.address,
+      /** `embedded` was made by Privy for this account; `connected` is a wallet the user brought. */
+      kind: w.kind,
+      /** Where the row was created. History, not where the executor settles now — see `GET /wallet`. */
+      cluster: w.cluster,
+      /** First in this order is the one every other route resolves to. */
+      active: i === 0,
+      lastActiveAt: w.active_at ? new Date(w.active_at).getTime() : undefined,
+      createdAt: new Date(w.created_at).getTime(),
+    })),
+  );
 });
 
 /** Privy could not be asked which wallets this account has — which is not the same as it having none. */
