@@ -21,6 +21,7 @@ import { append } from '../audit/log.js';
 import { currentWallet } from '../routes/wallet-context.js';
 import { PERSONAS, type PersonaId } from '../bot/personas.js';
 import { NO_TRADES, agentRecords, type AgentRecord } from './leaderboard.js';
+import { notifyKill } from '../notifications/alerts.js';
 
 export const agents = new Hono();
 
@@ -183,6 +184,12 @@ async function setStopped(c: Context, stopped: boolean) {
         : 'Strategies run on their schedules again, inside the same limits.',
       kind: 'risk',
     });
+    if (stopped) {
+      void notifyKill({
+        walletId: id,
+        reason: 'User activated agent kill switch.',
+      }).catch(() => undefined);
+    }
   }
   return c.json(await stoppedState(id));
 }

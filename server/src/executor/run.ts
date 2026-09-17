@@ -40,6 +40,7 @@ import { agentForKind } from '../agents/attribution.js';
 import { isStock } from '../venues/stocks.js';
 import { snapshotWallet } from '../portfolio/snapshots.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
+import { notifyExit } from '../notifications/alerts.js';
 
 /**
  * Our XorrAquaBook deployment, when there is one. Aqua only exists on Base mainnet, so on Sepolia
@@ -896,6 +897,18 @@ async function runStrategyInner(
       route: '/activity',
       kind: 'dca-executed',
     }).catch(() => undefined);
+
+    if (isClose) {
+      void notifyExit({
+        walletId,
+        symbol: intent.inSymbol,
+        reason: intent.because,
+        units: filledUnits,
+        price,
+        proceedsUsd: recordedUsd,
+        signature,
+      }).catch(() => undefined);
+    }
 
     return { status: 'filled', runId, signature, units: filledUnits, price };
   } catch (e) {

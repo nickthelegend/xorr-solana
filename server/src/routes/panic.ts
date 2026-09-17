@@ -41,6 +41,7 @@ import { humanFailure } from '../executor/failure.js';
 import { proceedsSince, usdcRawOf } from '../executor/fill-measure.js';
 import { isStock } from '../venues/stocks.js';
 import { snapshotWallet } from '../portfolio/snapshots.js';
+import { notifyExit } from '../notifications/alerts.js';
 
 export const panic = new Hono();
 
@@ -522,6 +523,16 @@ export async function closeHolding(params: {
 
     // The wallet's value with this sale in it (PLAN.md 2.10); not awaited.
     void snapshotWallet({ id: w.id, address: owner }, 'close').catch(() => undefined);
+
+    void notifyExit({
+      walletId: w.id,
+      symbol,
+      reason: action,
+      units: soldUnits,
+      price: soldUnits > 0 ? proceedsUsd / soldUnits : 0,
+      proceedsUsd,
+      signature,
+    }).catch(() => undefined);
 
     return {
       status: 200,

@@ -12,6 +12,7 @@ import { query } from '../db/index.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
 import { log } from '../http/request-id.js';
 import { runStrategy, type StrategyRow } from './run.js';
+import { autonomousAgentSweep } from '../bot/autonomous.js';
 import { evaluateAlerts } from '../alerts/evaluate.js';
 import { anchorSweep } from '../audit/anchor-sweep.js';
 import { snapshotSweep } from '../portfolio/snapshots.js';
@@ -42,6 +43,20 @@ export async function tick(now: Date = new Date()): Promise<number> {
     } catch (e) {
       log.error(`[scheduler] ${s.label} threw:`, e instanceof Error ? e.message : e);
     }
+  }
+
+  /*
+   * Autonomous AI Agent Sweep for xStocks (PLAN.md Goal: autonomous agent)
+   *
+   * Analyzes live market/news conditions, picks the best available strategy
+   * (momentum, event-driven, dca, grid) and xStock asset (NVDAx, TSLAx, AAPLx, MSFTx),
+   * evaluates risk/rules, and executes trades non-custodially via Jupiter with notifications.
+   */
+  try {
+    const autoExecuted = await autonomousAgentSweep(now);
+    ran += autoExecuted;
+  } catch (e) {
+    log.error('[scheduler] autonomous agent sweep failed:', e instanceof Error ? e.message : e);
   }
 
   /*

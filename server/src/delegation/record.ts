@@ -25,6 +25,7 @@ import {
   waitForReceipt,
 } from '../evm/delegation.js';
 import { readChain } from '../http/chain-read.js';
+import { notifyKill } from '../notifications/alerts.js';
 
 /** The wallet a permission belongs to: its row, and the address that signed. */
 export type PermissionOwner = { id: string; address: string };
@@ -222,6 +223,12 @@ export async function recordRevoke(w: PermissionOwner, txHash?: Hex): Promise<Re
       await stop();
     }
   });
+
+  void notifyKill({
+    walletId: w.id,
+    reason: 'Delegation permission revoked on-chain.',
+    signature: txHash,
+  }).catch(() => undefined);
 
   return { status: 200, body: { revoked: true, ownerPubkey: w.address, dailyCapUsd: 0 } };
 }
