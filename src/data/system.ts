@@ -584,6 +584,48 @@ export type XStockCatalog = {
   unpriced: number;
 };
 
+/** One hop of a Jupiter route: the AMM, and how much of the order it carries. */
+export type RouteHop = {
+  label: string;
+  /** Null when the venue did not say. A split route has several hops summing to 100. */
+  percent: number | null;
+};
+
+/**
+ * What an xStock order costs, read off the Jupiter quote that would fill it.
+ *
+ * Every number is the venue's, for the size actually asked. A figure the venue did not report
+ * arrives as null and is rendered as "not reported" — never as a zero, which on this screen would
+ * read as a trade that costs nothing.
+ */
+export type XStockQuote = {
+  symbol: string;
+  side: 'buy' | 'sell';
+  usd: number;
+  /** What is paid, in that token's own units. */
+  pay: number;
+  payToken: string;
+  /** What the venue expects to deliver. */
+  receive: number;
+  receiveToken: string;
+  /** The least it may deliver and still fill — the number the swap is submitted with. */
+  minimumReceive: number;
+  /** The venue's measured impact at this size, as a percent. */
+  priceImpactPct: number | null;
+  priceImpactUsd: number | null;
+  /** The tolerance the quote was taken at, as the venue echoed it back. */
+  slippageBps: number;
+  /** The worst that tolerance allows, in USD. */
+  slippageWorstUsd: number;
+  hops: RouteHop[];
+  /** Null means the aggregator takes nothing, which is this deployment's case. */
+  platformFeeUsd: number | null;
+  /** What this order works out to per token, once impact is in it. */
+  effectivePrice: number;
+  /** The pool mark for one token, to read `effectivePrice` against. */
+  markPrice: number;
+};
+
 /** One push kind, its explanation, and whether it is on. Labels come from the server. */
 export type NotificationPref = {
   kind: string;
@@ -687,6 +729,12 @@ export const system = {
   stocks: () => api.get<StockRow[]>('/market/stocks'),
   /** The tokenized-equity catalog: every mint, its sector, and what it costs (PLAN.md §8.4). */
   xstocks: () => api.get<XStockCatalog>('/market/xstocks'),
+  /** What one xStock order costs, before it is placed: impact, tolerance and route, from Jupiter. */
+  xstockQuote: (params: { symbol: string; side: 'buy' | 'sell'; usd: number; slippageBps?: number }) =>
+    api.get<XStockQuote>(
+      `/market/xstocks/quote?symbol=${encodeURIComponent(params.symbol)}&side=${params.side}&usd=${params.usd}` +
+        (params.slippageBps === undefined ? '' : `&slippageBps=${params.slippageBps}`),
+    ),
   symbols: () => api.get<string[]>('/market/symbols'),
   backtestStrategy: (body: {
     kind: 'dca' | 'grid';

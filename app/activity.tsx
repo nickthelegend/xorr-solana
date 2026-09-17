@@ -11,9 +11,9 @@
  * [G41] The `yield` row was orphaned by the original filter map; state/derived.ts folds it
  * into Trades so every row is reachable from a tab.
  */
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   BackButton,
   Button,
@@ -149,7 +149,58 @@ export default function Activity() {
   /** A failure, or an empty file said as one. Kept apart so "Nothing to export yet." is not reported as a failed export. */
   const [exportNote, setExportNote] = useState<{ text: string; failed: boolean }>();
 
-  const rows = filterActivity(data ?? [], actFilter);
+  /*
+   * The row a notification asked for.
+   *
+   * A tapped push carries the audit row it recorded (`notifications/routes.ts`), and landing at the
+   * top of a hundred rows is not "opening the thing it is about". The list scrolls to it and marks
+   * it until the reader takes over.
+   */
+  const { row: askedFor } = useLocalSearchParams<{ row?: string }>();
+  const scroller = useRef<ScrollView>(null);
+  const [offsets, setOffsets] = useState<Record<string, number>>({});
+  /*
+   * Which addressed row the reader has scrolled away from.
+   *
+   * Set from the scroll gesture — an event, never an effect. The param stays in the URL for as long
+   * as the screen is mounted, so without releasing it the list would drag itself back to that row
+   * every time the reader scrolled away, which is the behaviour of a screen that will not let go.
+   */
+  const [released, setReleased] = useState<string>();
+  const marked = askedFor && released !== askedFor ? askedFor : undefined;
+
+  /*
+   * A filter the addressed row is not under would hide it.
+   *
+   * A push about a blocked trade opens a list the reader last left on "Trades", while the row it
+   * names is filed under "Blocked". Widening to All is the one move that cannot fail to show it.
+   *
+   * DERIVED rather than written: setting the filter from an effect would cascade a render and,
+   * worse, would overwrite a choice the reader made afterwards. As a derivation it applies only
+   * while the row is still marked, so the first deliberate tap on a pill takes it back.
+   */
+  const addressedIsHidden =
+    marked !== undefined &&
+    data !== undefined &&
+    data.some((r) => r.id === marked) &&
+    !filterActivity(data, actFilter).some((r) => r.id === marked);
+  const showing = addressedIsHidden ? 0 : actFilter;
+
+  const rows = filterActivity(data ?? [], showing);
+
+  // Once the row has a measured offset under the filter now showing, put it on screen. A scroll is
+  // a side effect on a ref, not a state write, so it does not cascade.
+  useEffect(() => {
+    if (!marked) return;
+    const y = offsets[marked];
+    if (y === undefined) return;
+    scroller.current?.scrollTo({ y: Math.max(0, y - space.s12), animated: true });
+  }, [marked, offsets]);
+
+  const measure = useCallback(
+    (id: string, y: number) => setOffsets((prev) => (prev[id] === y ? prev : { ...prev, [id]: y })),
+    [],
+  );
 
   /**
    * One file out of the app, delivered the way `/export` delivers it: a download in a browser, a share sheet on a phone.
@@ -202,7 +253,17 @@ export default function Activity() {
 
       <PillRow style={{ marginTop: space.s18, flexGrow: 0 }}>
         {ACTIVITY_FILTERS.map((f, i) => (
-          <Pill key={f} label={f} selected={i === actFilter} onPress={() => setActFilter(i)} />
+          <Pill
+            key={f}
+            label={f}
+            // `showing`, not the stored filter: while a notification's row is being shown the list
+            // is widened to All, and a pill claiming otherwise would be describing a different list.
+            selected={i === showing}
+            onPress={() => {
+              if (askedFor) setReleased(askedFor);
+              setActFilter(i);
+            }}
+          />
         ))}
       </PillRow>
 
@@ -214,12 +275,18 @@ export default function Activity() {
         ) : rows.length === 0 ? (
           (data ?? []).length > 0 ? (
             /* The trail has rows, just none of this kind: "Nothing yet." and a push to start buying would deny the rest. */
-            <EmptyList list="activity" text={NONE_UNDER[actFilter] ?? 'Nothing here.'} />
+            <EmptyList list="activity" text={NONE_UNDER[showing] ?? 'Nothing here.'} />
           ) : (
             <EmptyList list="activity" />
           )
         ) : (
-          <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            ref={scroller}
+            refreshControl={refresh}
+            showsVerticalScrollIndicator={false}
+            // The reader has taken over. The mark has done its job and stops following them.
+            onScrollBeginDrag={() => askedFor && setReleased(askedFor)}
+          >
             {rows.map((r) => {
               const credit = activityAmountIsCredit(r.amount);
               return (
@@ -237,9 +304,23 @@ export default function Activity() {
                   onPress={() => router.push(`/explain/${r.id}`)}
                   accessibilityRole="button"
                   accessibilityLabel={`Why: ${plainAction(r.action)}`}
+                  // Where this row sits in the list, so a notification naming it can be scrolled to.
+                  onLayout={(e) => measure(r.id, e.nativeEvent.layout.y)}
                   style={[
                     { flexDirection: 'row', gap: space.s12, paddingVertical: space.s14 },
                     divider,
+                    /*
+                      The row the notification was about, said in the one way a list can say it.
+                      `surfaceAlt` is the design system's own "this one" — the same ink selection
+                      uses — so nothing here is a colour invented for this screen.
+                    */
+                    r.id === marked
+                      ? {
+                          backgroundColor: colors.surfaceAlt,
+                          borderRadius: radius.card,
+                          paddingHorizontal: space.s12,
+                        }
+                      : null,
                   ]}
                 >
                   <View

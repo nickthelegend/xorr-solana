@@ -119,7 +119,7 @@ export default function XStocks() {
                  * cannot be priced here — but an order ticket opened on it would have no number to
                  * put in front of someone before they commit money.
                  */
-                onPress={isTradable(s) ? () => router.push(`/order/${s.symbol}`) : undefined}
+                onPress={isTradable(s) ? () => router.push(`/xstock/${s.symbol}`) : undefined}
               />
             ))}
           </ScrollView>

@@ -9,17 +9,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 
-const h = vi.hoisted(() => ({ getJson: vi.fn(), staleValue: vi.fn() }));
+const h = vi.hoisted(() => ({
+  getJson: vi.fn(),
+  staleValue: vi.fn(),
+  xStockQuote: vi.fn(),
+  requireUser: vi.fn(),
+}));
 
 vi.mock('../http/get.js', () => ({ getJson: h.getJson, staleValue: h.staleValue }));
+// The catalog is public; the quote beside it is not. Authentication itself is `auth`'s to prove.
+vi.mock('../auth/middleware.js', () => ({ requireUser: h.requireUser, WrongPrincipalError: class extends Error {} }));
+vi.mock('../venues/xstocks-quote.js', async (orig) => ({
+  ...(await orig<typeof import('../venues/xstocks-quote.js')>()),
+  xStockQuote: h.xStockQuote,
+}));
 
 const NVDAX = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
 const SPYX = 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W';
 
-async function call(): Promise<{ status: number; body: any }> {
+async function call(path = '/market/xstocks'): Promise<{ status: number; body: any }> {
   const { xstockRoutes } = await import('./xstocks.js');
   const app = new Hono().route('/', xstockRoutes);
-  const res = await app.request('/market/xstocks');
+  const res = await app.request(path);
   return { status: res.status, body: await res.json() };
 }
 
@@ -27,6 +38,8 @@ beforeEach(() => {
   vi.resetModules();
   h.getJson.mockReset();
   h.staleValue.mockReset().mockReturnValue(undefined);
+  h.requireUser.mockReset();
+  h.xStockQuote.mockReset().mockResolvedValue({ symbol: 'NVDAx', side: 'buy', usd: 250 });
 });
 
 describe('with prices', () => {
@@ -84,5 +97,60 @@ describe('with no prices at all', () => {
     expect(body.rows.every((r: any) => r.price === null)).toBe(true);
     // The facts about each listing are not market data and survive the outage.
     expect(body.rows.every((r: any) => r.name && r.sector && r.address)).toBe(true);
+  });
+});
+
+describe('the order breakdown', () => {
+  it('asks for the size and side given, at the executor’s default tolerance', async () => {
+    const { status } = await call('/market/xstocks/quote?symbol=NVDAx&side=sell&usd=250');
+    const { DEFAULT_SLIPPAGE_BPS } = await import('../venues/xstocks-quote.js');
+
+    expect(status).toBe(200);
+    expect(h.xStockQuote).toHaveBeenCalledWith({
+      symbol: 'NVDAx',
+      side: 'sell',
+      usd: 250,
+      slippageBps: DEFAULT_SLIPPAGE_BPS,
+    });
+  });
+
+  it('is behind a session, unlike the catalog', async () => {
+    // A catalogue entry is a public fact about a listed asset. This is one person’s order at one
+    // size, and it costs an upstream request per call.
+    await call('/market/xstocks/quote?symbol=NVDAx&side=buy&usd=250');
+    expect(h.requireUser).toHaveBeenCalled();
+  });
+
+  it('refuses a tolerance outside the bounds rather than clamping it', async () => {
+    // Clamped, a ticket that asked for 0.1% would be quoted at 3% and show a floor nobody agreed
+    // to — and the person reading it has no way to tell.
+    const { status, body } = await call('/market/xstocks/quote?symbol=NVDAx&side=buy&usd=250&slippageBps=900');
+
+    expect(status).toBe(400);
+    expect(body.error).toBe('invalid_slippage');
+    expect(h.xStockQuote).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['?symbol=NVDAx&side=sideways&usd=250', 'invalid_side'],
+    ['?symbol=NVDAx&side=buy&usd=0', 'invalid_amount'],
+    ['?symbol=NVDAx&side=buy&usd=abc', 'invalid_amount'],
+  ])('refuses %s', async (qs, error) => {
+    const { status, body } = await call(`/market/xstocks/quote${qs}`);
+    expect(status).toBe(400);
+    expect(body.error).toBe(error);
+  });
+
+  it('answers a pair nobody will price as no quote, not as a breakdown of zeroes', async () => {
+    const { UnpricedError } = await import('../venues/jupiter.js');
+    h.xStockQuote.mockRejectedValue(new UnpricedError('No Jupiter quote for USDC -> NVDAx: 429'));
+
+    const { status, body } = await call('/market/xstocks/quote?symbol=NVDAx&side=buy&usd=250');
+
+    // Zeroes on this screen read as a free trade. The ticket renders this as "nobody would price
+    // it", which is a different sentence from "something broke".
+    expect(status).toBe(502);
+    expect(body.error).toBe('no_quote');
+    expect(body.detail).toMatch(/429/);
   });
 });
