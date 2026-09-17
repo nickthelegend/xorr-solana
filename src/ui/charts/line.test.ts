@@ -70,3 +70,25 @@ describe('the point under a finger', () => {
     expect(nearestIndex(lineFrame([1, 2], { width: 4, height: 10 }, 2), 3)).toBe(0);
   });
 });
+
+describe('a lone reading is a point, not a line', () => {
+  const f = lineFrame([42], BOX, 2);
+
+  /*
+   * `M x,y` with nothing after it draws nothing in SVG, and an area closed from a single x is a zero-width sliver. Both
+   * were emitted before and both were invisible, so a chart handed one reading rendered as an empty box — which is what
+   * a chart handed NO readings looks like. Saying there is no path makes the caller draw the reading instead.
+   */
+  it('has no line and no area for one point', () => {
+    expect(linePaths(f, [42])).toEqual({ line: '', area: '' });
+  });
+
+  it('still places that point, centred, so it can be drawn', () => {
+    expect(lineX(f, 0)).toBe(BOX.width / 2);
+    expect(Number.isFinite(lineY(f, 42))).toBe(true);
+  });
+
+  it('draws a line again as soon as there are two', () => {
+    expect(linePaths(lineFrame([10, 20], BOX, 2), [10, 20]).line).not.toBe('');
+  });
+});

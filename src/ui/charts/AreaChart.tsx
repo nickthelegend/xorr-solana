@@ -260,6 +260,14 @@ export function AreaChart({
     const f = frameOf(layer);
     const { line, area } = linePaths(f, layer.data);
     const last = layer.data.length - 1;
+    /*
+     * One reading is a point, and is drawn whether or not this chart asked for an end dot.
+     *
+     * `linePaths` gives a lone reading no line and no area, deliberately — a line needs two observations, and one is a
+     * fact without a direction. Without this the chart would then draw nothing at all, which is what a chart with NO
+     * readings looks like: the same "nothing" versus "not yet" conflation the rest of this app exists to avoid.
+     */
+    const lone = layer.data.length === 1;
     return (
       <>
         <Path d={area} fill={`url(#${gradientId}-${slot})`} />
@@ -271,7 +279,7 @@ export function AreaChart({
           strokeLinejoin="round"
           strokeLinecap="round"
         />
-        {endDot ? (
+        {endDot || lone ? (
           <Circle
             cx={lineX(f, last)}
             cy={lineY(f, layer.data[last]!)}
