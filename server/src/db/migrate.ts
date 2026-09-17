@@ -61,6 +61,9 @@ const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(
 const RENAMED: Readonly<Record<string, string>> = Object.freeze({
   // Collided with 030-agent-risk-profile.sql. Moved after it, which is the order it already ran in.
   '033-multiplier-observations.sql': '030-multiplier-observations.sql',
+  // Collided with 034-position-sleeves.sql: both branches read 033 and both wrote 034. Moved to
+  // the timestamped scheme, which is the collision this repo stopped being able to have.
+  '20260917T091529-corporate-action-notices.sql': '034-corporate-action-notices.sql',
 });
 
 for (const [current, previous] of Object.entries(RENAMED)) {
