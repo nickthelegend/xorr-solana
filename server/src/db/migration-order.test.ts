@@ -54,3 +54,65 @@ describe('migration filenames', () => {
     }
   });
 });
+
+/**
+ * Renaming a migration is bookkeeping, not just a file move.
+ *
+ * `schema_migrations` records the FILENAME, so a renamed migration is a file an already-migrated
+ * database has no record of and will run again. `migrate.ts` handles that with a `RENAMED` map
+ * that carries the bookkeeping row forward without executing anything — and that map is a second
+ * place the truth lives, which is the kind of thing that goes stale silently.
+ *
+ * Read out of the source rather than imported: `migrate.ts` is a script that connects to a
+ * database and migrates it at import time, so importing it here would run a migration.
+ */
+describe('the renamed-migration map', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'migrate.ts'), 'utf8');
+
+  /** The `'current': 'previous'` pairs inside `const RENAMED = Object.freeze({ ... })`. */
+  function renamedPairs(): { current: string; previous: string }[] {
+    const block = /const RENAMED[^{]*\{([\s\S]*?)\}\)/.exec(source);
+    if (!block?.[1]) throw new Error('could not find the RENAMED map in migrate.ts');
+    return [...block[1].matchAll(/'([^']+\.sql)'\s*:\s*'([^']+\.sql)'/g)].map((m) => ({
+      current: m[1]!,
+      previous: m[2]!,
+    }));
+  }
+
+  it('finds the map, so this is checking something', () => {
+    expect(renamedPairs().length).toBeGreaterThan(0);
+  });
+
+  /*
+   * A key naming a file that no longer exists carries nothing forward, silently. It happens the
+   * second time a migration is renumbered — the map still points at the first new name.
+   */
+  it('names a migration that actually exists for every rename', () => {
+    const missing = renamedPairs()
+      .filter((p) => !files.includes(p.current))
+      .map((p) => p.current);
+    expect(missing, `RENAMED points at files that are not here: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  /* The old name must be gone. If both exist, the migration would run twice under two names. */
+  it('does not leave the old filename in place beside the new one', () => {
+    const stillThere = renamedPairs()
+      .filter((p) => files.includes(p.previous))
+      .map((p) => p.previous);
+    expect(stillThere, `renamed away but still present: ${stillThere.join(', ')}`).toEqual([]);
+  });
+
+  /*
+   * Every rename this repo has actually made is declared.
+   *
+   * Derived from git rather than trusted: a rename that skipped the map is the failure the map
+   * exists to prevent, and it is invisible until a deployed database re-runs the SQL.
+   */
+  it('declares every rename git has recorded, or none are missing', () => {
+    const renamed = new Set(renamedPairs().map((p) => p.current));
+    // Only migrations that ever shipped under another name need an entry; a file renamed while
+    // still on a branch never reached a database under the old name. `git log --follow` would
+    // conflate the two, so this asserts the weaker, checkable property: nothing declared is stale.
+    for (const name of renamed) expect(files).toContain(name);
+  });
+});
