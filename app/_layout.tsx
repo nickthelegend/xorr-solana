@@ -152,6 +152,8 @@ export default function RootLayout() {
           <Stack.Screen name="explain/[seq]" options={{ presentation: 'modal' }} />
           {/* The risk setting opens over the panel describing the behaviour it governs. */}
           <Stack.Screen name="agent/risk" options={{ presentation: 'modal' }} />
+          {/* The basket, and how far it has drifted from what was asked for. */}
+          <Stack.Screen name="agent/basket" options={{ presentation: 'modal' }} />
           <Stack.Screen name="bot/[id]/intro" options={{ presentation: 'modal' }} />
           <Stack.Screen name="bot/[id]/settings" options={{ presentation: 'modal' }} />
           <Stack.Screen name="strategy/dca" options={{ presentation: 'modal' }} />

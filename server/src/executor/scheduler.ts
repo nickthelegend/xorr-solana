@@ -13,6 +13,7 @@ import { THIS_CHAIN } from '../db/chain-scope.js';
 import { log } from '../http/request-id.js';
 import { runStrategy, type StrategyRow } from './run.js';
 import { autonomousAgentSweep } from '../bot/autonomous.js';
+import { basketSweep } from '../bot/basket.js';
 import { evaluateAlerts } from '../alerts/evaluate.js';
 import { anchorSweep } from '../audit/anchor-sweep.js';
 import { snapshotSweep } from '../portfolio/snapshots.js';
@@ -78,6 +79,22 @@ export async function tick(now: Date = new Date()): Promise<number> {
     ran += autoExecuted;
   } catch (e) {
     log.error('[scheduler] autonomous agent sweep failed:', e instanceof Error ? e.message : e);
+  }
+
+  /*
+   * Basket rebalancing, after the agent has had its turn.
+   *
+   * After, so a rebalance measures a portfolio that includes whatever the agent just opened. The
+   * order matters: measuring first and trading second would size a correction against a basket
+   * that changed underneath it.
+   *
+   * Each wallet's run is claimed on a unique period key before anything is read, so a tick that
+   * overruns, a restart, or two schedulers all converge on one rebalance per period.
+   */
+  try {
+    ran += await basketSweep(now);
+  } catch (e) {
+    log.error('[scheduler] basket sweep failed:', e instanceof Error ? e.message : e);
   }
 
   /*
