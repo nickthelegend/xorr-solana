@@ -43,6 +43,7 @@ import type {
   Wallet,
 } from './types';
 import type {
+  AccountWallet,
   OrderOutcome,
   PerpCandles,
   PerpMarket,
@@ -647,6 +648,9 @@ export const LocalRepositories: Repositories = {
        * signed-in user out of their own session to recover from a blip.
        */
       return await api.get<Wallet | null>('/wallet');
+    },
+    async all(): Promise<AccountWallet[]> {
+      return api.get<AccountWallet[]>('/wallets');
     },
     async createEmbedded(): Promise<Wallet> {
       return api.post<Wallet>('/wallet/create', {});

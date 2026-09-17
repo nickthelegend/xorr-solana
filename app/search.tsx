@@ -5,6 +5,17 @@
  * The catalog is searchable the moment the screen opens, and prices fill in class by class as each
  * read answers. This waited on `listClasses`, whose slowest read — the share snapshot — measured eight
  * seconds, and said "Loading markets…" over a list of names it already had.
+ *
+ * Two things were wrong with the search itself.
+ *
+ * It matched a SUBSTRING, which is exact matching with a friendlier name: "nvidia" found nothing,
+ * because the symbol is `NVDAx`, and "aple" found nothing at all. It now ranks by subsequence
+ * (`markets/fuzzy.ts`) — forgiving of a dropped letter and of typing the company instead of the
+ * ticker, and still strict enough that a wrong character finds nothing rather than something close.
+ *
+ * And it searched the EVM market classes only, so none of the xStocks were reachable from here at
+ * all — the catalogue this app can actually trade on Solana was invisible to its own search box.
+ * They are merged in from `/market/xstocks`, priced or saying "No price", never a placeholder.
  */
 import React, { useMemo, useState } from 'react';
 import { ScrollView, TextInput, View } from 'react-native';
@@ -30,8 +41,35 @@ import {
 } from '@/ui';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { useMarketPrices } from '@/markets/useMarketPrices';
+import { assetGradient } from '@/design/gradients';
+import { useAsync } from '@/data/useAsync';
+import { system } from '@/data/system';
+import { fuzzyRank } from '@/markets/fuzzy';
+import { price as fmtPrice } from '@/format';
 
 const FIELD_H = 46;
+
+/**
+ * One searchable row, whichever catalogue it came from.
+ *
+ * `symbol` and `name` are what `fuzzyRank` scores against; everything else is what the row draws.
+ * Flattening the two sources into one shape is what lets a single query rank an xStock against a
+ * crypto instrument instead of searching two lists and concatenating the answers.
+ */
+type Hit = {
+  key: string;
+  symbol: string;
+  name: string;
+  secondary: string;
+  gradient: { c1: string; c2: string };
+  price: string;
+  /** Drawn in muted ink, and never a number. */
+  unpriced: boolean;
+  delta?: string;
+  up: boolean;
+  state: 'ready' | 'loading' | 'failed';
+  href: string;
+};
 /** With no query, show a sample rather than all 45 — the list is a starting point. */
 const PREVIEW = 12;
 
@@ -41,17 +79,57 @@ export default function Search() {
   const [q, setQ] = useState('');
   const classes = useMarketPrices();
 
+  /*
+   * The xStocks catalogue, merged in beside the market classes.
+   *
+   * Its own read, so a search box opens instantly on the names it already has and the Solana rows
+   * arrive when the executor answers — the same reasoning the class prices already follow.
+   */
+  const xstocks = useAsync(() => system.xstocks(), []);
+
   const results = useMemo(() => {
-    const all = classes.flatMap((c) => c.instruments.map((i) => ({ i, state: c.state })));
-    if (!q.trim()) return all.slice(0, PREVIEW);
-    const needle = q.trim().toLowerCase();
-    return all.filter(
-      ({ i }) => i.sym.toLowerCase().includes(needle) || i.name.toLowerCase().includes(needle),
+    const fromClasses: Hit[] = classes.flatMap((c) =>
+      c.instruments.map((i) => ({
+        key: `${i.classId}-${i.sym}`,
+        symbol: i.sym,
+        name: i.name,
+        secondary: `${i.name} · ${i.tag}`,
+        gradient: { c1: i.c1, c2: i.c2 },
+        price: i.px,
+        unpriced: i.feed === 'unavailable',
+        delta: i.chg,
+        up: i.up,
+        state: c.state,
+        href: `/asset/${i.sym}`,
+      })),
     );
-  }, [classes, q]);
+
+    const fromXStocks: Hit[] = (xstocks.data?.rows ?? []).map((r) => ({
+      key: `xstock-${r.address}`,
+      symbol: r.symbol,
+      name: r.name,
+      secondary: `${r.name} · ${r.sector}`,
+      gradient: assetGradient(r.symbol),
+      /*
+       * Never a placeholder number. A mint nothing will price says so, here as on the catalogue
+       * screen — the row exists because the asset exists, and the missing price is the fact.
+       */
+      price: r.price === null ? 'No price' : fmtPrice(r.price),
+      unpriced: r.price === null,
+      delta: undefined,
+      up: false,
+      state: 'ready' as const,
+      // The cost breakdown, which is the only xStock screen there is to open.
+      href: `/xstock/${r.symbol}`,
+    }));
+
+    const all = [...fromClasses, ...fromXStocks];
+    if (!q.trim()) return all.slice(0, PREVIEW);
+    return fuzzyRank(all, q);
+  }, [classes, xstocks.data, q]);
 
   // Real logos for whatever the query matched, same as every other list of instruments.
-  const symbols = useMemo(() => results.map(({ i }) => i.sym), [results]);
+  const symbols = useMemo(() => results.map((r) => r.symbol), [results]);
   const logos = useLogos(symbols);
 
   // Each read that failed, once: the four classes the feed prices share one.
@@ -113,25 +191,25 @@ export default function Search() {
           <EmptyState text={`Nothing matches "${q}".`} />
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {results.map(({ i, state }) => (
+            {results.map((hit) => (
               <Row
-                key={`${i.classId}-${i.sym}`}
-                left={<AssetMark gradient={{ c1: i.c1, c2: i.c2 }} {...logoProps(logos, i.sym)} size={32} />}
-                title={i.sym}
-                secondary={`${i.name} · ${i.tag}`}
+                key={hit.key}
+                left={<AssetMark gradient={hit.gradient} {...logoProps(logos, hit.symbol)} size={32} />}
+                title={hit.symbol}
+                secondary={hit.secondary}
                 value={
-                  state === 'ready' ? (
-                    <Price color={i.feed === 'unavailable' ? colors.ink55 : undefined} figure="market">
-                      {i.px}
+                  hit.state === 'ready' ? (
+                    <Price color={hit.unpriced ? colors.ink55 : undefined} figure="market">
+                      {hit.price}
                     </Price>
-                  ) : state === 'loading' ? (
+                  ) : hit.state === 'loading' ? (
                     <Placeholder height={12} width={56} />
                   ) : undefined
                 }
-                delta={state === 'ready' ? i.chg : undefined}
-                deltaTone={i.up ? 'up' : 'down'}
+                delta={hit.state === 'ready' ? hit.delta : undefined}
+                deltaTone={hit.up ? 'up' : 'down'}
                 height={62}
-                onPress={() => router.replace(`/asset/${i.sym}`)}
+                onPress={() => router.replace(hit.href as never)}
               />
             ))}
           </ScrollView>

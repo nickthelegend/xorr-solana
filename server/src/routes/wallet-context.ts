@@ -6,7 +6,7 @@
  * build read "the first wallet row" — fine for one user on a laptop, catastrophic for two.
  */
 import type { Context } from 'hono';
-import { one } from '../db/index.js';
+import { one, query } from '../db/index.js';
 import { requireUser } from '../auth/middleware.js';
 
 export type WalletRow = {
@@ -20,6 +20,12 @@ export type WalletRow = {
   /** The stop-all the executor enforces (migration 019). Absent on a database that has not run it. */
   agents_stopped?: boolean;
   agents_stopped_at?: Date | null;
+  /**
+   * When the app last said it was on this address (migration 011), and what `currentWallet` orders
+   * by. Null on a row written before that column existed.
+   */
+  active_at?: Date | null;
+  created_at: Date;
 };
 
 /**
@@ -45,13 +51,36 @@ export type WalletRow = {
  * row age. `created_at` and `id` still break ties, and `id` being the primary key makes the
  * ordering total.
  */
+/**
+ * Which of a user's wallets is the current one, as one string.
+ *
+ * Exported so the account switcher can list wallets in the SAME order this picks from. A list whose
+ * idea of "active" is computed separately would eventually disagree with the executor's, and the
+ * user would be looking at a ticked row while their money moved on a different address. That is the
+ * exact class of bug the docblock above describes; one ordering is how it stays fixed.
+ */
+export const WALLET_ORDER = 'ORDER BY active_at DESC NULLS LAST, created_at DESC, id DESC';
+
 export async function currentWallet(c: Context): Promise<WalletRow | undefined> {
   const { userId } = requireUser(c);
   return one<WalletRow>(
-    `SELECT * FROM wallets WHERE user_id = $1
-      ORDER BY active_at DESC NULLS LAST, created_at DESC, id DESC LIMIT 1`,
+    `SELECT * FROM wallets WHERE user_id = $1 ${WALLET_ORDER} LIMIT 1`,
     [userId],
   );
+}
+
+/**
+ * Every wallet on the caller's account, the current one first.
+ *
+ * A user having more than one is not hypothetical — web Privy lists any injected browser extension
+ * alongside the embedded wallet — and until now the app could see only whichever the ordering above
+ * picked. Everything is scoped by wallet: the policy, the balance, the strategies, the trail. So an
+ * account with two addresses had a whole second set of all of it that nothing in the app could
+ * reach, and no way to tell that was why the numbers looked wrong.
+ */
+export async function walletsFor(c: Context): Promise<WalletRow[]> {
+  const { userId } = requireUser(c);
+  return query<WalletRow>(`SELECT * FROM wallets WHERE user_id = $1 ${WALLET_ORDER}`, [userId]);
 }
 
 /**
