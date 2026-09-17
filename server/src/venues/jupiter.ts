@@ -134,9 +134,23 @@ export async function quote(params: {
    * cloned route the same thing. Mainnet is left free to take the genuinely best route.
    */
   const pinnedDex = CLUSTER_KEY === 'solana-mainnet' ? null : process.env.FORK_ROUTE_DEX ?? 'Whirlpool';
-  const routePin = pinnedDex ? `&dexes=${encodeURIComponent(pinnedDex)}&onlyDirectRoutes=true` : '';
+
+  /*
+   * The pin is a preference, not a constraint.
+   *
+   * One pool is not the whole market: a size the cloned Whirlpool cannot absorb returns
+   * NO_ROUTES_FOUND under the pin while the open market quotes it happily — which is how a sell
+   * large enough to matter became unsellable, exits included. So the pinned route is tried first,
+   * because it is the one the fork can actually execute, and an unpinned quote is taken when the
+   * pin has nothing. The fill then settles through the venue vault and is labelled `venue-vault`,
+   * which is honest: a real price, and no claim that a route ran.
+   */
+  const attempts = pinnedDex
+    ? [`&dexes=${encodeURIComponent(pinnedDex)}&onlyDirectRoutes=true`, '']
+    : [''];
 
   let lastError: Error | null = null;
+  for (const routePin of attempts) {
   for (const baseUrl of JUPITER_APIS) {
     try {
       const url = `${baseUrl}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=${slippageBps}${routePin}`;
@@ -150,6 +164,7 @@ export async function quote(params: {
     } catch (err) {
       lastError = err as Error;
     }
+  }
   }
 
   /*
