@@ -73,6 +73,8 @@ import { chainAccess } from '@/wallet/chainAccess';
 import { standingOnChain } from '@/wallet/delegationChain';
 import { killSwitchChip } from '@/state/killSwitch';
 import { KillSwitchChip } from '@/ui/KillSwitchChip';
+import { TradingTicker } from '@/ui/TradingTicker';
+import { usePoll } from '@/data/usePoll';
 
 type SheetTab = 'agents' | 'gainers' | 'stocks' | 'futures';
 
@@ -87,6 +89,9 @@ const AVATAR = 40;
 const GRABBER_W = 36;
 const GRABBER_H = 4;
 const TAB_RULE = 2;
+
+/** How often the present-tense line asks again. A run is seconds of work, so this is often enough to catch one. */
+const TICKER_EVERY_MS = 15_000;
 const SPARK_W = 56;
 const SPARK_H = 22;
 /** The agents are tiles, not rows: a medium orb with its name under it, four across. */
@@ -350,6 +355,11 @@ export default function Home() {
   }, [wallet?.address]);
   /* The trade step is a fill the executor recorded, not a strategy somebody created. */
   const recordedRuns = useAsync(() => system.runs(50), []);
+  /*
+   * The same runs, asked again on a clock, for the present-tense line (`TradingTicker`). `usePoll` only runs while this
+   * screen is focused and never stacks a read behind itself, so a tab nobody is looking at asks nothing.
+   */
+  const liveRuns = usePoll(() => system.runs(20), TICKER_EVERY_MS);
   const signedOut = useSignedOut();
   const now = useNow();
   const setup = setupSteps({
@@ -528,6 +538,21 @@ export default function Home() {
             <SetupCard steps={setup} onOpen={(href) => router.push(href)} />
           </Rise>
         ) : null}
+
+        {/*
+          What the agents are doing at this moment, from runs the executor recorded as still open (FEATURES.md #33).
+          The app could say what the bot HAD done and what it was ALLOWED to do, and never that it was doing something.
+
+          Polled rather than read once, because the claim is present-tense — and only while this screen is focused, so
+          a tab nobody is looking at is not asking. A run left open by a crash is reported as stuck rather than as
+          trading; a read that failed says so rather than resolving into "nothing is happening", which is itself a
+          claim somebody might act on.
+        */}
+        {signedOut ? null : (
+          <Rise index={2} style={{ marginTop: space.s12, paddingHorizontal: space.gutter }}>
+            <TradingTicker runs={liveRuns.data} failed={liveRuns.error !== undefined} />
+          </Rise>
+        )}
 
         {/* The sheet: a grabber, a rounded top, and it runs to the bottom — the reference's watchlist. */}
         <Rise
