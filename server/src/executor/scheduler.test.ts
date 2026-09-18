@@ -12,10 +12,21 @@ vi.mock('./run.js', () => ({ runStrategy: vi.fn() }));
 vi.mock('../alerts/evaluate.js', () => ({ evaluateAlerts: vi.fn(async () => []) }));
 vi.mock('../audit/anchor-sweep.js', () => ({ anchorSweep: vi.fn(async () => null) }));
 vi.mock('../portfolio/snapshots.js', () => ({ snapshotSweep: vi.fn(async () => ({ recorded: 0, failed: 0 })) }));
+/*
+ * The price observation sweep, stubbed like the sweeps above.
+ *
+ * Left real, the first tick in this file asked Jupiter's live quote API for every xStock in turn —
+ * about four seconds of network — so "runs every due strategy when one of them throws" sat just under
+ * vitest's 5s timeout and failed on a slow CI runner. Later ticks skipped it (the sweep is paced), which
+ * is why only that test was slow. Nothing here is about prices; the sweep has its own suite in
+ * `market/observe.test.ts`. What this file needs is that the tick calls it, which the first test asserts.
+ */
+vi.mock('../market/observe.js', () => ({ observeSweep: vi.fn(async () => null) }));
 
 const { query } = await import('../db/index.js');
 const { runStrategy } = await import('./run.js');
 const { evaluateAlerts } = await import('../alerts/evaluate.js');
+const { observeSweep } = await import('../market/observe.js');
 const { tick, guardedTick } = await import('./scheduler.js');
 
 const row = (id: string) => ({ id, label: `strategy ${id}` });
@@ -29,6 +40,7 @@ beforeEach(() => {
   vi.mocked(query).mockReset();
   vi.mocked(runStrategy).mockReset();
   vi.mocked(evaluateAlerts).mockClear();
+  vi.mocked(observeSweep).mockClear();
 });
 
 describe('a tick', () => {
@@ -39,7 +51,9 @@ describe('a tick', () => {
       .mockRejectedValueOnce(new Error('rpc exploded'))
       .mockResolvedValueOnce({ status: 'filled', runId: 'r', signature: '0x1', units: 1, price: 1 });
 
-    expect(await tick(new Date())).toBe(1);
+    const now = new Date();
+    expect(await tick(now)).toBe(1);
+    expect(observeSweep).toHaveBeenCalledExactlyOnceWith(now);
     expect(runStrategy).toHaveBeenCalledTimes(2);
     expect(evaluateAlerts).toHaveBeenCalledTimes(1);
     restore();
