@@ -3,7 +3,7 @@
  * If these three ever used different arithmetic, a mark would float beside the line it belongs on.
  */
 import { describe, expect, it } from 'vitest';
-import { lineFrame, linePaths, lineX, lineY, nearestIndex } from './line';
+import { lineFrame, linePaths, lineX, lineY, nearestIndex, nearestMark } from './line';
 
 /** 100 wide and 50 tall inside a 2pt inset. */
 const BOX = { width: 104, height: 54 };
@@ -90,5 +90,26 @@ describe('a lone reading is a point, not a line', () => {
 
   it('draws a line again as soon as there are two', () => {
     expect(linePaths(lineFrame([10, 20], BOX, 2), [10, 20]).line).not.toBe('');
+  });
+});
+
+describe('the mark under a tap (FEATURES.md #77)', () => {
+  // Points at x = 2, 52, 102; values 10 → y 52, 30 → y 2.
+  const f = lineFrame([10, 20, 30], BOX, 2);
+  const marks = [
+    { position: 0.5, price: 15 }, // (27, 39.5)
+    { position: 1, price: 20 }, // (52, 27)
+  ];
+
+  it('is the mark drawn nearest the finger, measured on the line’s own projection', () => {
+    expect(nearestMark(f, marks, 27, 39.5, 10)).toBe(0);
+    expect(nearestMark(f, marks, 50, 28, 10)).toBe(1);
+    // Between the two, the nearer wins.
+    expect(nearestMark(f, marks, 42, 31, 30)).toBe(1);
+  });
+
+  it('is nothing when no mark is within reach, or there are none', () => {
+    expect(nearestMark(f, marks, 90, 5, 10)).toBeNull();
+    expect(nearestMark(f, [], 27, 39.5, 100)).toBeNull();
   });
 });

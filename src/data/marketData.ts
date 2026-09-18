@@ -416,8 +416,11 @@ export async function fetchTimedHistory(symbol: string, range: HistoryRange): Pr
   return rows ? foldWindowTimed(rows) : null;
 }
 
-/** One of this wallet's fills as a chart marks it: when it settled, which way it went, and the price recorded for it. */
-export type RecordedFill = { at: number; side: 'buy' | 'sell'; price: number };
+/**
+ * One of this wallet's fills as a chart marks it: when it settled, which way it went, the price recorded for it, and
+ * where it filled (`strategy_runs.venue`, null on a run that recorded none). `id` is the run, for opening its receipt.
+ */
+export type RecordedFill = { at: number; side: 'buy' | 'sell'; price: number; venue: string | null; id?: string };
 
 /**
  * The fields of a `/runs` row a fill is read from.
@@ -426,11 +429,14 @@ export type RecordedFill = { at: number; side: 'buy' | 'sell'; price: number };
  * with every run (PLAN.md 3.1): `buy`, `sell`, or `supply` for cash put to work, which is not a trade in the asset.
  */
 export type FillRun = {
+  id?: string;
   symbol: string;
   status: string;
   side?: string | null;
   price: number | null;
   finishedAt: string | null;
+  /** Where it filled — `jupiter-route`, `venue-vault`, or an older run's EVM venue. Absent or null: not recorded. */
+  venue?: string | null;
 };
 
 /**
@@ -452,9 +458,30 @@ export function fillsOf(runs: readonly FillRun[], symbol: string): RecordedFill[
     if (r.side !== 'buy' && r.side !== 'sell') continue;
     const at = r.finishedAt === null ? Number.NaN : Date.parse(r.finishedAt);
     if (!Number.isFinite(at) || r.price === null || !(r.price > 0)) continue;
-    out.push({ at, side: r.side, price: r.price });
+    const venue = typeof r.venue === 'string' && r.venue.trim() !== '' ? r.venue : null;
+    const fill: RecordedFill = { at, side: r.side, price: r.price, venue };
+    if (r.id !== undefined) fill.id = r.id;
+    out.push(fill);
   }
   return out.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * From when a list of runs is known to hold every fill, or null when it holds all of them.
+ *
+ * `/runs` answers the newest `limit` runs, newest first. Fewer than that is the whole record. A full page is not: a
+ * run older than the oldest one here may exist and be missing, so a chart stretch before it is unknown rather than
+ * empty — and a screen that drew it unmarked without saying so would be claiming nothing filled there.
+ */
+export function fillsKnownFrom(runs: readonly { at: string }[], limit: number): number | null {
+  if (runs.length < limit) return null;
+  let oldest = Number.POSITIVE_INFINITY;
+  for (const r of runs) {
+    const t = Date.parse(r.at);
+    if (Number.isFinite(t) && t < oldest) oldest = t;
+  }
+  // A full page with no readable time at all says nothing about where the record starts: treat all of it as unknown.
+  return Number.isFinite(oldest) ? oldest : Number.POSITIVE_INFINITY;
 }
 
 export type StockQuote = {

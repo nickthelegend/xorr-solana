@@ -91,3 +91,29 @@ export function linePaths(f: LineFrame, data: readonly number[]): { line: string
     area: `${line} L ${lineX(f, data.length - 1)},${f.height} L ${lineX(f, 0)},${f.height} Z`,
   };
 }
+
+/**
+ * The mark a tap at (x, y) lands on, or null — the nearest one whose drawn point is within `reach`.
+ *
+ * Measured against the same projection the mark is drawn with, so what a finger picks is what it is on. Nothing is
+ * chosen from further away than `reach`: a tap on bare line beside a mark is not a question about that mark.
+ */
+export function nearestMark(
+  f: LineFrame,
+  marks: readonly { position: number; price: number }[],
+  x: number,
+  y: number,
+  reach: number,
+): number | null {
+  let best: number | null = null;
+  let bestDistance = reach;
+  for (let i = 0; i < marks.length; i++) {
+    const m = marks[i]!;
+    const d = Math.hypot(lineX(f, m.position) - x, lineY(f, m.price) - y);
+    if (d <= bestDistance) {
+      best = i;
+      bestDistance = d;
+    }
+  }
+  return best;
+}
