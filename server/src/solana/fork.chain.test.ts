@@ -7,9 +7,11 @@
  * 3. Kill switch (revoke): on-chain revoke stops new orders while resting exits stay live.
  * 4. End-to-end xStocks trade: one real USDC -> NVDAx BUY and a SELL back.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import { execSync, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import {
   getOrCreateAssociatedTokenAccount,
@@ -38,29 +40,53 @@ import {
 } from './index.js';
 import { guardAndSpend } from '../executor/place.js';
 import { XSTOCKS } from '../venues/xstocks.js';
-import { startValidator, prepareGenesisMints } from './fork-bootstrap.js';
+import { startValidator, stopValidator } from './fork-bootstrap.js';
 
-const FORK_RPC = process.env.FORK_RPC ?? 'http://127.0.0.1:8899';
+/*
+ * This run's own validator, on ports nobody else holds.
+ *
+ * The RPC used to default to 127.0.0.1:8899. Other checkouts on the same machine run this suite
+ * too, and whichever validator held 8899 first was the one every run talked to: `startValidator`
+ * saw it answering, reused it, and the proofs ran against another run's ledger — Proof 3 timed
+ * out, Proof 4 read someone else's balances, and it "passed on re-run" once that validator exited.
+ *
+ * `FORK_RPC` has to be settled before the imports above load: `connection.ts` builds its singleton
+ * from it at import, and `guardAndSpend` spends through that singleton. `vi.hoisted` runs first.
+ * An explicitly set `FORK_RPC` still wins — CI or a developer pointing the suite at a fork on purpose.
+ */
+const FORK = await vi.hoisted(async () => {
+  const { execSync } = await import('node:child_process');
+  const { allocateValidatorPorts } = await import('./validator-ports.js');
+  // These proofs drive a real solana-test-validator. Where that binary is absent (a dev box
+  // without the Solana toolchain, the hermetic CI job), skip rather than fail the run.
+  let hasValidator = false;
+  try {
+    execSync('solana-test-validator --version', { stdio: 'ignore' });
+    hasValidator = true;
+  } catch {
+    // skipped below
+  }
+  const explicit = process.env.FORK_RPC;
+  if (explicit || !hasValidator) {
+    return { hasValidator, rpcUrl: explicit ?? '', ports: undefined, allocated: false };
+  }
+  const ports = await allocateValidatorPorts();
+  const rpcUrl = `http://127.0.0.1:${ports.rpc}`;
+  process.env.FORK_RPC = rpcUrl;
+  return { hasValidator, rpcUrl, ports, allocated: true };
+});
+const FORK_RPC = FORK.rpcUrl;
 const USDC_MINT = new PublicKey(DEFAULT_MINTS.USDC);
 const NVDAX_MINT = new PublicKey(XSTOCKS.NVDAx!.address);
 
-// These proofs drive a real solana-test-validator. Where that binary is absent
-// (a dev box without the Solana toolchain), skip rather than fail the run — CI
-// installs the toolchain so the suite executes there.
-const hasValidator = (() => {
-  try {
-    execSync('solana-test-validator --version', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-const d = hasValidator ? describe : describe.skip;
+// The on-demand `solana-fork` CI job installs the toolchain so the suite executes there.
+const d = FORK.hasValidator ? describe : describe.skip;
 
 d('Solana Mainnet Fork On-Chain Proofs', () => {
   let conn: Connection;
   let validatorProcess: ChildProcess | null = null;
-  const fixturesDir = path.resolve(process.cwd(), 'scratch', 'test-chain-fixtures');
+  // Fixtures and ledger per run, so two runs never share (or `--reset`) each other's ledger.
+  let fixturesDir = '';
 
   const payer = payerKeypair();
   const delegate = delegateKeypair();
@@ -69,7 +95,16 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
 
   beforeAll(async () => {
     // 1. Boot or connect to solana-test-validator
-    validatorProcess = await startValidator(fixturesDir, payer);
+    fixturesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xorr-fork-chain-'));
+    validatorProcess = await startValidator(fixturesDir, payer, {
+      rpcUrl: FORK_RPC,
+      ports: FORK.ports,
+      ledgerDir: path.join(fixturesDir, 'ledger'),
+      // Held from the moment of spawn: if this hook times out mid-boot, afterAll still stops it.
+      onSpawn: (child) => {
+        validatorProcess = child;
+      },
+    });
     conn = createConnection(FORK_RPC, 'confirmed');
 
     // 2. Fund SOL to test keypairs
@@ -159,11 +194,17 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
     );
   }, 60_000);
 
+  // Runs whether the proofs passed, threw or timed out. Only ever stops the validator this run
+  // spawned — one found already running at an explicit FORK_RPC is left alone.
   afterAll(async () => {
-    if (validatorProcess) {
-      validatorProcess.kill('SIGTERM');
+    try {
+      if (validatorProcess) await stopValidator(validatorProcess);
+    } finally {
+      validatorProcess = null;
+      if (fixturesDir) fs.rmSync(fixturesDir, { recursive: true, force: true });
+      if (FORK.allocated) delete process.env.FORK_RPC;
     }
-  });
+  }, 15_000);
 
   it('Proof 1: Real on-chain signature and confirmation on the fork', async () => {
     const testRecipient = Keypair.generate();
