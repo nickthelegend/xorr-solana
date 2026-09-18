@@ -25,7 +25,9 @@
  *   are hidden (FEATURES.md #47) and a price's line says `figure="market"`.
  *
  *   Marks (FEATURES.md #9). `marks` are the user's own fills, each drawn at its place along the line and its price,
- *   on the line's own projection.
+ *   on the line's own projection. With `formatValue` as well, a tap on a mark names it (FEATURES.md #77): bought or
+ *   sold, at what price, when it settled, and the venue that filled it — as recorded, never inferred. The label
+ *   appears where the mark already is; nothing moves into place.
  *
  *   A range switch (FEATURES.md #83). With a `seriesKey`, a new key crossfades the old line into the new one while
  *   the box and the grid hold still, and `pending` steps the line back while the next series loads.
@@ -39,10 +41,10 @@ import { selectionTick } from '../haptics';
 import type { FigureKind } from '../mask';
 import { arrival, timing, useReducedMotion } from '../motion';
 import { Text, Value } from '../Text';
-import { chart, colors, duration, radius, space } from '../tokens';
+import { chart, colors, duration, radius, size, space } from '../tokens';
 import { describeSeries } from './describeSeries';
-import { lineFrame, linePaths, lineX, lineY, nearestIndex } from './line';
-import { MARK_RADIUS, describeMarks, markPath, type LineMark } from './marks';
+import { lineFrame, linePaths, lineX, lineY, nearestIndex, nearestMark } from './line';
+import { MARK_RADIUS, describeMarks, markDetail, markPath, sameFill, type LineMark } from './marks';
 import { labelAnchor, scrubTime, scrubber } from './scrub';
 import { useMeasuredBox } from './useMeasuredBox';
 import { PENDING_OPACITY, sameItems, useSeriesLayers } from './useSeriesLayers';
@@ -118,7 +120,7 @@ interface Drawn {
 }
 
 const sameMark = (a: LineMark, b: LineMark) =>
-  a.position === b.position && a.price === b.price && a.side === b.side;
+  a.position === b.position && a.price === b.price && a.side === b.side && a.venue === b.venue && a.id === b.id;
 
 function sameDrawn(a: Drawn, b: Drawn): boolean {
   return (
@@ -231,7 +233,20 @@ export function AreaChart({
     const index = nearestIndex(frame, x);
     if (index !== null) drag.move(index);
   };
-  const scrub =
+
+  /*
+   * The mark a tap picked, and the series it was picked on. Kept as the fill itself rather than an index, and shown
+   * only while that same series is up and still holds it: a new range drops the label instead of carrying it across.
+   */
+  const [picked, setPicked] = useState<{ key: string; mark: LineMark } | null>(null);
+  const inspectable = formatValue !== undefined && !pending && measured && shown.marks.length > 0;
+  const pick = (x: number, y: number) => {
+    // Half the minimum hit target: a mark is smaller than a finger, and the reach is what makes it tappable.
+    const index = nearestMark(frame, shown.marks, x, y, size.hit / 2);
+    setPicked(index === null ? null : { key: seriesKey ?? '', mark: shown.marks[index]! });
+  };
+
+  const pan =
     formatValue === undefined
       ? undefined
       : Gesture.Pan()
@@ -240,9 +255,21 @@ export function AreaChart({
           .activeOffsetX([-SCRUB_SLOP, SCRUB_SLOP])
           .failOffsetY([-SCRUB_SLOP, SCRUB_SLOP])
           .shouldCancelWhenOutside(false)
-          .onStart((e) => follow(e.x))
+          .onStart((e) => {
+            setPicked(null);
+            follow(e.x);
+          })
           .onUpdate((e) => follow(e.x))
           .onFinalize(() => drag.end());
+  const tap = Gesture.Tap()
+    .runOnJS(true)
+    .enabled(inspectable)
+    .maxDistance(SCRUB_SLOP)
+    .onEnd((e, success) => {
+      if (success) pick(e.x, e.y);
+    });
+  // Whichever the finger means first: a still tap inspects a mark, a sideways drag scrubs.
+  const scrub = pan === undefined ? undefined : Gesture.Race(pan, tap);
 
   const point = scrubbable && scrubbed !== null && scrubbed < shown.data.length ? scrubbed : null;
   const pointX = point === null ? 0 : lineX(frame, point);
@@ -251,6 +278,15 @@ export function AreaChart({
   const pointAt =
     point !== null && times !== undefined && times.length === shown.data.length ? times[point] : undefined;
   const timeSpan = times !== undefined && times.length > 1 ? times[times.length - 1]! - times[0]! : 0;
+
+  /* The picked mark, while the scrub is not showing a point and the series it was picked on is still the one shown. */
+  const inspected =
+    inspectable && point === null && picked !== null && picked.key === (seriesKey ?? '')
+      ? shown.marks.find((m) => sameFill(m, picked.mark))
+      : undefined;
+  const inspectedX = inspected === undefined ? 0 : lineX(frame, inspected.position);
+  const inspectedY = inspected === undefined ? 0 : lineY(frame, inspected.price);
+  const detail = inspected === undefined ? undefined : markDetail(inspected);
 
   const drawable = measured && layers.slots.some((layer) => layer !== null && layer.data.length > 0);
 
@@ -373,8 +409,46 @@ export function AreaChart({
               />
             </>
           ) : null}
+
+          {/* A ring around the inspected mark, drawn where the mark already is. */}
+          {inspected !== undefined ? (
+            <Circle
+              cx={inspectedX}
+              cy={inspectedY}
+              r={MARK_RADIUS + chart.area.strokeWidth}
+              fill="none"
+              stroke={colors.ink}
+              strokeWidth={chart.candle.markStroke}
+            />
+          ) : null}
         </Svg>
       )}
+
+      {inspected !== undefined && detail !== undefined && formatValue !== undefined ? (
+        <View
+          testID={testID === undefined ? undefined : `${testID}-mark`}
+          style={{
+            position: 'absolute',
+            ...labelAnchor(inspectedX, inspectedY, { width: box.width, height }, space.s8),
+            paddingVertical: space.s4,
+            paddingHorizontal: space.s8,
+            gap: space.s2,
+            borderRadius: radius.glyph,
+            backgroundColor: colors.surfaceAlt,
+            pointerEvents: 'none',
+          }}
+        >
+          <Value variant="chip" color={colors.ink} figure={figure}>
+            {`${detail.action} at ${formatValue(inspected.price)}`}
+          </Value>
+          <Text variant="footnoteSm" color={colors.ink55}>
+            {scrubTime(inspected.at, timeSpan)}
+          </Text>
+          <Text variant="footnoteSm" color={colors.ink55}>
+            {detail.venue}
+          </Text>
+        </View>
+      ) : null}
 
       {point !== null && formatValue !== undefined ? (
         <View

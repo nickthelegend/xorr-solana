@@ -6,7 +6,7 @@
  * is what a four-hour row matching the eight thirty-minute rows before its stamp showed on 2026-09-14.
  */
 import { describe, expect, it } from 'vitest';
-import { fillsOf, foldWindow, foldWindowTimed, type FillRun, type OhlcRow } from './marketData';
+import { fillsKnownFrom, fillsOf, foldWindow, foldWindowTimed, type FillRun, type OhlcRow } from './marketData';
 import type { Bar } from './types';
 
 const MIN = 60_000;
@@ -74,8 +74,8 @@ describe('your fills of one token', () => {
   it('are its filled buys and sells, oldest first, at the time each settled and the price recorded', () => {
     const later = run({ side: 'sell', price: 2510.5, finishedAt: '2026-09-14T11:00:00.000Z' });
     expect(fillsOf([later, run({})], 'WETH')).toEqual([
-      { at: Date.parse('2026-09-14T10:00:00.000Z'), side: 'buy', price: 2400 },
-      { at: Date.parse('2026-09-14T11:00:00.000Z'), side: 'sell', price: 2510.5 },
+      { at: Date.parse('2026-09-14T10:00:00.000Z'), side: 'buy', price: 2400, venue: null },
+      { at: Date.parse('2026-09-14T11:00:00.000Z'), side: 'sell', price: 2510.5, venue: null },
     ]);
   });
 
@@ -113,5 +113,49 @@ describe('your fills of one token', () => {
         'WETH',
       ),
     ).toEqual([]);
+  });
+});
+
+describe('where each fill happened, and which run recorded it (FEATURES.md #77)', () => {
+  const run = (over: Partial<FillRun>): FillRun => ({
+    symbol: 'NVDAX',
+    status: 'filled',
+    side: 'buy',
+    price: 180,
+    finishedAt: '2026-09-17T10:00:00.000Z',
+    ...over,
+  });
+
+  it('carries the recorded venue and the run id with the fill, unchanged', () => {
+    expect(fillsOf([run({ id: 'r1', venue: 'venue-vault' })], 'NVDAx')).toEqual([
+      { at: Date.parse('2026-09-17T10:00:00.000Z'), side: 'buy', price: 180, venue: 'venue-vault', id: 'r1' },
+    ]);
+    expect(fillsOf([run({ venue: 'jupiter-route', side: 'sell' })], 'NVDAx')[0]!.venue).toBe('jupiter-route');
+  });
+
+  it('records no venue as null — a run that wrote none is not given one', () => {
+    expect(fillsOf([run({ venue: null }), run({ venue: '  ' }), run({})], 'NVDAx').map((f) => f.venue)).toEqual([
+      null,
+      null,
+      null,
+    ]);
+  });
+});
+
+describe('how far back the runs are known to hold every fill', () => {
+  const at = (iso: string) => ({ at: iso });
+
+  it('is all of it when the page is short of the limit', () => {
+    expect(fillsKnownFrom([at('2026-09-17T10:00:00Z')], 200)).toBeNull();
+    expect(fillsKnownFrom([], 200)).toBeNull();
+  });
+
+  it('is from the oldest run when the page is full, since an older run may be missing', () => {
+    const page = [at('2026-09-17T10:00:00Z'), at('2026-09-15T08:00:00Z'), at('2026-09-16T00:00:00Z')];
+    expect(fillsKnownFrom(page, 3)).toBe(Date.parse('2026-09-15T08:00:00Z'));
+  });
+
+  it('is nothing known at all when a full page carries no readable time', () => {
+    expect(fillsKnownFrom([at('garbage')], 1)).toBe(Number.POSITIVE_INFINITY);
   });
 });

@@ -104,6 +104,11 @@ verified against merged PRs, not asserted.
 80 recurring-buy calendar view · 81 icon-set unification · 82 config-driven feature flags ·
 83 daily alerts digest · 84 scroll parallax on home · 85 multi-strategy stacking on one symbol — **MERGED (PR #13)**
 
+**Since built:** **77** chart entry/exit annotations — the asset chart's buy/sell marks now name their venue when
+tapped (`jupiter-route` vs `venue-vault`, the vault never called a swap), and the drawn fills are listed under the
+chart with their recorded time, price and venue, each opening its run. From `strategy_runs` via `/runs` only; a
+failed read or a capped page that stops short of the range is said, never drawn as an empty stretch.
+
 ## Tier 5 — deliberately rejected (all SKIPPED)
 
 86 social feed — clutter, off-pitch · 87 NFTs — off-pitch · 88 3D trade globe — decoration ·

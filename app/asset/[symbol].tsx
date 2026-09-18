@@ -3,7 +3,8 @@
  *
  * Back / mark + name. Price at `priceLg` with a delta chip that names its window. A chart — candles by
  * default, or the line, chosen above it — over the real series for the selected range, with the user's own
- * fills marked on it. Range pills. The position rows, from the real book. Sell / Buy.
+ * fills marked on it and listed under it, each with the venue that filled it (FEATURES.md #77). Range pills. The
+ * position rows, from the real book. Sell / Buy.
  *
  * Rebuilt on `src/ui`. Everything that used to be invented is gone: the position rows were
  * hardcoded (1,750.30 SOL, avg cost $81.14, +$12,566), and the chart fell back to
@@ -39,7 +40,9 @@ import {
   closeLine,
   colors,
   lineMarks,
+  markDetail,
   money,
+  type MarkedFill,
   NoteStrip,
   percent,
   pnlTone,
@@ -53,17 +56,18 @@ import {
   typeScale,
 } from '@/ui';
 import { RollingNumber } from '@/ui/RollingNumber';
-import { signedMoney } from '@/format';
+import { signedMoney, when } from '@/format';
 import { repos } from '@/data';
 import { api } from '@/data/api';
 import { NotSignedIn } from '@/data/apiError';
-import { fetchTimedHistory, fillsOf, type HistoryRange } from '@/data/marketData';
+import { fetchTimedHistory, fillsKnownFrom, fillsOf, type HistoryRange } from '@/data/marketData';
 import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
 import { rangeChange } from '@/state/derived';
 import { settlementSymbol } from '@/data/tradable';
 import { useSettleable } from '@/data/useSettleable';
+import { chartFillsNote, listedFills } from '@/markets/chartFills';
 import { quoteOf } from '@/markets/quote';
 import { actionSentence, type CorporateActionNotice } from '@/markets/corporateAction';
 import { DUST_USD } from '@/markets/ticket';
@@ -104,6 +108,8 @@ const ROW_H = 52;
 const CHANGE_LINE_H = Math.max(typeScale.body.lineHeight, typeScale.chipDelta.lineHeight + space.s2 * 2);
 /** The most runs `/runs` answers with, and so the reach of the marks: a fill older than the oldest of them is not drawn. */
 const RUNS_WINDOW = 200;
+/** The most fills listed under the chart. The rest are still marked on it, and counted in a line below the list. */
+const LISTED_FILLS = 5;
 
 export default function AssetDetail() {
   const { symbol } = useLocalSearchParams<{ symbol: string }>();
@@ -188,6 +194,24 @@ export default function AssetDetail() {
   const fills = useMemo(() => fillsOf(runs.data ?? [], settlementSymbol(symbol ?? '')), [runs.data, symbol]);
   const onLine = useMemo(() => lineMarks(fills, line.times), [fills, line]);
   const inCandles = useMemo(() => candleMarks(fills, spans), [fills, spans]);
+
+  /*
+   * The fills under the chart (FEATURES.md #77): exactly the ones the chart in view drew, each with its recorded time,
+   * price and venue, so a reader can see where every mark came from without having to find it with a finger. The note
+   * under them keeps an unmarked stretch from reading as a quiet one: a read that failed, or a capped page of runs
+   * that stops short of this range's start, is said out loud.
+   */
+  const candlesShown = candleView && !lone;
+  const marked: readonly MarkedFill[] = candlesShown ? inCandles : onLine;
+  const listed = useMemo(() => listedFills(marked, LISTED_FILLS), [marked]);
+  const runsUnread = runs.error !== undefined && !(runs.error instanceof NotSignedIn);
+  const fillsNote = chartFillsNote({
+    unread: runsUnread,
+    knownFrom: runs.data ? fillsKnownFrom(runs.data, RUNS_WINDOW) : null,
+    windowStart: hasSeries ? line.times[0] : undefined,
+    marked: marked.length,
+    ofToken: fills.length,
+  });
 
   /*
    * The corporate action this share has queued, off its own mint.
@@ -473,6 +497,61 @@ export default function AssetDetail() {
           <Pill key={r} label={r} selected={r === range} onPress={() => setRange(r)} />
         ))}
       </PillRow>
+
+      {/*
+        Where the chart's marks came from, one row per fill, newest first. Each opens its run, where the signature and
+        the venue's full meaning are. The venue is named by `markDetail`, so a venue-vault settlement reads as the
+        vault and is never called a swap. Nothing is listed that the chart did not draw.
+      */}
+      {hasSeries && drawn && (listed.shown.length > 0 || fillsNote !== null) ? (
+        <View style={{ marginTop: space.s14, paddingHorizontal: space.gutter }}>
+          {listed.shown.length > 0 ? (
+            <Text variant="secondarySm" color={colors.ink55} style={{ marginBottom: space.s4 }}>
+              {candlesShown ? 'Your fills on these candles' : 'Your fills on this line'}
+            </Text>
+          ) : null}
+          {listed.shown.map((m, i) => {
+            const detail = markDetail(m);
+            return (
+              <Row
+                key={m.id ?? `${m.at}:${m.side}:${m.price}`}
+                title={`${detail.action} at ${fmtPrice(m.price)}`}
+                secondary={`${when(m.at)} · ${detail.venue}`}
+                figure="market"
+                height={ROW_H}
+                divider={i < listed.shown.length - 1}
+                onPress={m.id === undefined ? undefined : () => router.push(`/runs/${m.id}`)}
+              />
+            );
+          })}
+          {listed.more > 0 ? (
+            <Text variant="footnote" color={colors.ink45} style={{ marginTop: space.s6 }}>
+              {`${listed.more} earlier ${listed.more === 1 ? 'fill is' : 'fills are'} marked on the chart but not listed.`}
+            </Text>
+          ) : null}
+          {fillsNote?.kind === 'unread' ? (
+            // Not "no fills": the record did not answer, so this chart cannot say either way.
+            <Press
+              onPress={runs.reload}
+              accessibilityRole="button"
+              accessibilityLabel="Read your fills again"
+              hitHeight={size.hit}
+            >
+              <Text variant="footnote" color={colors.ink55}>
+                Your fills did not load, so none are marked. Try again ›
+              </Text>
+            </Press>
+          ) : fillsNote?.kind === 'partial' ? (
+            <Text variant="footnote" color={colors.ink45} style={{ marginTop: space.s6 }}>
+              {`Only your latest ${RUNS_WINDOW} runs were read, back to ${when(fillsNote.since)}. Fills before then are not marked.`}
+            </Text>
+          ) : fillsNote?.kind === 'outside' ? (
+            <Text variant="footnote" color={colors.ink45}>
+              {`None of your ${fillsNote.count} ${fillsNote.count === 1 ? 'fill' : 'fills'} of ${symbol} ${fillsNote.count === 1 ? 'is' : 'are'} in this range.`}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={{ marginTop: space.s14, paddingHorizontal: space.gutter }}>
         {held ? (

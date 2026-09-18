@@ -3,7 +3,16 @@
  * lands on, what is left off because it is outside the chart, and the projection making room for its price.
  */
 import { describe, expect, it } from 'vitest';
-import { candleMarks, closeLine, describeMarks, lineMarks, markPath, type TimedFill } from './marks';
+import {
+  candleMarks,
+  closeLine,
+  describeMarks,
+  lineMarks,
+  markDetail,
+  markPath,
+  sameFill,
+  type TimedFill,
+} from './marks';
 import { tightProjection, toPct } from './projection';
 
 const buy = (at: number, price = 100): TimedFill => ({ at, side: 'buy', price });
@@ -32,8 +41,8 @@ describe('a fill on a line', () => {
   const times = [0, 10, 20];
 
   it('sits between the two points either side of it, by time', () => {
-    expect(lineMarks([buy(15, 7)], times)).toEqual([{ position: 1.5, side: 'buy', price: 7 }]);
-    expect(lineMarks([sell(2.5)], times)).toEqual([{ position: 0.25, side: 'sell', price: 100 }]);
+    expect(lineMarks([buy(15, 7)], times)).toEqual([{ position: 1.5, side: 'buy', price: 7, at: 15 }]);
+    expect(lineMarks([sell(2.5)], times)).toEqual([{ position: 0.25, side: 'sell', price: 100, at: 2.5 }]);
   });
 
   it('sits on a point when it happened at that point’s time, the ends included', () => {
@@ -46,7 +55,7 @@ describe('a fill on a line', () => {
 
   it('has no line to sit on when there is none, and one place on a single point', () => {
     expect(lineMarks([buy(5)], [])).toEqual([]);
-    expect(lineMarks([buy(5), buy(6)], [5])).toEqual([{ position: 0, side: 'buy', price: 100 }]);
+    expect(lineMarks([buy(5), buy(6)], [5])).toEqual([{ position: 0, side: 'buy', price: 100, at: 5 }]);
   });
 });
 
@@ -58,10 +67,10 @@ describe('a fill on a candle chart', () => {
 
   it('goes in the candle whose stretch holds it — one at a close belongs to the candle that closed', () => {
     expect(candleMarks([buy(5), sell(10), buy(10.5), sell(20)], spans)).toEqual([
-      { index: 0, side: 'buy', price: 100 },
-      { index: 0, side: 'sell', price: 100 },
-      { index: 1, side: 'buy', price: 100 },
-      { index: 1, side: 'sell', price: 100 },
+      { index: 0, side: 'buy', price: 100, at: 5 },
+      { index: 0, side: 'sell', price: 100, at: 10 },
+      { index: 1, side: 'buy', price: 100, at: 10.5 },
+      { index: 1, side: 'sell', price: 100, at: 20 },
     ]);
   });
 
@@ -102,5 +111,47 @@ describe('what a mark looks like and says', () => {
     expect(describeMarks([{ side: 'sell' }, { side: 'buy' }, { side: 'buy' }])).toBe('2 buys and 1 sell marked');
     expect(describeMarks([{ side: 'sell' }, { side: 'sell' }])).toBe('2 sells marked');
     expect(describeMarks([])).toBe('');
+  });
+});
+
+describe('an entry or exit, inspected (FEATURES.md #77)', () => {
+  const times = [0, 10, 20];
+
+  it('keeps the fill’s own recorded time, venue and run — not the time of the point it sits beside', () => {
+    const fill: TimedFill = { at: 13, side: 'sell', price: 101.5, venue: 'jupiter-route', id: 'run-1' };
+    const [onLine] = lineMarks([fill], times);
+    expect(onLine).toEqual({ position: 1.3, side: 'sell', price: 101.5, at: 13, venue: 'jupiter-route', id: 'run-1' });
+    const [inCandle] = candleMarks([fill], [{ start: 10, end: 20 }]);
+    expect(inCandle).toEqual({ index: 0, side: 'sell', price: 101.5, at: 13, venue: 'jupiter-route', id: 'run-1' });
+  });
+
+  it('adds no venue or run the fill did not have', () => {
+    const [m] = lineMarks([buy(10)], times);
+    expect(m).not.toHaveProperty('venue');
+    expect(m).not.toHaveProperty('id');
+  });
+
+  it('names a Jupiter route as routed, and a venue-vault settlement as the vault — never a swap', () => {
+    expect(markDetail({ side: 'buy', venue: 'jupiter-route' })).toEqual({
+      action: 'Bought',
+      venue: 'Jupiter route',
+      routed: true,
+    });
+    const vault = markDetail({ side: 'sell', venue: 'venue-vault' });
+    expect(vault).toEqual({ action: 'Sold', venue: 'Venue vault', routed: false });
+    expect(`${vault.action} ${vault.venue}`).not.toMatch(/swap|route|jupiter/i);
+  });
+
+  it('says a venue was not recorded rather than borrowing one, and shows one it cannot name verbatim', () => {
+    expect(markDetail({ side: 'buy', venue: null })).toEqual({ action: 'Bought', venue: 'Venue not recorded' });
+    expect(markDetail({ side: 'buy' })).toEqual({ action: 'Bought', venue: 'Venue not recorded' });
+    expect(markDetail({ side: 'sell', venue: 'phoenix-v9' }).venue).toBe('phoenix-v9');
+  });
+
+  it('knows the same fill by its run, or by its moment, side and price when there is no run', () => {
+    expect(sameFill({ at: 1, side: 'buy', price: 2, id: 'a' }, { at: 9, side: 'sell', price: 3, id: 'a' })).toBe(true);
+    expect(sameFill({ at: 1, side: 'buy', price: 2, id: 'a' }, { at: 1, side: 'buy', price: 2, id: 'b' })).toBe(false);
+    expect(sameFill({ at: 1, side: 'buy', price: 2 }, { at: 1, side: 'buy', price: 2 })).toBe(true);
+    expect(sameFill({ at: 1, side: 'buy', price: 2 }, { at: 1, side: 'sell', price: 2 })).toBe(false);
   });
 });

@@ -8,16 +8,42 @@
  *
  * Pure, so every rule here is tested without a renderer.
  */
+import { venueNaming } from '../fillVenue';
 import { chart } from '../tokens';
 import type { Candle } from './projection';
 
 export type MarkSide = 'buy' | 'sell';
 
-/** A fill as a chart takes it: when it settled (ms since the epoch), which way it went, and the price recorded for it. */
+/**
+ * A fill as a chart takes it: when it settled (ms since the epoch), which way it went, and the price recorded for it —
+ * with where it filled and the run that recorded it, when known, for a mark's detail to name.
+ */
 export interface TimedFill {
   at: number;
   side: MarkSide;
   price: number;
+  /** The recorded venue (`jupiter-route`, `venue-vault`, …). Null or absent: the run recorded none. */
+  venue?: string | null;
+  /** The run's id, for opening its receipt. */
+  id?: string;
+}
+
+/** What a mark carries besides where it sits: the fill it stands for, unchanged. */
+export interface MarkedFill {
+  side: MarkSide;
+  price: number;
+  /** When the fill settled, as recorded — never the time of the point it was placed beside. */
+  at: number;
+  venue?: string | null;
+  id?: string;
+}
+
+/** The fill's own facts, copied onto its mark — absent fields stay absent. */
+function carried(f: TimedFill): MarkedFill {
+  const m: MarkedFill = { side: f.side, price: f.price, at: f.at };
+  if (f.venue !== undefined) m.venue = f.venue;
+  if (f.id !== undefined) m.id = f.id;
+  return m;
 }
 
 /**
@@ -32,17 +58,13 @@ export interface Span {
 }
 
 /** A fill on a line. `position` is a fractional point index: 2.5 is halfway between the third and fourth points. */
-export interface LineMark {
+export interface LineMark extends MarkedFill {
   position: number;
-  side: MarkSide;
-  price: number;
 }
 
 /** A fill on a candle chart, in the candle it happened in. */
-export interface CandleMark {
+export interface CandleMark extends MarkedFill {
   index: number;
-  side: MarkSide;
-  price: number;
 }
 
 /**
@@ -89,7 +111,7 @@ export function lineMarks(fills: readonly TimedFill[], times: readonly number[])
   for (const f of fills) {
     if (!(f.at >= first && f.at <= last)) continue;
     if (n === 1) {
-      out.push({ position: 0, side: f.side, price: f.price });
+      out.push({ position: 0, ...carried(f) });
       continue;
     }
     // The segment whose two points bracket the fill.
@@ -98,7 +120,7 @@ export function lineMarks(fills: readonly TimedFill[], times: readonly number[])
     const from = times[k]!;
     const to = times[k + 1]!;
     const along = to > from ? Math.min(1, Math.max(0, (f.at - from) / (to - from))) : 0;
-    out.push({ position: k + along, side: f.side, price: f.price });
+    out.push({ position: k + along, ...carried(f) });
   }
   return out;
 }
@@ -108,9 +130,29 @@ export function candleMarks(fills: readonly TimedFill[], spans: readonly Span[])
   const out: CandleMark[] = [];
   for (const f of fills) {
     const index = spans.findIndex((s) => f.at > s.start && f.at <= s.end);
-    if (index !== -1) out.push({ index, side: f.side, price: f.price });
+    if (index !== -1) out.push({ index, ...carried(f) });
   }
   return out;
+}
+
+/**
+ * What a mark says when it is inspected: which way the fill went, and where it filled.
+ *
+ * The venue comes from `venueNaming`, the one place this app names a venue, so a `venue-vault` settlement reads
+ * "Venue vault" and is never called a swap or a route — the vault settled it at a quoted price and executed no route.
+ * A fill whose run recorded no venue says so, rather than borrowing one.
+ */
+export function markDetail(m: Pick<MarkedFill, 'side' | 'venue'>): { action: string; venue: string; routed?: boolean } {
+  const action = m.side === 'buy' ? 'Bought' : 'Sold';
+  const naming = venueNaming(m.venue);
+  if (naming === undefined) return { action, venue: 'Venue not recorded' };
+  return naming.routed === undefined ? { action, venue: naming.label } : { action, venue: naming.label, routed: naming.routed };
+}
+
+/** Whether two marks stand for the same fill: the run's id when both have one, else the same moment, side and price. */
+export function sameFill(a: MarkedFill, b: MarkedFill): boolean {
+  if (a.id !== undefined && b.id !== undefined) return a.id === b.id;
+  return a.at === b.at && a.side === b.side && a.price === b.price;
 }
 
 /** What a screen reader hears about the marks after the chart's own sentence — "2 buys and 1 sell marked" — or nothing. */
