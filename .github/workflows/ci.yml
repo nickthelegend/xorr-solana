@@ -159,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MAINNET_RPC: ${{ secrets.MAINNET_RPC }}
-      FORK_RPC: http://127.0.0.1:8899
+      # No FORK_RPC: the suite starts its own validator on free ports, as it does on a dev machine.
     steps:
       - uses: actions/checkout@v4
 

@@ -22,6 +22,7 @@ import {
   devOwnerKeypair,
   venueVaultKeypair,
 } from './keys.js';
+import { portArgs, portOf, type ValidatorPorts } from './validator-ports.js';
 
 const RPC = process.env.FORK_RPC ?? 'http://127.0.0.1:8899';
 const UPSTREAM_RPC = process.env.MAINNET_RPC ?? 'https://api.mainnet-beta.solana.com';
@@ -32,9 +33,11 @@ const UPSTREAM_RPC = process.env.MAINNET_RPC ?? 'https://api.mainnet-beta.solana
  * and gossip ports move with it — at 8899 they land on the validator's own defaults (9900, 8000) —
  * because a second validator on a fixed faucet or gossip port dies on bind before it serves a slot.
  */
-export const RPC_PORT = Number(new URL(RPC).port || 8899);
-export const FAUCET_PORT = RPC_PORT + 1001;
-export const GOSSIP_PORT = RPC_PORT - 899;
+export function derivedPorts(rpcUrl: string): ValidatorPorts {
+  const rpc = portOf(rpcUrl);
+  return { rpc, faucet: rpc + 1001, gossip: rpc - 899 };
+}
+export const { rpc: RPC_PORT, faucet: FAUCET_PORT, gossip: GOSSIP_PORT } = derivedPorts(RPC);
 
 export const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 export const NVDAX_MINT = new PublicKey('Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh');
@@ -170,6 +173,24 @@ export async function prepareGenesisMints(
   return { usdcPath, nvdaxPath };
 }
 
+export interface StartValidatorOptions {
+  /** The RPC the caller will talk to. Reused if something already answers there. */
+  rpcUrl?: string;
+  /**
+   * Where to bind. When omitted, `derivedPorts(rpcUrl)`: the well-known layout the README's fork
+   * uses. The chain suite passes a block from `allocateValidatorPorts` instead, so parallel runs on
+   * one machine never share a port — dynamic range included.
+   */
+  ports?: ValidatorPorts;
+  /** The ledger directory. Defaults to `<fixturesDir>/test-ledger`. */
+  ledgerDir?: string;
+  /**
+   * Called as soon as the process is spawned, before it is ready. A caller that must tear the
+   * validator down even when its own setup times out mid-boot needs the handle this early.
+   */
+  onSpawn?: (child: ChildProcess) => void;
+}
+
 /**
  * What the validator said before it died. With --quiet its stdout is empty and the reason — a port
  * already bound, say — is only in the ledger's own log, so read the tail of that too.
@@ -181,34 +202,39 @@ function validatorLogs(logPath: string, ledgerDir: string): string {
 }
 
 /**
- * Launch solana-test-validator if not already running.
+ * Launch solana-test-validator if nothing already answers at `rpcUrl`.
  */
-export async function startValidator(fixturesDir: string, payer: Keypair): Promise<ChildProcess | null> {
-  if (await isValidatorRunning()) {
-    console.log(`Validator is already running on ${RPC}`);
+export async function startValidator(
+  fixturesDir: string,
+  payer: Keypair,
+  opts: StartValidatorOptions = {},
+): Promise<ChildProcess | null> {
+  const rpcUrl = opts.rpcUrl ?? RPC;
+  if (await isValidatorRunning(rpcUrl)) {
+    console.log(`Validator is already running on ${rpcUrl}`);
     return null;
+  }
+
+  const ports = opts.ports ?? derivedPorts(rpcUrl);
+  if (ports.rpc !== portOf(rpcUrl)) {
+    throw new Error(`startValidator: RPC port ${ports.rpc} does not match ${rpcUrl}`);
   }
 
   console.log(`Preparing genesis accounts in ${fixturesDir}...`);
   const { usdcPath, nvdaxPath } = await prepareGenesisMints(fixturesDir, payer);
 
-  const ledgerDir = path.join(fixturesDir, 'test-ledger');
+  const ledgerDir = opts.ledgerDir ?? path.join(fixturesDir, 'test-ledger');
   const logPath = path.join(fixturesDir, 'validator.log');
   const logFd = fs.openSync(logPath, 'w');
 
-  console.log(`Starting solana-test-validator on ${RPC}...`);
+  console.log(`Starting solana-test-validator on ${rpcUrl} (ledger ${ledgerDir})...`);
 
   const child = spawn(
     'solana-test-validator',
     [
       '--ledger',
       ledgerDir,
-      '--rpc-port',
-      String(RPC_PORT),
-      '--faucet-port',
-      String(FAUCET_PORT),
-      '--gossip-port',
-      String(GOSSIP_PORT),
+      ...portArgs(ports),
       '--account',
       USDC_MINT.toBase58(),
       usdcPath,
@@ -230,10 +256,18 @@ export async function startValidator(fixturesDir: string, payer: Keypair): Promi
       detached: false,
     },
   );
+  fs.closeSync(logFd);
 
   child.on('error', (err) => {
     console.error('Failed to spawn solana-test-validator:', err);
   });
+
+  // A backstop for a parent that exits without tearing the validator down. It cannot cover
+  // SIGKILL of the parent, which is why callers still stop it themselves.
+  const killOnExit = () => child.kill('SIGKILL');
+  process.once('exit', killOnExit);
+  child.once('exit', () => process.removeListener('exit', killOnExit));
+  opts.onSpawn?.(child);
 
   // Poll for readiness
   for (let i = 0; i < 45; i++) {
@@ -243,14 +277,28 @@ export async function startValidator(fixturesDir: string, payer: Keypair): Promi
         `solana-test-validator exited prematurely with code ${child.exitCode}.\nLogs:\n${validatorLogs(logPath, ledgerDir)}`,
       );
     }
-    if (await isValidatorRunning()) {
+    if (await isValidatorRunning(rpcUrl)) {
       console.log('Validator is ready!');
       return child;
     }
   }
 
-  child.kill('SIGKILL');
-  throw new Error(`Timed out waiting for solana-test-validator to boot.\nLogs:\n${validatorLogs(logPath, ledgerDir)}`);
+  const logs = validatorLogs(logPath, ledgerDir);
+  await stopValidator(child);
+  throw new Error(`Timed out waiting for solana-test-validator to boot.\nLogs:\n${logs}`);
+}
+
+/**
+ * Stop a validator this process started: SIGTERM, then SIGKILL if it has not exited in `graceMs`.
+ * Resolves once the process is gone, so the caller can delete its ledger safely.
+ */
+export async function stopValidator(child: ChildProcess, graceMs = 5_000): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  child.kill('SIGTERM');
+  const timer = setTimeout(() => child.kill('SIGKILL'), graceMs);
+  await exited;
+  clearTimeout(timer);
 }
 
 export async function bootstrapFork(customDevOwner?: string) {
