@@ -185,7 +185,9 @@ export default function Alerts() {
           /* A list that could not be read is not an empty one, and must not look like one. */
           <ErrorState error={error} onRetry={reload} />
         ) : (
-          <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>
+          <ScrollView refreshControl={refresh.control} showsVerticalScrollIndicator={false}>
+            {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+            {refresh.notice}
             {/*
               No alerts is a real state, not a reason to show a catalogue.
 

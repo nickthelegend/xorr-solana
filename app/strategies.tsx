@@ -124,7 +124,9 @@ export default function Strategies() {
       <Segmented options={TABS} value={tab} onChange={setTab} style={{ marginTop: space.s18 }} />
 
       <Fill style={{ marginTop: space.s8 }}>
-        <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>
+        <ScrollView refreshControl={refresh.control} showsVerticalScrollIndicator={false}>
+          {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+          {refresh.notice}
           {tab === 'running' ? (
             loading && !data ? (
               <LoadingRows count={3} />

@@ -164,10 +164,12 @@ export default function History() {
           />
         ) : (
           <ScrollView
-            refreshControl={refresh}
+            refreshControl={refresh.control}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: space.s30 }}
           >
+            {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+            {refresh.notice}
             {items.map((item, i) => (
               <HistoryRow key={`${item.kind}:${item.txHash}:${i}`} item={item} />
             ))}

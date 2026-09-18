@@ -78,7 +78,9 @@ export default function Inbox() {
             onAction={() => router.push('/safety')}
           />
         ) : (
-          <ScrollView refreshControl={refresh} showsVerticalScrollIndicator={false}>
+          <ScrollView refreshControl={refresh.control} showsVerticalScrollIndicator={false}>
+            {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
+            {refresh.notice}
             {rows.map(({ event, route }) => (
               <Row
                 key={event.id}
