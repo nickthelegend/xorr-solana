@@ -9,7 +9,7 @@ import { screenPatience } from '../http/patience.js';
 import { StillFetching } from '../http/deadline.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { one, query } from '../db/index.js';
+import { one, query, tx } from '../db/index.js';
 import { append, exportTrail, list as listAudit, verify } from '../audit/log.js';
 import { FILLS_SQL, fillsCsv, type FillRow } from '../audit/fills.js';
 import { explainTrade } from '../bot/explain.js';
@@ -1037,6 +1037,64 @@ routes.get('/activity/fills.csv', async (c) => {
     'content-type': 'text/csv; charset=utf-8',
     'content-disposition': 'attachment; filename="xorr-fills.csv"',
   });
+});
+
+/**
+ * The order this wallet's owner put their watchlist in.
+ *
+ * The LIST is the executor's — `/market/watchable` is what a strategy can follow here — so this is
+ * a preference applied to it and never a copy of it. A symbol that stops being watchable keeps its
+ * place in storage and returns to it if coverage comes back; the client's `markets/watchOrder.ts`
+ * holds both halves of that rule and is tested on them.
+ *
+ * Scoped to the wallet like everything else here. An account with two addresses would otherwise
+ * have one shared watchlist while every other screen showed two different sets of holdings.
+ */
+routes.get('/watchlist/order', async (c) => {
+  const w = await requireWallet(c);
+  const rows = await query<{ symbol: string }>(
+    `SELECT symbol FROM watchlist_order WHERE wallet_id = $1 ORDER BY position ASC`,
+    [w.id],
+  );
+  return c.json(rows.map((r) => r.symbol));
+});
+
+/**
+ * Save it, whole.
+ *
+ * The entire order rather than a moved pair: a partial update would need the executor to hold its
+ * own idea of what the list is, and the two would drift the moment the watchable set changed.
+ * Written in one transaction — a delete followed by an insert that failed would leave someone with
+ * no order at all, which is worse than the order being one move out of date.
+ */
+const WatchOrder = z.object({
+  symbols: z.array(z.string().min(1).max(12)).max(200),
+});
+
+routes.put('/watchlist/order', async (c) => {
+  const w = await requireWallet(c);
+  const body = WatchOrder.parse(await c.req.json());
+
+  /*
+   * De-duplicated, keeping the first position of each.
+   *
+   * The primary key would reject the second copy anyway; doing it here means a client that sent a
+   * duplicate gets its order saved rather than a 500 naming a constraint.
+   */
+  const seen = new Set<string>();
+  const symbols = body.symbols.filter((s) => !seen.has(s) && seen.add(s) !== undefined);
+
+  await tx(async (client) => {
+    await client.query(`DELETE FROM watchlist_order WHERE wallet_id = $1`, [w.id]);
+    for (const [position, symbol] of symbols.entries()) {
+      await client.query(
+        `INSERT INTO watchlist_order (wallet_id, symbol, position) VALUES ($1, $2, $3)`,
+        [w.id, symbol, position],
+      );
+    }
+  });
+
+  return c.json({ symbols });
 });
 
 routes.get('/activity/verify', async (c) => {

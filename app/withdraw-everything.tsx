@@ -46,6 +46,7 @@ import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import { withdrawals } from '@/data/withdrawals';
 import { useStore } from '@/state/store';
+import { delegationOrUnknown, delegationScope } from '@/accounts/delegationScope';
 import { useAllowlist, usableFromText, usableIn } from '@/wallet/allowlist';
 import { useWithdrawEverything } from '@/wallet/useWithdrawEverything';
 import { sellBlocked, type Step } from '@/wallet/withdrawEverything';
@@ -79,7 +80,21 @@ export default function WithdrawEverything() {
    * with something to sell needs the permission — and a preview not read yet might have something.
    */
   const permission = useAsync(() => repos.wallet.delegation(), []);
-  const storedPermission = useStore((s) => s.delegation);
+  /*
+   * The cached permission ONLY when it belongs to the address in use.
+   *
+   * A switch re-points every executor call at another account; carrying the old grant across would
+   * show one account's cap while the executor acts on another. `undefined` is "not read yet",
+   * which is what every reader here already treats as still-loading — `null` is a claim that this
+   * address has granted nothing, and must never stand in for not having looked.
+   */
+  const storedPermission = delegationOrUnknown(
+    delegationScope({
+      cached: useStore((s) => s.delegation),
+      cachedFor: useStore((s) => s.delegationAddress),
+      active: useStore((s) => s.wallet?.address),
+    }),
+  );
   const blocked = sellBlocked(permission.data !== undefined ? permission.data : (storedPermission ?? undefined));
   const cannotSell = blocked !== undefined && (preview.data ? preview.data.legs.length > 0 : true);
 

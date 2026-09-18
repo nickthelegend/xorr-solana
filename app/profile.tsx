@@ -241,7 +241,7 @@ function AccountSwitcher({
   wallets: readonly AccountWallet[];
   onSwitched: () => void;
 }) {
-  const setWallet = useStore((s) => s.setWallet);
+  const switchAccount = useStore((s) => s.switchAccount);
   const [busy, setBusy] = useState<string>();
   const [note, setNote] = useState<string>();
   const [failed, setFailed] = useState(false);
@@ -254,12 +254,15 @@ function AccountSwitcher({
     try {
       const next = await repos.wallet.connect(w.address);
       /*
-       * The store too, not only the server.
+       * The store too, and everything account-scoped in it.
        *
-       * Every screen reads the active wallet from here, and leaving it on the old address would
-       * have the header naming one account while the executor answered about another.
+       * `setWallet` alone left the previous account's permission, stop switch, caps and approvals
+       * in place — so Safety would render account A's live grant while every executor call now
+       * resolved to account B. `switchAccount` drops all of it and each is read again for the
+       * account now in use; `accounts/delegationScope.ts` keeps "not read yet" distinct from "this
+       * account granted nothing" so nothing renders a claim in the gap.
        */
-      setWallet(next);
+      switchAccount(next);
       setNote(switchedNote(w));
       onSwitched();
     } catch (e) {

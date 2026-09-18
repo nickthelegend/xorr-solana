@@ -9,6 +9,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ApiError, NotSignedIn, TimedOut } from './apiError';
+import { SessionExpired } from '@/auth/expiry';
 import { classify, waitSentence } from './failures';
 
 const APP = path.resolve(import.meta.dirname, '../../app');
@@ -210,5 +211,35 @@ describe('waitSentence', () => {
     expect(waitSentence(60)).toBe('Try again in about a minute.');
     expect(waitSentence(61)).toBe('Try again in about 2 minutes.');
     expect(waitSentence(240)).toBe('Try again in about 4 minutes.');
+  });
+});
+
+/**
+ * A session that ended while the app was open.
+ *
+ * The same KIND as being signed out and a different event: nothing was wrong, the app was working a
+ * moment ago, and the reader is owed that rather than "This needs you to be signed in" turning up
+ * on a screen they were already using.
+ */
+describe('a session that expired mid-use', () => {
+  it('is not reported as a fault', () => {
+    const f = classify(new SessionExpired('/positions'));
+    expect(f.kind).toBe('signed-out');
+    expect(f.outcomeUnknown).toBe(false);
+  });
+
+  it('keeps its own sentence rather than the generic one', () => {
+    // "This needs you to be signed in" is the right sentence for a signed-out visitor and the wrong
+    // one for someone whose session just ran out under them.
+    const f = classify(new SessionExpired('/positions'));
+    expect(f.message).toMatch(/your session ended/i);
+    expect(f.message).toContain('/positions');
+  });
+
+  it('offers the route that fixes it, not a retry', () => {
+    // Repeating the request answers the same way until they sign in.
+    const f = classify(new SessionExpired('/wallet'));
+    expect(f.retryable).toBe(false);
+    expect(f.fix).toEqual({ label: 'Sign in', href: '/' });
   });
 });

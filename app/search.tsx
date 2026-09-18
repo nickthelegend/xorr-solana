@@ -45,6 +45,8 @@ import { assetGradient } from '@/design/gradients';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
 import { fuzzyRank } from '@/markets/fuzzy';
+import { openingList } from '@/markets/recents';
+import { useStore } from '@/state/store';
 import { price as fmtPrice } from '@/format';
 
 const FIELD_H = 46;
@@ -59,6 +61,8 @@ const FIELD_H = 46;
 type Hit = {
   key: string;
   symbol: string;
+  /** Set only on the opening list: this is one the reader has looked at before. */
+  recent?: boolean;
   name: string;
   secondary: string;
   gradient: { c1: string; c2: string };
@@ -78,6 +82,8 @@ export default function Search() {
   const goBack = useGoBack();
   const [q, setQ] = useState('');
   const classes = useMarketPrices();
+  const recents = useStore((s) => s.recentMarkets);
+  const rememberMarket = useStore((s) => s.rememberMarket);
 
   /*
    * The xStocks catalogue, merged in beside the market classes.
@@ -124,9 +130,27 @@ export default function Search() {
     }));
 
     const all = [...fromClasses, ...fromXStocks];
-    if (!q.trim()) return all.slice(0, PREVIEW);
-    return fuzzyRank(all, q);
-  }, [classes, xstocks.data, q]);
+    if (q.trim()) return fuzzyRank(all, q);
+
+    /*
+     * Before anyone types: what they keep coming back to, then the catalogue.
+     *
+     * Twelve arbitrary rows is a sample of a list rather than a starting point. Almost every search
+     * in a trading app is a repeat of an earlier one, and `markets/recents.ts` keeps the two rules
+     * that matter — a recent the catalogue no longer holds is not offered, and the list is never
+     * ONLY recents, since finding a seventh market is the one thing this screen exists for.
+     */
+    const bySymbol = new Map(all.map((h) => [h.symbol, h]));
+    return openingList({
+      recents,
+      catalogue: all.map((h) => h.symbol),
+      known: new Set(bySymbol.keys()),
+      limit: PREVIEW,
+    }).flatMap(({ symbol, recent }) => {
+      const hit = bySymbol.get(symbol);
+      return hit ? [{ ...hit, recent }] : [];
+    });
+  }, [classes, xstocks.data, q, recents]);
 
   // Real logos for whatever the query matched, same as every other list of instruments.
   const symbols = useMemo(() => results.map((r) => r.symbol), [results]);
@@ -196,7 +220,9 @@ export default function Search() {
                 key={hit.key}
                 left={<AssetMark gradient={hit.gradient} {...logoProps(logos, hit.symbol)} size={32} />}
                 title={hit.symbol}
-                secondary={hit.secondary}
+                // "Recent" earns its place only before a query: among search RESULTS it would be
+                // noise, and the ordering there is the relevance, not the history.
+                secondary={hit.recent && !q.trim() ? `Recent · ${hit.secondary}` : hit.secondary}
                 value={
                   hit.state === 'ready' ? (
                     <Price color={hit.unpriced ? colors.ink55 : undefined} figure="market">
@@ -209,7 +235,12 @@ export default function Search() {
                 delta={hit.state === 'ready' ? hit.delta : undefined}
                 deltaTone={hit.up ? 'up' : 'down'}
                 height={62}
-                onPress={() => router.replace(hit.href as never)}
+                onPress={() => {
+                  // Recorded on the tap, which is the moment the interest is real — not on every
+                  // keystroke that happened to match.
+                  rememberMarket(hit.symbol);
+                  router.replace(hit.href as never);
+                }}
               />
             ))}
           </ScrollView>

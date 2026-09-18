@@ -51,6 +51,8 @@ import { repos } from '@/data';
 import { NotSignedIn, isRetryable } from '@/data/apiError';
 import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
+import { freshness } from '@/data/staleness';
+import { useExecutorReachable } from '@/net/Reachability';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import { logoProps, perpLogoProps, useLogos } from '@/data/useLogos';
 import { usePrivyIdentity } from '@/auth/usePrivyIdentity';
@@ -332,6 +334,7 @@ export default function Home() {
   );
 
   const total = balance.data?.total ?? null;
+
   const fillsNothing = nothingSettles(tradable.data, watchable.data);
 
   /*
@@ -362,6 +365,22 @@ export default function Home() {
   const liveRuns = usePoll(() => system.runs(20), TICKER_EVERY_MS);
   const signedOut = useSignedOut();
   const now = useNow();
+
+  /*
+   * Whether the balance above is current, or the last one read before the connection dropped.
+   *
+   * `reachable` decides it rather than the read itself: a read that succeeded a second before the
+   * drop has no idea it is now stale, and only the heartbeat does. It shares the screen's existing
+   * minute clock, so the age stays true as an outage runs on without adding a second timer.
+   */
+  const reachable = useExecutorReachable();
+  const balanceAge = freshness({
+    hasData: balance.data !== undefined,
+    settledAt: balance.settledAt,
+    reachable,
+    now,
+  });
+
   const setup = setupSteps({
     // Refused for want of a session is not a failed read: nobody's wallet was asked about.
     signedOut:
@@ -514,6 +533,26 @@ export default function Home() {
               </Price>
             )}
           </Press>
+
+          {/*
+            A figure from before the outage says so, and says when.
+
+            Keeping the last good read rather than emptying the screen avoids one lie — an account
+            that looks empty because the connection dropped — and introduces the opposite one: a
+            balance from twenty minutes ago drawn exactly like a live one, on the screen someone
+            reads to decide whether to intervene. There is no third option: it is live, or it is
+            dated (`data/staleness.ts`).
+          */}
+          {balanceAge.state === 'last-known' ? (
+            <Text
+              variant="footnote"
+              color={colors.warn}
+              style={{ marginTop: space.s6 }}
+              accessibilityLiveRegion="polite"
+            >
+              {balanceAge.label}
+            </Text>
+          ) : null}
         </Rise>
 
         {/*

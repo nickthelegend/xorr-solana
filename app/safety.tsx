@@ -52,6 +52,8 @@ import {
   timeLeft,
 } from '@/state/derived';
 import { useStore } from '@/state/store';
+import { delegationOrUnknown, delegationScope } from '@/accounts/delegationScope';
+import { readDelegationIntoStore } from '@/wallet/readDelegation';
 import { useNow } from '@/state/useNow';
 import { pinnedDelegation } from '@/chain';
 import { useAllowlist } from '@/wallet/allowlist';
@@ -118,7 +120,21 @@ export default function Safety() {
   const storedKilled = useStore((s) => s.killed);
   const setKilled = useStore((s) => s.setKilled);
   const setDelegation = useStore((s) => s.setDelegation);
-  const delegation = useStore((s) => s.delegation);
+  /*
+   * The cached permission ONLY when it belongs to the address in use.
+   *
+   * A switch re-points every executor call at another account; carrying the old grant across would
+   * show one account's cap while the executor acts on another. `undefined` is "not read yet",
+   * which is what every reader here already treats as still-loading — `null` is a claim that this
+   * address has granted nothing, and must never stand in for not having looked.
+   */
+  const delegation = delegationOrUnknown(
+    delegationScope({
+      cached: useStore((s) => s.delegation),
+      cachedFor: useStore((s) => s.delegationAddress),
+      active: useStore((s) => s.wallet?.address),
+    }),
+  );
   const recoveryBackedUp = useStore((s) => s.recoveryBackedUp);
   const [localError, setLocalError] = useState<string>();
   /*
@@ -149,11 +165,9 @@ export default function Safety() {
   const [answered, setAnswered] = useState(false);
   useEffect(() => {
     let alive = true;
-    void repos.wallet
-      .delegation()
-      .then((d) => {
+    void readDelegationIntoStore()
+      .then(() => {
         if (!alive) return;
-        setDelegation(d);
         setDelegationError(undefined);
       })
       .catch((e: unknown) => {
@@ -354,7 +368,7 @@ export default function Safety() {
     setSent(stopping ? 'stop' : 'grant');
     setKilled(unusable || expired ? false : !killed);
     try {
-      setDelegation(await repos.wallet.delegation());
+      await readDelegationIntoStore();
       setDelegationError(undefined);
     } catch (e) {
       if (e instanceof NotSignedIn) setSignedOut(true);

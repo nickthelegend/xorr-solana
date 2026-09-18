@@ -101,9 +101,6 @@ export const LEGACY_MIGRATIONS: ReadonlySet<string> = new Set([
   '032-xstock-basket.sql',
   '033-multiplier-observations.sql',
   '034-position-sleeves.sql',
-  // In flight on another branch when numbers closed (worker 23). Listed so that branch and this
-  // one can merge in either order; it is the last numbered migration this repo will have.
-  '035-watchlist-order.sql',
 ]);
 
 export type MigrationName =
