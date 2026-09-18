@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import {
   getOrCreateAssociatedTokenAccount,
@@ -24,6 +25,16 @@ import {
 
 const RPC = process.env.FORK_RPC ?? 'http://127.0.0.1:8899';
 const UPSTREAM_RPC = process.env.MAINNET_RPC ?? 'https://api.mainnet-beta.solana.com';
+
+/*
+ * The validator listens where FORK_RPC points, not on a fixed 8899: a fork started for
+ * FORK_RPC=http://127.0.0.1:18899 must not collide with another one already on 8899. The faucet
+ * and gossip ports move with it — at 8899 they land on the validator's own defaults (9900, 8000) —
+ * because a second validator on a fixed faucet or gossip port dies on bind before it serves a slot.
+ */
+export const RPC_PORT = Number(new URL(RPC).port || 8899);
+export const FAUCET_PORT = RPC_PORT + 1001;
+export const GOSSIP_PORT = RPC_PORT - 899;
 
 export const USDC_MINT = new PublicKey('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
 export const NVDAX_MINT = new PublicKey('Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh');
@@ -160,6 +171,16 @@ export async function prepareGenesisMints(
 }
 
 /**
+ * What the validator said before it died. With --quiet its stdout is empty and the reason — a port
+ * already bound, say — is only in the ledger's own log, so read the tail of that too.
+ */
+function validatorLogs(logPath: string, ledgerDir: string): string {
+  const read = (file: string) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+  const ledgerLog = read(path.join(ledgerDir, 'validator.log')).split('\n').slice(-40).join('\n');
+  return [read(logPath), ledgerLog].filter(Boolean).join('\n');
+}
+
+/**
  * Launch solana-test-validator if not already running.
  */
 export async function startValidator(fixturesDir: string, payer: Keypair): Promise<ChildProcess | null> {
@@ -183,7 +204,11 @@ export async function startValidator(fixturesDir: string, payer: Keypair): Promi
       '--ledger',
       ledgerDir,
       '--rpc-port',
-      '8899',
+      String(RPC_PORT),
+      '--faucet-port',
+      String(FAUCET_PORT),
+      '--gossip-port',
+      String(GOSSIP_PORT),
       '--account',
       USDC_MINT.toBase58(),
       usdcPath,
@@ -214,8 +239,9 @@ export async function startValidator(fixturesDir: string, payer: Keypair): Promi
   for (let i = 0; i < 45; i++) {
     await sleep(1000);
     if (child.exitCode !== null) {
-      const logs = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
-      throw new Error(`solana-test-validator exited prematurely with code ${child.exitCode}.\nLogs:\n${logs}`);
+      throw new Error(
+        `solana-test-validator exited prematurely with code ${child.exitCode}.\nLogs:\n${validatorLogs(logPath, ledgerDir)}`,
+      );
     }
     if (await isValidatorRunning()) {
       console.log('Validator is ready!');
@@ -223,9 +249,8 @@ export async function startValidator(fixturesDir: string, payer: Keypair): Promi
     }
   }
 
-  const logs = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
   child.kill('SIGKILL');
-  throw new Error(`Timed out waiting for solana-test-validator to boot.\nLogs:\n${logs}`);
+  throw new Error(`Timed out waiting for solana-test-validator to boot.\nLogs:\n${validatorLogs(logPath, ledgerDir)}`);
 }
 
 export async function bootstrapFork(customDevOwner?: string) {
@@ -367,10 +392,24 @@ export async function bootstrapFork(customDevOwner?: string) {
   fs.writeFileSync('.env.fork', envContent);
   console.log('\nWrote .env.fork successfully.');
   console.log('Fork bootstrap complete! Run tests with:');
-  console.log('  CHAIN=1 npx vitest run src/solana/fork.chain.test.ts');
+  console.log(`  FORK_RPC=${RPC} CHAIN=1 npx vitest run src/solana/fork.chain.test.ts`);
 }
 
-if (process.argv[1]?.includes('fork-bootstrap')) {
+/*
+ * Run only when THIS file is the entry point. A substring match on 'fork-bootstrap' also fired
+ * when infra/solana-fork/fork-bootstrap.ts imported this module, so that wrapper started the
+ * bootstrap twice at once and the two validators fought over one set of ports. Compared by real
+ * path, because macOS's /tmp is a symlink to /private/tmp.
+ */
+const isEntryPoint = (() => {
+  try {
+    return fs.realpathSync(process.argv[1] ?? '') === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (isEntryPoint) {
   const target = process.argv[2] ?? process.env.OWNER_ADDRESS;
   bootstrapFork(target)
     .then(() => process.exit(0))

@@ -32,12 +32,14 @@
  *
  * Every signature printed is returned by confirmTransaction against the fork and is
  * independently checkable with:
- *   solana confirm -v <signature> --url http://127.0.0.1:8899
+ *   solana confirm -v <signature> --url $FORK_RPC
  *
- * Bring the fork up first:
- *   (cd server && npx tsx src/solana/fork-bootstrap.ts)
+ * Bring the fork up first (FORK_RPC defaults to http://127.0.0.1:8899; set it to use another port):
+ *   npx tsx infra/solana-fork/fork-bootstrap.ts
  * Then:
  *   npx tsx tools/prove-solana-xstock-buy.ts
+ *
+ * README.md "Verify it yourself" walks through this end to end.
  */
 process.env.XORR_CHAIN ??= 'solana-fork';
 process.env.FORK_RPC ??= 'http://127.0.0.1:8899';

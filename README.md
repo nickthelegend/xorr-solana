@@ -19,6 +19,208 @@ Chain: **Base**. ETH Online 2026 · Base Build Camp 2026.
 
 ---
 
+## Verify it yourself — Solana mainnet fork (Stocklana judge quickstart)
+
+The Stocklana claim is that an agent buys an xStock (a Token-2022 tokenized equity) **through a
+real Jupiter route, on-chain**, inside a capped permission the owner can revoke. This section lets
+you check that on your own machine in about ten minutes. You need no accounts and no API keys.
+Each command below was run from a fresh `git clone` into an empty directory before it was written
+here.
+
+### 1. Prerequisites
+
+| | version verified | why |
+|---|---|---|
+| Node.js | 26.5 (needs ≥ 20.11 for `import.meta.dirname`) | runs the tools through `tsx` |
+| Solana CLI with `solana-test-validator` | 3.1.11 (Agave) | the fork, and `solana confirm` |
+| PostgreSQL | 16 | only for step 4 (the executor's database) |
+| Internet access | — | the fork clones accounts from mainnet, and prices come from Jupiter's live quote API |
+
+Install the Solana CLI with `sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"`, then put
+its `bin` directory on your `PATH`.
+
+**Env var names.** The proofs below need **none** of these set; the defaults are shown in brackets.
+You never have to paste in a secret.
+
+- `FORK_RPC`: where the fork listens [`http://127.0.0.1:8899`]. Set it if 8899 is already taken; everything below follows it.
+- `MAINNET_RPC`: upstream the fork clones from [`https://api.mainnet-beta.solana.com`]. Set it to your own RPC if the public one rate-limits you.
+- `DATABASE_URL`: Postgres for step 4 [`postgres://$USER@localhost:5432/xorr`].
+- `PROVE_USD`: dollar size of the proof buy [`100`].
+- `XORR_KEY_DIR`, `XORR_KEY_PAYER`, `XORR_KEY_DELEGATE`, `XORR_KEY_DEV_OWNER`, `XORR_KEY_VENUE_VAULT`: optional. If none is set, the fork uses deterministic development keypairs, so your addresses will match the ones below.
+- `ONEINCH_API_KEY`: not needed here. See the limitations below for what it unlocks.
+
+### 2. Clone and install
+
+```bash
+git clone https://github.com/nickthelegend/xorr-solana.git && cd xorr-solana
+npm install && (cd server && npm install)
+export FORK_RPC=http://127.0.0.1:8899   # or any free port, e.g. :18899
+```
+
+### 3. Start the mainnet fork
+
+```bash
+npx tsx infra/solana-fork/fork-bootstrap.ts
+```
+
+This starts `solana-test-validator` on the port in `FORK_RPC`. The faucet and gossip ports shift
+with it, so a second fork on the same machine does not collide. The validator clones these from
+mainnet:
+
+- the real **USDC** mint (`EPjFWdd…`) and **NVDAx** mint (`Xsc9qvG…`, Token-2022)
+- the **Jupiter v6** program (`JUP6Lkb…`) and **Orca Whirlpool** program (`whirLb…`)
+- the USDC/NVDAx Whirlpool pool, its vaults, tick arrays and oracle
+
+The bootstrap then airdrops SOL and funds the dev owner with 25,000 USDC and 10 NVDAx. It writes
+`.env.fork` and exits, and the validator keeps running in the background. A passing run ends with:
+
+```
+Wrote .env.fork successfully.
+Fork bootstrap complete! Run tests with:
+  FORK_RPC=http://127.0.0.1:8899 CHAIN=1 npx vitest run src/solana/fork.chain.test.ts
+```
+
+To stop the fork later, run `pkill -f "solana-test-validator.*--rpc-port ${FORK_RPC##*:}"`.
+
+### 4. The database (optional for the proofs)
+
+The two proof tools do not touch Postgres. The executor and the agent do, so you can bring the real
+schema up with:
+
+```bash
+createdb xorr
+(cd server && DATABASE_URL=postgres://$USER@localhost:5432/xorr npm run migrate)
+```
+
+On a fresh database it prints `applied <file>` for each migration in `server/src/db/migrations/`.
+We got 35 rows in `schema_migrations` and 30 tables. It records what it applied, so running it again
+is free.
+
+### 5. Proof: a Jupiter-routed xStock buy
+
+```bash
+npx tsx tools/prove-solana-xstock-buy.ts
+```
+
+The tool makes a capped SPL approval, with the owner signing. It then sends a $100 USDC → NVDAx buy
+through the executor's single spend path, `guardAndSpend`, with the delegate signing. Finally it
+reads the transaction's own logs back from the ledger. A passing run prints the following. The
+signatures, slots and prices are from our run and will differ in yours.
+
+```
+=== 1. Real mainnet state cloned onto the fork ===
+  NVDAx mint                 Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh owner=TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
+  Jupiter v6 (cloned)        JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 owner=BPFLoaderUpgradeab1e11111111111111111111111 (executable)
+  NVDAx multiplier           1.001701196801074
+=== 2. Capped SPL approval (owner signs) ===
+  delegated cap              500 USDC
+=== 4. guardAndSpend: BUY $100 NVDAx (delegate signs) ===
+  BUY SIGNATURE              3aheLFM37WDnqkFtJo1HCvBuGmEN21PBGEXV2QgQdWbywb8B6nmpxwCwgs82gRczXKStF8XoGdtUW1fxvS3q64Se
+  BUY SLOT                   34
+  PRICE SOURCE               live Jupiter v6 quote API (off-chain HTTP; no program invoked)
+  FILL PATH                  jupiter-route — Jupiter v6 invoked on-chain, CPI into the AMM
+  jupiter invoked            true
+  route + AMM swap           true / true
+=== 6. After ===
+  USDC                       24900 (-100.000000)
+  delegated cap left         400 USDC
+=== 7. Reported fill vs on-chain delta ===
+  drift                      1.6653345369377348e-16
+
+All proofs held. Verify independently with:
+  solana confirm -v <signature> --url http://127.0.0.1:8899
+```
+
+Check two things. **`PRICE SOURCE`** is only ever a number fetched over HTTP. **`FILL PATH`** is
+what happened on-chain, and it has two possible values:
+
+- `jupiter-route`: the Jupiter program ran and swapped against the pool's reserves.
+- `venue-vault`: a capped delegate transfer at the quoted price, filled from a maker account. It is legitimate, but it is **not** a Jupiter swap.
+
+The tool **exits non-zero** on anything other than `jupiter-route`, and it prints
+`PROOF FAILED: Filled through 'venue-vault'`. It also fails if the reported fill and the on-chain
+balance change disagree after applying the Token-2022 Scaled-UI multiplier (step 7).
+
+### 6. Check the signature yourself, without our code
+
+```bash
+solana confirm -v <BUY SIGNATURE> --url $FORK_RPC
+```
+
+```
+  Status: Ok
+  Log Messages:
+    Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 invoke [1]
+    Program log: Instruction: Route
+    Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc invoke [2]
+    Program log: Instruction: SwapV2
+    Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [3]     ← USDC in  (SPL Token)
+    Program log: Instruction: TransferChecked
+    Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb invoke [3]     ← NVDAx out (Token-2022)
+    Program log: Instruction: TransferChecked
+    Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc success
+    ...
+    Program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 success
+```
+
+**`JUP6Lkb… invoke [1]` followed by `Instruction: Route`** means the transaction's top-level
+instruction is Jupiter v6's `Route`. It is the real mainnet program bytecode, cloned onto the fork.
+**`whirLb… invoke [2]` followed by `Instruction: SwapV2`** means Jupiter then made a cross-program
+call into Orca Whirlpool, and Whirlpool swapped against the cloned USDC/NVDAx pool. The `[3]` lines
+are the pool moving USDC in and NVDAx out. If a fill had gone through the venue vault instead, you
+would see no `JUP6Lkb…` line at all, only a token `TransferChecked`.
+
+### 7. More on-chain proofs: the cap, the kill switch, and a sell
+
+```bash
+(cd server && CHAIN=1 npx vitest run src/solana/fork.chain.test.ts)   # 4 passed
+```
+
+- Proof 2: the SPL cap rejects an over-cap transfer **on chain**.
+- Proof 3: revoking the permission (the kill switch) stops new orders while resting exits stay live.
+- Proof 4: a buy, then a sell back.
+
+### 8. Proof: deposit handoff and withdrawal policy
+
+```bash
+npx tsx tools/prove-solana-deposit-withdraw.ts
+```
+
+A passing run ends with `ALL DEMO PROOFS PASSED (MoonPay Dev Sandbox + Solana Fork)` and exits 0.
+Read what that proves narrowly, as the list below explains. On `main` today, section 4 of this tool
+**signs** a user withdrawal but **does not broadcast it**. It prints `User Transaction Signature: <hex>`,
+and that hex string is not a transaction the chain ever saw, so do not try `solana confirm` on it.
+Open PR #30 makes this step settle on the fork. Once that is merged, the tool prints a real base58
+signature and the balances before and after, and you can confirm them the same way as step 6.
+
+### Known limitations — read these before you believe us
+
+- **The MoonPay sandbox proves a signed checkout URL, not arrival of funds.** The deposit proof
+  shows the checkout URL is strictly sandbox and targets `usdc_sol` at the user's own address. It
+  also shows the URL is HMAC-SHA256 signed. Completing a sandbox purchase needs a human to enter a
+  card on MoonPay's site, so no USDC arrives in any run you can script. The 24-hour cooling-off
+  checks in that tool are computed in-process. The database-backed allowlist lives in
+  `server/src/withdrawals/`.
+- **The withdrawal on `main` is authorised and policy-checked, but not settled** (see step 8, and PR #30).
+- **The agent cannot choose a trade outside Nasdaq regular hours without a `ONEINCH_API_KEY`.** It
+  can still execute one. Outside regular hours, the off-hours guard compares the Jupiter price with
+  a second venue's price. With no key there is no second venue, so the guard holds and the agent
+  reports `no_setup`. That is the guard working as designed. Execution downstream of the choice is
+  proven regardless: the proofs above, plus the agent path in `docs/E2E-RUN-2026-09-17.md` §3.
+- **Pool accounts are cloned at a fixed slot, so off-mainnet slippage is floored at 200 bps.** The
+  quote is live mainnet, but the fork's pool is frozen at the slot it was cloned from, and the two
+  drift apart. At the default 50 bps, Jupiter's own output check rejects the route (`0x1771`,
+  `SlippageToleranceExceeded`). `FORK_MIN_SLIPPAGE_BPS` in `server/src/venues/jupiter.ts` applies
+  **only off mainnet**. On mainnet the quote and the pool read the same moment, and 50 bps stands.
+- **Only the USDC → NVDAx route is cloned.** The pool accounts are route-specific
+  (`ROUTE_ACCOUNTS` in `server/src/solana/fork-bootstrap.ts`). The sell back in Proof 4 reverts
+  inside Jupiter on the fork (`custom program error: 0x1789`). It settles through `venue-vault`
+  instead and logs `this fill is NOT a Jupiter swap`. Other xStocks and the sell side would need
+  their own route accounts cloned.
+- **The Docker image in `infra/solana-fork/`** runs the hosted fork. It clones USDC with Circle's
+  real mint authority, so it cannot be funded locally the way the bootstrap funds it. The steps
+  above were verified against `fork-bootstrap.ts`, not against that image.
+
 ## Watch it work
 
 <p align="center">
