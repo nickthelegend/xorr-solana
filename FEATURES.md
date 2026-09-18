@@ -12,7 +12,7 @@ verified against merged PRs, not asserted.
 
 **Status key**
 - **MERGED** — built, hand-verified, on `main`
-- **GREEN** — built and CI-passing, unmerged (blocked by the repo migration from `xorr-eth` → `xorr-solana`)
+- **GREEN** — built and CI-passing, not yet merged
 - **SKIPPED** — with reason
 
 **Buckets** — `FN` core functional · `SP` sponsor/xStocks-native · `DM` design & motion · `PR` production-readiness
@@ -37,22 +37,22 @@ verified against merged PRs, not asserted.
 | 12 | DM | Breathing sparkline on live price ticks | **MERGED** | PR #8 |
 | 13 | PR | Empty states for every list, with a next action | **MERGED** | PR #4 — `emptyActions.ts` |
 | 14 | FN | Notification centre of agent actions | **MERGED** | PR #11 — `notifications/alerts.ts` |
-| 15 | DM | Onboarding hero → first fund | **GREEN** | PR #23 — setup progress, four states |
+| 15 | DM | Onboarding hero → first fund | **MERGED** | PR #3 — four states; a failed read is never drawn as 'not done' |
 
 ## Tier 2 — high value
 
 | # | B | Feature | Status | Evidence |
 |---|---|---|---|---|
 | 16 | SP | Backing drawer: custody, attestation age, multiplier history | **MERGED** | PR #22 |
-| 17 | FN | Strategy confidence meter | **GREEN** | PR #24 |
-| 18 | FN | Auto-rebalance basket on drift | **SKIPPED** | time |
-| 19 | SP | Dividend auto-reinvest yield line | **SKIPPED** | largely subsumed by #1 |
+| 17 | FN | Strategy confidence meter | **MERGED** | PR #2 — thresholds derived from what the agent reasons with |
+| 18 | FN | Auto-rebalance basket on drift | **MERGED** | PR #6, #16 — drift in percentage points, banded; re-landed after orphaning |
+| 19 | SP | Dividend auto-reinvest yield line | **MERGED** | PR #19 — from real multiplier deltas; a split is explicitly not yield |
 | 20 | DM | Number roll-up animations (tabular) | **MERGED** | PR #5 — `RollingNumber.tsx` |
 | 21 | PR | Network-mismatch hard-error screen | **MERGED** | PR #4 |
 | 22 | FN | "Explain this trade" from the stored decision record | **MERGED** | PR #20 — invents nothing when no record exists |
 | 23 | DM | Content-preserving refresh (no jarring skeletons) | **MERGED** | PR #8 |
-| 24 | FN | Price alerts on xStocks | **GREEN** | PR #25 — refuses alerts on unpriced symbols |
-| 25 | SP | Multiplier-adjusted limit orders | **SKIPPED** | time |
+| 24 | FN | Price alerts on xStocks | **MERGED** | PR #1 — refused at creation for symbols with no feed |
+| 25 | SP | Multiplier-adjusted limit orders | **MERGED** | PR #10 — and it uncovered a live split-liquidation bug |
 | 26 | DM | Haptic map (fill / reject / kill / grant) | **MERGED** | PR #8 |
 | 27 | PR | Retry with fresh blockhash | **SKIPPED** | backend handles it; no UI surfaced |
 | 28 | FN | Agent schedule preview | **MERGED** | PR #20 — refuses to predict a winner |
@@ -60,7 +60,7 @@ verified against merged PRs, not asserted.
 | 30 | PR | Idempotency visible ("already filled") | **MERGED** | PR #4 |
 | 31 | FN | Allocation donut by sector | **MERGED** | PR #18 — sectors from SEC EDGAR |
 | 32 | SP | Kamino lending of idle xStocks | **SKIPPED** | out of owner-locked scope |
-| 33 | DM | "Agent is trading" live ticker | **SKIPPED** | time |
+| 33 | DM | "Agent is trading" live ticker | **MERGED** | PR #11 — a line that only claims the present tense |
 | 34 | FN | Withdrawal cooling-off countdown | **MERGED** | PR #3 — 24h allowlist cooling-off |
 | 35 | DM | Theme cross-fade + system sync | **SKIPPED** | time |
 
@@ -68,30 +68,30 @@ verified against merged PRs, not asserted.
 
 | # | B | Feature | Status |
 |---|---|---|---|
-| 36 | FN | Multi-account switcher | SKIPPED — time |
-| 37 | PR | Offline mode + reconnecting banner | SKIPPED — time |
+| 36 | FN | Multi-account switcher | **MERGED** |
+| 37 | PR | Offline mode + reconnecting banner | **MERGED** |
 | 38 | DM | Custom pull-to-refresh | SKIPPED — time |
-| 39 | FN | Fuzzy xStock search | SKIPPED — time |
-| 40 | SP | Proof-of-reserves history chart | SKIPPED — data persisted (migration 029), chart not built |
-| 41 | DM | Asset hero chart draw-on | SKIPPED — time |
+| 39 | FN | Fuzzy xStock search | **MERGED** |
+| 40 | SP | Proof-of-reserves history chart | **MERGED** |
+| 41 | DM | Asset hero chart draw-on | **MERGED** |
 | 42 | PR | Rate-limit / breaker UI | **MERGED** — PR #4 |
-| 43 | FN | Receipt / CSV export | **GREEN** — PR #25 |
-| 44 | DM | Tasteful profit-close moment | SKIPPED — time |
-| 45 | FN | Per-strategy pause/resume | **GREEN** — PR #25, kept visually distinct from the kill switch |
-| 46 | SP | Corporate-action push notifications | SKIPPED — time |
+| 43 | FN | Receipt / CSV export | **MERGED** — PR #1, from real recorded fills only |
+| 44 | DM | Tasteful profit-close moment | **MERGED** |
+| 45 | FN | Per-strategy pause/resume | **MERGED** — PR #1, pause is NOT the kill switch (written into the audit trail + test) |
+| 46 | SP | Corporate-action push notifications | **MERGED** |
 | 47 | PR | Amount input validation (min/max/decimals/balance) | **MERGED** — PR #4 |
-| 48 | DM | Tab-bar micro-animation | SKIPPED — time |
+| 48 | DM | Tab-bar micro-animation | **MERGED** |
 | 49 | FN | Portfolio value timeline | **MERGED** — PR #21, no interpolation |
 | 50 | DM | Drag-to-set amount, spring physics | SKIPPED — time |
-| 51 | FN | Tunable agent risk profile | **GREEN** — PR #24 |
+| 51 | FN | Tunable agent risk profile | **MERGED** — PR #2, changes real thresholds, cited in the decision record |
 | 52 | PR | Graceful session/auth expiry | SKIPPED — time |
 | 53 | DM | Shared-element asset transition | SKIPPED — time |
 | 54 | FN | Fee / slippage breakdown before confirm | **MERGED** — PR #17, real Jupiter quote |
 | 55 | SP | xStock catalog browser with live prices | **MERGED** — PR #17, "No price is a row" |
-| 56 | DM | Kill-switch armed/disarmed chip | **GREEN** — driven by on-chain `readDelegation` |
+| 56 | DM | Kill-switch armed/disarmed chip | **MERGED** — PR #5/#9, on-chain read; a failed read outranks a stale answer |
 | 57 | PR | Deep-link handling from notifications | **MERGED** — PR #17 |
 | 58 | FN | Watchlist reorder + alerts | SKIPPED — time |
-| 59 | DM | Onboarding progress (fund → grant → first trade) | **GREEN** — PR #23 |
+| 59 | DM | Onboarding progress (fund → grant → first trade) | **MERGED** — PR #3, each step from the source that decides it |
 | 60 | PR | Accessibility pass on primary flows | **MERGED (partial)** — PR #4 |
 
 ## Tier 4 — nice-to-have (all SKIPPED: time, and each adds surface without strengthening the pitch)
@@ -102,7 +102,7 @@ verified against merged PRs, not asserted.
 73 multi-currency display · 74 gesture shortcuts · 75 notes on positions · 76 Sentry crash reporting ·
 77 chart entry/exit annotations · 78 benchmark vs SPYx · 79 empty-state micro-copy pass ·
 80 recurring-buy calendar view · 81 icon-set unification · 82 config-driven feature flags ·
-83 daily alerts digest · 84 scroll parallax on home · 85 multi-strategy stacking on one symbol
+83 daily alerts digest · 84 scroll parallax on home · 85 multi-strategy stacking on one symbol — **MERGED (PR #13)**
 
 ## Tier 5 — deliberately rejected (all SKIPPED)
 
@@ -120,9 +120,9 @@ verified against merged PRs, not asserted.
 
 | | Count |
 |---|---|
-| **MERGED** (built + verified on `main`) | **27** |
-| **GREEN** (built, CI-passing, unmerged) | **6** |
-| **SKIPPED** | **67** |
+| **MERGED** (built + verified on `main`) | **46** |
+| **GREEN** (built, CI-passing, unmerged) | **2** |
+| **SKIPPED** | **52** |
 
 ### Built but not on the original list
 The highest-value artifact of the session was not one of the 100: a **real Jupiter-routed xStock buy
