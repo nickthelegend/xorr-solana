@@ -81,6 +81,19 @@ const SHADOWS: Record<ChatThemeName, readonly [string, string]> = {
   black: ['0 6px 18px rgba(0, 0, 0, 0.45)', '0 14px 34px rgba(0, 0, 0, 0.6)'],
 };
 
+const ROOMS: Readonly<Record<ChatThemeName, ChatPalette>> = { light, black };
+
+/**
+ * A room's ground, by name, without putting that room in place.
+ *
+ * The cross-fade needs the palette it is LEAVING while the one it has arrived at is already in `chat`, and `chat` holds
+ * exactly one at a time. This is the only way to read a room that is not the one being drawn.
+ */
+export function groundOf(theme: ChatThemeName): readonly [string, string, string] {
+  const room = ROOMS[theme];
+  return [room.groundTop, room.groundMid, room.groundBottom];
+}
+
 /** The palette in use. Read while drawing, never at import: it changes in place with the theme. */
 export const chat: ChatPalette = { ...black };
 export let chatShadow = SHADOWS.black[0];
@@ -88,7 +101,7 @@ export let chatShadowLg = SHADOWS.black[1];
 
 /** Puts a room's palette in `chat`. The drawer calls it as it draws, before anything inside reads a colour. */
 export function applyChatTheme(theme: ChatThemeName): void {
-  Object.assign(chat, theme === 'light' ? light : black);
+  Object.assign(chat, ROOMS[theme]);
   [chatShadow, chatShadowLg] = SHADOWS[theme];
 }
 

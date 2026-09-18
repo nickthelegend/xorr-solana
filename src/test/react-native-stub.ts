@@ -27,6 +27,10 @@ export const AccessibilityInfo = {
 
 export const Dimensions = { get: () => ({ width: 402, height: 874, scale: 3, fontScale: 1 }) };
 
+/** The phone's appearance. Node has none, and the pure modules only need the hook to exist. */
+export type ColorSchemeName = 'light' | 'dark' | null;
+export const useColorScheme = (): ColorSchemeName => null;
+
 export type TextStyle = Record<string, unknown>;
 export type ViewStyle = Record<string, unknown>;
 export type StyleProp<T> = T | T[] | null | undefined;
