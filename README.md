@@ -180,28 +180,72 @@ would see no `JUP6Lkb…` line at all, only a token `TransferChecked`.
 - Proof 3: revoking the permission (the kill switch) stops new orders while resting exits stay live.
 - Proof 4: a buy, then a sell back.
 
-### 8. Proof: deposit handoff and withdrawal policy
+### 8. Proof: deposit handoff, and a withdrawal that settles
 
 ```bash
 npx tsx tools/prove-solana-deposit-withdraw.ts
 ```
 
-A passing run ends with `ALL DEMO PROOFS PASSED (MoonPay Dev Sandbox + Solana Fork)` and exits 0.
-Read what that proves narrowly, as the list below explains. On `main` today, section 4 of this tool
-**signs** a user withdrawal but **does not broadcast it**. It prints `User Transaction Signature: <hex>`,
-and that hex string is not a transaction the chain ever saw, so do not try `solana confirm` on it.
-Open PR #30 makes this step settle on the fork. Once that is merged, the tool prints a real base58
-signature and the balances before and after, and you can confirm them the same way as step 6.
+The tool runs four parts:
+
+- **Part 1: the MoonPay sandbox handoff.** This is a signed checkout URL, not arrival of funds; see the limitations.
+- **Part 2: the ATA addresses.** It derives the associated token accounts for the user and the destination.
+- **Part 3: the address rules.** It applies the withdrawal allowlist's address rules.
+- **Part 4: a real withdrawal on the fork.** A fresh user wallet is funded with SOL for its own fee
+  and with 200 USDC. The destination's token account is created. Then the **user** signs a 50 USDC
+  SPL transfer against a real blockhash, and the tool broadcasts and confirms it. It reads both
+  balances back from the chain. Your addresses and signature will differ from these, which are from
+  our run; the balances will match:
+
+```
+--- 4. USER-SIGNED SPL TOKEN TRANSFER & AUDIT RECORDING ---
+  ✔ User funded with SOL on the fork to pay its own fee
+  ✔ Funded account is the ATA the app derives, not a second account
+  ✔ Destination ATA exists and matches the derived address
+  Before — user: 200 USDC, dest: 0 USDC
+  ✔ Created SPL Token transfer instruction
+  ✔ Signer matches user wallet (non-custodial: user signs, not executor)
+  ✔ Transaction is in the ledger, read back by signature
+  ✔ Ledger records no error for the withdrawal
+  ✔ Destination balance rose by exactly 50 USDC
+  ✔ Source balance fell by exactly 50 USDC
+  ✔ What left the source is what arrived at the destination
+  WITHDRAW SIGNATURE: 5zTaos5EAAkQPfzbvzZ3uAHL4c8AmcDfofzRSoD7nhPbj1qC5cvaR2YL14469GcTWRGNbifVFAtiLvUziPM6Ce2N
+  SLOT:               31
+  Amount:             50 USDC (50000000 raw units)
+  From:               CvQHdBAL4rb7xXA8PE4K7xhk4bzbAydGsF7TF7FhNGZT
+  To:                 FF9XTb4fRDzWqL8aUL1KdSA4FLPTVo5oHd63Qsfdty35
+  After — user: 150 USDC, dest: 50 USDC
+  Verify:             solana confirm -v <signature> --url http://127.0.0.1:8899
+
+================================================================
+  ALL DEMO PROOFS PASSED (MoonPay Dev Sandbox + Solana Fork)
+================================================================
+```
+
+Any failed check prints `✖ FAIL` and the tool exits 1. Confirm the withdrawal the same way as in
+step 6:
+
+```
+$ solana confirm -v <WITHDRAW SIGNATURE> --url $FORK_RPC
+  Account 0: srw- CvQHdBAL4rb7xXA8PE4K7xhk4bzbAydGsF7TF7FhNGZT (fee payer)
+  Status: Ok
+    Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]
+    Program log: Instruction: Transfer
+```
+
+Account 0 is both the fee payer and the only signer, and it is the **user's** address from `From:`
+above, not the executor's. That is the non-custodial property, read straight off the transaction.
 
 ### Known limitations — read these before you believe us
 
 - **The MoonPay sandbox proves a signed checkout URL, not arrival of funds.** The deposit proof
   shows the checkout URL is strictly sandbox and targets `usdc_sol` at the user's own address. It
   also shows the URL is HMAC-SHA256 signed. Completing a sandbox purchase needs a human to enter a
-  card on MoonPay's site, so no USDC arrives in any run you can script. The 24-hour cooling-off
-  checks in that tool are computed in-process. The database-backed allowlist lives in
-  `server/src/withdrawals/`.
-- **The withdrawal on `main` is authorised and policy-checked, but not settled** (see step 8, and PR #30).
+  card on MoonPay's site, so no USDC arrives in any run you can script.
+- **The withdrawal proof's 24-hour cooling-off is computed in-process.** It checks the constant and
+  the rule, not the database clock. The database-backed allowlist is in `server/src/withdrawals/`,
+  and its tests are in the same directory. The withdrawal itself does settle on-chain (step 8).
 - **The agent cannot choose a trade outside Nasdaq regular hours without a `ONEINCH_API_KEY`.** It
   can still execute one. Outside regular hours, the off-hours guard compares the Jupiter price with
   a second venue's price. With no key there is no second venue, so the guard holds and the agent

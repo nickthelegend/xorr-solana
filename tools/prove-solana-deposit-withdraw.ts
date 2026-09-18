@@ -346,7 +346,7 @@ async function main() {
   console.log(`  From:               ${userAddress}`);
   console.log(`  To:                 ${destAddress}`);
   console.log(`  After — user: ${Number(afterUser.amount) / 1e6} USDC, dest: ${Number(afterDest.amount) / 1e6} USDC`);
-  console.log(`  Verify:             solana confirm -v ${signature} --url http://127.0.0.1:8899`);
+  console.log(`  Verify:             solana confirm -v ${signature} --url ${connection.rpcEndpoint}`);
 
   console.log('\n================================================================');
   if (failures === 0) {
