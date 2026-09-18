@@ -33,6 +33,7 @@ import {
   size,
   space,
 } from '@/ui';
+import { assetMarkTag } from '@/ui/sharedTags';
 import { Sparkline } from '@/ui/charts';
 import { Icon } from '@/design/Icon';
 import { repos } from '@/data';
@@ -143,6 +144,8 @@ export default function MarketsScreen() {
                     gradient={{ c1: item.c1, c2: item.c2 }}
                     {...logoProps(logos, item.sym)}
                     size={size.mark}
+                    // Carried into the header of the screen this row opens (FEATURES.md #53). One row per symbol here.
+                    sharedTag={assetMarkTag(item.sym)}
                   />
                 }
                 title={item.sym}

@@ -52,6 +52,7 @@ import { View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   cancelAnimation,
   ReduceMotion,
+  SharedTransition,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -138,6 +139,19 @@ const BREATH = 1.015;
 const ACTING_DIM = 0.72;
 /** Where a fill's single scale-in starts. */
 const FILL_FROM = 0.94;
+
+/**
+ * How an asset's mark carries from the row that was tapped into the header of the screen it opened (FEATURES.md #53).
+ *
+ * Only the mark moves, and only its position and size — the same picture, taking its new place. No value rides along:
+ * the price, the name and the change all arrive with the screen as they always did, so nothing a reader trusts is ever
+ * mid-flight. `duration.enter` because it travels with the screen's own arrival, and a mark that landed before or after
+ * the sheet it belongs to would read as two things happening rather than one.
+ *
+ * No spring (`springify` is the builder's spring, and animations.md bans overshoot on anything that confirms a tap).
+ * `ReduceMotion.System`, so under reduced motion the mark is simply in its new place.
+ */
+const MARK_CONTINUITY = SharedTransition.duration(duration.enter).reduceMotion(ReduceMotion.System);
 
 const STATUS_LABEL: Readonly<Record<OrbStatus, string>> = {
   active: 'Active',
@@ -437,6 +451,7 @@ export function AssetMark({
   size = metrics.mark,
   uri,
   pending = false,
+  sharedTag,
   style,
   testID,
 }: {
@@ -460,6 +475,15 @@ export function AssetMark({
    * dashes had, and the same fix: say which.
    */
   pending?: boolean;
+  /**
+   * Carry this mark into the matching one on the next screen, instead of letting the screen replace it.
+   *
+   * The same string on both ends — the row that was tapped and the header it opens — and nowhere else on either screen:
+   * two marks with one tag on a screen is ambiguous, and reanimated would pick one. So it is passed only where a symbol
+   * appears exactly once. Where the platform cannot run the transition (the web, or a presentation it does not reach)
+   * this does nothing at all and the mark simply appears in place — it can make the tap smoother, never broken.
+   */
+  sharedTag?: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
@@ -480,7 +504,12 @@ export function AssetMark({
   const waiting = (pending && !showLogo) || (showLogo && drawnUri !== uri);
 
   return (
-    <View testID={testID} style={[{ width: size, height: size }, style]}>
+    <Animated.View
+      testID={testID}
+      style={[{ width: size, height: size }, style]}
+      sharedTransitionTag={sharedTag}
+      sharedTransitionStyle={sharedTag === undefined ? undefined : MARK_CONTINUITY}
+    >
       {waiting ? (
         <Placeholder
           height={size}
@@ -516,6 +545,6 @@ export function AssetMark({
           }}
         />
       ) : null}
-    </View>
+    </Animated.View>
   );
 }

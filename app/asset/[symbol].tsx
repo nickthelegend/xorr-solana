@@ -52,6 +52,7 @@ import {
   toCandles,
   typeScale,
 } from '@/ui';
+import { assetMarkTag } from '@/ui/sharedTags';
 import { RollingNumber } from '@/ui/RollingNumber';
 import { signedMoney } from '@/format';
 import { repos } from '@/data';
@@ -279,6 +280,8 @@ export default function AssetDetail() {
             gradient={inst.data ? { c1: inst.data.c1, c2: inst.data.c2 } : assetGradient(symbol ?? '')}
             {...logo}
             size={26}
+            // The row that was tapped, arriving here rather than being replaced (FEATURES.md #53).
+            sharedTag={symbol ? assetMarkTag(symbol) : undefined}
           />
           <Text variant="cardTitleLg" numberOfLines={1}>
             {inst.data?.name ?? symbol}

@@ -47,7 +47,9 @@ to show that the app registered a tap.
 - **Prices, deltas, P&L, order totals, keypad amount.** Snap.
 - **TP/SL markers.** They jump to the new projected price. A slide implies the *price* moved rather
   than the user's setting.
-- **Screen transitions.** Use the platform default push/present. Don't author custom ones.
+- **Screen transitions.** Use the platform default push/present. Don't author custom ones. One element may travel
+  *with* the platform's transition — see "The mark that was tapped" below — but the screen itself still arrives exactly
+  as the platform presents it.
 - **The agent status dot.** Static color, no pulse. A pulsing dot on a bottom tab is a distraction
   the user can't dismiss.
 
@@ -195,3 +197,25 @@ leaving is quicker than arriving.
 It is continuity, not an entrance: nothing arrives, one thing makes room for another, and both are already on screen when
 the move starts. While it is down the bar takes no taps and is hidden from a screen reader. Under reduced motion both
 simply appear and disappear.
+
+
+## The mark that was tapped
+
+Tapping a market row opened the asset screen, and the mark in its header was a new mark: the sheet rose, and the logo
+you had just touched was replaced by another copy of itself somewhere else. `<AssetMark sharedTag>` (FEATURES.md #53)
+carries the one you tapped into its place in the header instead — same picture, taking its new position and size, over
+`duration.enter` so it lands with the sheet it belongs to rather than before or after it.
+
+This is not a custom screen transition, and the rule above still stands. The platform presents the screen exactly as it
+always did. One element — the one the finger was on — travels with it, which is continuity rather than an entrance:
+nothing arrives, one thing moves to where it now lives.
+
+What it will not do:
+
+- **Carry a value.** Only the mark moves, and only its position and size. The price, the name and the change arrive with
+  the screen as they always did. Nothing a reader trusts is ever mid-flight.
+- **Spring.** No `springify`, for the reason there is no spring anywhere else.
+- **Guess.** The tag is passed only where a symbol appears once on a screen; two marks with one tag would be ambiguous.
+- **Break anything.** Where the platform cannot run it — the web, or a presentation it does not reach — it does nothing
+  and the mark appears in place, exactly as before this existed.
+- **Move under reduced motion**, where the mark is simply in its new place.
