@@ -60,6 +60,12 @@ export const HIDDEN_ON_SOLANA: readonly string[] = [
   '/compare',
   // The day's movers are Hyperliquid perps and spot crypto, each tagged "Perp"; none of them trades here.
   '/movers',
+  /*
+   * A backtest replays months of real prices. The xStocks have no such history anywhere — this deployment's own
+   * recorded prices begin when it started watching — and the screen offered WETH and CBBTC, which do not trade here
+   * (2026-09-20). A replay that can only fail, over assets this build does not hold, is not a screen to keep.
+   */
+  '/backtest',
 ];
 
 /**
