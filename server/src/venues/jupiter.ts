@@ -178,7 +178,7 @@ export async function quote(params: {
    * which is honest: a real price, and no claim that a route ran.
    */
   const attempts = pinnedDex
-    ? [`&dexes=${encodeURIComponent(pinnedDex)}&onlyDirectRoutes=true`, '']
+    ? [`&dexes=${encodeURIComponent(pinnedDex)}&onlyDirectRoutes=true&asLegacyTransaction=true`, '']
     : [''];
 
   let lastError: Error | null = null;
@@ -281,6 +281,13 @@ async function routeThroughJupiter(params: {
           userPublicKey: signer.publicKey.toBase58(),
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
+          /*
+           * Off mainnet, a legacy transaction (2026-09-19): it names every account itself, where a v0 transaction points
+           * at address lookup tables — and Jupiter's choice of table can change between the fork's boot, when its
+           * accounts were cloned, and the trade. On the hosted fork a buy failed with "loads an address table account
+           * that doesn't exist" half an hour after boot. A direct single-pool route fits a legacy transaction easily.
+           */
+          ...(CLUSTER_KEY === 'solana-mainnet' ? {} : { asLegacyTransaction: true }),
           ...(destinationTokenAccount
             ? { destinationTokenAccount: destinationTokenAccount.toBase58() }
             : {}),
