@@ -27,8 +27,8 @@ vi.mock('../venues/xstocks.js', () => ({
   xStockKey: (s: string) => s,
   xStockPriceUsd: vi.fn(async () => 230),
 }));
-const guard = vi.fn(async () => ({ placed: true, usd: 230, filledUnits: 1, fillPrice: 230, signature: 'sig', venue: 'jupiter-route', slot: 9 }));
-vi.mock('./place.js', () => ({ guardAndSpend: (...a: unknown[]) => guard(...a) }));
+const guard = vi.fn(async (_intent?: unknown) => ({ placed: true, usd: 230, filledUnits: 1, fillPrice: 230, signature: 'sig', venue: 'jupiter-route', slot: 9 }));
+vi.mock('./place.js', () => ({ guardAndSpend: (a: unknown) => guard(a) }));
 
 const { solanaExitSweep } = await import('./solanaExits.js');
 
