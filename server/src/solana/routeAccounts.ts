@@ -19,7 +19,6 @@ const JUPITER = 'https://lite-api.jup.ag/swap/v1';
 const BUILTIN = new Set([
   '11111111111111111111111111111111',
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
   'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
   'ComputeBudget111111111111111111111111111111',
   'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
@@ -70,6 +69,9 @@ export async function resolveRouteClones(params: {
 }): Promise<RouteClones> {
   const skip = new Set([...params.exclude, params.user]);
   const keys = new Set<string>();
+  // Mainnet's own Token-2022 program, cloned rather than the validator's bundled build: xStocks rely on its newest
+  // extensions (Scaled UI), and a validator a release behind would read them differently.
+  keys.add('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
   for (const x of params.xstocks) {
     for (const pair of [
       { inputMint: params.usdcMint, outputMint: x.mint, amount: 100_000_000n },
