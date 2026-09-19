@@ -37,4 +37,10 @@ describe('the Solana build hides the Base-only screens', () => {
   it('hides the perp movers', () => {
     expect(solanaRedirect('/movers')).toBe('/not-here?from=%2Fmovers');
   });
+
+  it('hides the backtest, which has no xStock history to replay and offered Base tokens', () => {
+    expect(hiddenOn('/backtest', true)).toBe(true);
+    expect(hiddenOn('/backtest', false)).toBe(false);
+    expect(shownHere('/backtest')).toBe(false);
+  });
 });

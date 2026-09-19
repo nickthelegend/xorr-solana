@@ -52,6 +52,7 @@ import type {
   Repositories,
 } from './repositories';
 import { percent, price as fmtPrice } from '../format';
+import { sharePriced } from '@/markets/useSpotPrices';
 
 const allInstruments: Instrument[] = assetClasses.flatMap((c) => c.instruments);
 
@@ -142,7 +143,10 @@ export const LocalRepositories: Repositories = {
       // Two feeds, one answer. Crypto is priced by CoinGecko; the tokenized equities have no
       // CoinGecko listing and are priced off the 1inch route that would fill them. A screen asking
       // for a price should not have to know which kind of asset it is holding.
-      const needsStocks = symbols.some((s) => STOCK_SYMBOLS.has(s));
+      // `STOCK_SYMBOLS` is the Base catalogue; on Solana the snapshot's rows are xStocks, which it does not list
+      // (2026-09-20). Asking only by that set meant `usePrice('NVDAx')` answered undefined while the executor priced it
+      // all day — the new-alert screen could not seed a level, and every screen using this hook read "no price".
+      const needsStocks = symbols.some((s) => STOCK_SYMBOLS.has(s) || sharePriced(s));
       let warming = false;
       const [live, stocks] = await Promise.all([
         /*
@@ -166,9 +170,9 @@ export const LocalRepositories: Repositories = {
       for (const s of symbols) {
         const stock = stocks[s];
         if (stock?.price != null) {
-          // A swap quote is one observation. No 24h delta exists, so none is reported — a 0 here
-          // would read as "unchanged today", which is a claim we have not measured.
-          out[s] = { price: stock.price };
+          // A swap quote is one observation, so a delta is reported only where the executor measured one over a
+          // recorded day (`change24h` on the Solana snapshot); a 0 would read as "unchanged today".
+          out[s] = stock.change24h === undefined ? { price: stock.price } : { price: stock.price, change24h: stock.change24h };
           continue;
         }
         const q = live[s];

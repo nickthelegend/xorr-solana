@@ -1090,6 +1090,14 @@ routes.get('/activity', async (c) => {
   return c.json(
     rows.map((r) => ({
       id: String(r.seq),
+      /*
+       * The instant, for the reader's own clock (2026-09-20).
+       *
+       * `t` is formatted HERE, in the server's timezone — UTC on the hosted executor — and the app printed that string
+       * with no zone beside it. Someone in IST read "10:46 PM" over something that happened at 4:16 AM their morning.
+       * The row now carries the moment; the app formats it where the reader is. `t` stays for an app older than this.
+       */
+      at: new Date(r.at).getTime(),
       t: new Date(r.at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
       agent: r.agent,
       action: r.action,

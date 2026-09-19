@@ -36,6 +36,7 @@ import {
 import { NotSignedIn } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
+import { isSolana } from '@/chain';
 
 type Source = {
   name: string;
@@ -45,26 +46,12 @@ type Source = {
   how: string;
 };
 
-const SOURCES: Source[] = [
-  {
-    name: 'The chain',
-    owns: 'Balances, the permission, approvals, names and every transaction',
-    how: 'Read directly over RPC.',
-  },
-  {
-    name: 'xorr',
-    owns: 'Positions and their cost, realised profit, runs, alerts, stock readings and the audit trail',
-    how: 'The executor’s own database. The audit trail in it is hash-chained and anchored on the chain.',
-  },
+/** Base's sources: the aggregator, the perps feed, the lending pool and the subgraph over the delegation contract. */
+const BASE_SOURCES: Source[] = [
   {
     name: '1inch',
     owns: 'Swap routes, fill prices, stock prices, limit orders and cross-chain quotes',
     how: 'Routes from its aggregator; the stocks are priced by quoting a real buy, because they have no feed.',
-  },
-  {
-    name: 'CoinGecko',
-    owns: 'Crypto prices and charts',
-    how: 'One batched request per refresh, cached — the public tier rate-limits hard.',
   },
   {
     name: 'Hyperliquid',
@@ -77,14 +64,52 @@ const SOURCES: Source[] = [
     how: '`currentLiquidityRate`, read from the lending pool. It floats; it is not a promise.',
   },
   {
-    name: 'EDGAR',
-    owns: 'Earnings dates for the tokenized equities',
-    how: "The regulator's own filing record. The next date is a projection from the cadence, and says so.",
-  },
-  {
     name: 'The Graph',
     owns: 'Spend history, independently of our records',
     how: 'A subgraph over the delegation contract — a second account of the same money, kept by someone else.',
+  },
+];
+
+/**
+ * Solana's own (2026-09-20). This screen listed Base's four on the Solana build — an aggregator, a perps feed, a
+ * lending pool and a subgraph none of which this executor calls — while naming neither Jupiter, which prices and fills
+ * every trade here, nor the issuer's proof of reserves behind each xStock. A screen whose whole purpose is saying
+ * where a number came from must not name the wrong source.
+ */
+const SOLANA_SOURCES: Source[] = [
+  {
+    name: 'Jupiter',
+    owns: 'Swap routes, fill prices and every xStock price',
+    how: 'Its quote and swap API. An xStock has no market-data feed, so its price is a real route for a real size.',
+  },
+  {
+    name: 'Backed',
+    owns: 'What backs each xStock, and the issuer controls on it',
+    how: 'The issuer’s proof-of-reserves feed, carried with its age; the token’s own controls are read from the chain.',
+  },
+];
+
+const SOURCES: Source[] = [
+  {
+    name: 'The chain',
+    owns: 'Balances, the permission, approvals, names and every transaction',
+    how: 'Read directly over RPC.',
+  },
+  {
+    name: 'xorr',
+    owns: 'Positions and their cost, realised profit, runs, alerts, stock readings and the audit trail',
+    how: 'The executor’s own database. The audit trail in it is hash-chained and anchored on the chain.',
+  },
+  ...(isSolana ? SOLANA_SOURCES : BASE_SOURCES),
+  {
+    name: 'CoinGecko',
+    owns: 'Crypto prices and charts',
+    how: 'One batched request per refresh, cached — the public tier rate-limits hard.',
+  },
+  {
+    name: 'EDGAR',
+    owns: 'Earnings dates for the tokenized equities',
+    how: "The regulator's own filing record. The next date is a projection from the cadence, and says so.",
   },
   {
     name: 'Privy',

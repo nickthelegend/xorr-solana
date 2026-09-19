@@ -7,6 +7,8 @@
  * only a handful of those can be routed and settled. Offering a Buy on the rest would put a
  * strategy in the database that no signed transaction could ever fill.
  */
+import { isSolana } from '@/chain';
+
 export const TRADABLE = [
   // Crypto the delegation can route on Base.
   'ETH',
@@ -52,8 +54,14 @@ export function isTradable(symbol: string): boolean {
   return (TRADABLE as readonly string[]).some((t) => t.toUpperCase() === settled);
 }
 
-/** What the default buy is when a screen has to pick one. */
-export const DEFAULT_BUY: string = 'WETH';
+/**
+ * What the default buy is when a screen has to pick one.
+ *
+ * Chain-aware since 2026-09-20: on Solana this was still `WETH`, so the new-alert screen opened offering "Alert me
+ * when WETH is above $2,761" — a Base token this build cannot price, trade or hold. The Solana default is the xStock
+ * the rest of the app leads with.
+ */
+export const DEFAULT_BUY: string = isSolana ? 'NVDAx' : 'WETH';
 
 /**
  * What the SERVER says can be settled, which is not always what this list says.
