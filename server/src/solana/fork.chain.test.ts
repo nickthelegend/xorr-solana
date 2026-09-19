@@ -275,7 +275,7 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
     expect(stateAfter.remainingUsd).toBe(60);
   });
 
-  it('Proof 3: Kill switch (revoke) stops new orders while resting exits stay live', async () => {
+  it('Proof 3: Kill switch (revoke) stops new orders, and a sale needs the sell approval the stop drops', async () => {
     // 1. Grant $500 permission
     await approveDelegate(devOwner, delegate.publicKey, 500, conn, payer);
     const beforeRevoke = await readDelegation(devOwner.publicKey, USDC_MINT, conn);
@@ -305,7 +305,11 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
       expect(buyOutcome.reason).toBe('delegation_revoked');
     }
 
-    // 4. Resting exit / sell DOES stay live (reduces risk, returns funds to owner)
+    /*
+     * 4. A sale moves the OWNER's shares, so it needs the owner's approval on that xStock account (2026-09-19). It used
+     * to "stay live" after a stop by selling the venue vault's own shares and paying the owner — a sale of nothing the
+     * owner held. With no sell approval (none granted, or dropped by the stop) it is refused.
+     */
     // First ensure dev owner has some NVDAx to exit
     const devOwnerNvdaxAta = await getOrCreateAssociatedTokenAccount(
       conn,
@@ -338,11 +342,8 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
       skipRulesEngine: true,
     });
 
-    expect(exitOutcome.placed).toBe(true);
-    if (exitOutcome.placed) {
-      expect(exitOutcome.side).toBe('sell');
-      expect(exitOutcome.signature).toBeTruthy();
-    }
+    expect(exitOutcome.placed).toBe(false);
+    if (!exitOutcome.placed) expect(exitOutcome.reason).toBe('no_sell_permission');
     // Real Jupiter quotes and several confirmed transactions: seconds each, well past vitest's 5s default.
   }, 120_000);
 
@@ -385,7 +386,9 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
     console.log(`  Bought:  ${buyOutcome.filledUnits.toFixed(6)} NVDAx @ $${buyOutcome.fillPrice.toFixed(2)}`);
     console.log(`  Tx Sig:  ${buyOutcome.signature}`);
 
-    // 2. SELL back: Sell half back to USDC
+    // 2. SELL back: the owner approves the delegate on their NVDAx account, as the grant does, then half is sold.
+    await approveDelegate(devOwner, delegate.publicKey, 2n ** 64n - 1n, conn, payer, NVDAX_MINT);
+    const nvdaxBeforeSell = await getTokenBalance(devOwner.publicKey, NVDAX_MINT, conn);
     const sellUsd = 100;
     const sellOutcome = await guardAndSpend({
       walletId: 'test-wallet-4',
@@ -405,6 +408,9 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
     // Check balances on-chain after SELL
     const usdcAfterSell = await getTokenBalance(devOwner.publicKey, USDC_MINT, conn);
     expect(usdcAfterSell.amount).toBeGreaterThan(usdcAfterBuy.amount);
+    // The shares sold are the owner's: their NVDAx fell by exactly what was sold.
+    const nvdaxAfterSell = await getTokenBalance(devOwner.publicKey, NVDAX_MINT, conn);
+    expect(nvdaxBeforeSell.amount - nvdaxAfterSell.amount).toBe(sellOutcome.inUnits);
 
     console.log(`\n SELL PROOF SUCCESS:`);
     console.log(`  Sold:    ${sellOutcome.filledUnits.toFixed(6)} NVDAx for ~$${sellOutcome.usd.toFixed(2)} USDC`);

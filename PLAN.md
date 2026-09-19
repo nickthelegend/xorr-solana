@@ -1,533 +1,341 @@
-# xorr-solana — full migration plan: chain-agnostic reference → Solana-native
+# xorr on Solana — the plan to a verified, submitted product
 
-**The first xorr-solana plan — 2026-09-16.** xorr-solana is a clone of **xorr-dev** (the full-featured
-reference build of xorr, itself a copy of the xorr-eth/Base implementation). The reference app ships the
-complete feature surface — 85 screens, the full executor, venues, contracts layer, subgraphs, and
-29-doc audit trail — with chain-specific code structured behind clean seams (`server/src/evm/`,
-`contracts/`, `subgraph/`, `src/networks/`, `src/wallet/`, `app/network.tsx`) so that a chain can be
-swapped in file-by-file.
+**Source of truth for what is left.** Written 2026-09-19 from the repo, a live end-to-end run on the fork
+(`docs/TESTPLAN-SOLANA.md`), four read-only audits (docs, stubs/fakes, infra, every screen), and the owner's answers
+(all defaults, §4). Update the status tags here as work lands; nothing is DONE until its verification has been run.
 
-This plan migrates the reference to a **Solana-native** xorr:
-
-- Non-custody via **SPL Token delegation** (`approve` / `revoke`) instead of an ERC-20 allowance +
-  `XorrDelegation` contract. The SPL Token program is the final, authoritative cap and the kill switch.
-- Settlement in **USDC on Solana** (mainnet mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`, 6 decimals).
-- Every EVM module is mapped to a Solana equivalent in section 8 (the module-by-module table). Nothing is
-  dropped; everything is repointed at a Solana primitive, a Solana venue, or a neutral market feed.
-
-Written for an agent to pick up cold: each task names its files and what "done" means. Status tags:
-**DONE** · **IN PROGRESS** · **NOT STARTED** · **BLOCKED — reason**.
+Superseded plans: `docs/archive/PLAN-solana-migration-2026-09-16.md` (generic port), `PLAN.local-2026-09-17.md`
+(untracked Stocklana draft; its "nothing exists" audit is stale).
 
 ---
 
-## 0. How to work this plan
+## 1. Executive summary
 
-### 0.1 Owner rules (unchanged from the reference)
+xorr is a non-custodial trading app: you grant an AI agent a capped, revocable, on-chain permission, and it trades
+tokenized US stocks (Backed's **xStocks**, Token-2022) on Solana through **Jupiter** while you stay in control. It is
+being submitted to **STOCKLANA** (hackathons.solana.com, Solana Foundation, main track $100K), deadline
+**2026-09-25 16:00 ET**. Judging asks one question: *could this be a real app that people will actually use?* —
+real user problem, working end-to-end demo, Solana relevance, execution quality.
 
-- **No mocks, no fallbacks, no stubs.** Real database, real (or localnet) chain, real signatures, real API
-  calls. Pause only for real money, a mainnet action, or a credential that does not exist.
-- **Never print a secret value — names only.** `.keys` and `.env*` stay git-ignored and are never pasted
-  into logs, tests, or commits.
-- **Never delete a Railway service, a Postgres, or their env vars.** Existing executors from the reference
-  stay up while xorr-solana ships its own named services (`xorr-solana-executor`).
-- **One path to spending.** Every entry (DCA, agent, manual order) funnels through the spend chokepoint;
-  `strategy_runs.period_key` and `position_closes.claim_key` stay UNIQUE for idempotency. Proved
-  adversarially on-chain in the reference — re-prove it on Solana.
-- **Kill switch = on-chain revoke.** New orders stop, resting exits/TPs stay live, open positions stay
-  untouched. Three behaviors tested independently (keep the reference's tests, port the chain assertions).
+The repo is a fork of the Base build. The Solana core loop (sign in → fund → grant → buy → agent buys → kill switch
+→ withdraw) is proven live on a mainnet fork. Most of the rest of the app (119 routes) still runs Base code: the
+Swap tab, strategies, exits, sells, flatten, and ~40 screens reachable from Explore. Nothing Solana is hosted.
 
-### 0.2 Environments
+**Initial completion: 15 / 50 P0+P1 checklist items verified = 30 %** (P0 alone: 15 / 30 = 50 %). See §9.
 
-| Environment | Cluster (`XORR_CHAIN`) | RPC | Money class | Notes |
-|---|---|---|---|---|
-| `localnet` | `solana-localnet` | `http://127.0.0.1:8899` | copy | `solana-test-validator`, no network deps |
-| `solana-dev` | `solana-devnet` | `https://api.devnet.solana.com` | test | Faucet mints SOL/USDC; CI + integration |
-| `solana-fork` | `solana-mainnet` (validator `--clone`) | local `FORK_RPC` | copy | Real USDC mint + real venue programs cloned |
-| `solana-mainnet` | `solana-mainnet` | `https://api.mainnet-beta.solana.com` | real | Refused by faucet; requires `ALLOW_MAINNET=yes` |
+## 2. Vision, problem, users
 
-**Chain-agreement invariant (unchanged):** `XORR_CHAIN` (server) and `EXPO_PUBLIC_XORR_CHAIN` (app) must
-agree at all times. The app switches the wallet to the build's cluster before asking for signatures.
+- **Problem.** Handing a bot your money is a trust problem, not a trading problem. Brokerage "robo" products custody
+  your assets; crypto bots take your keys. Tokenized stocks trade 24/7 on Solana, but nobody can watch a market
+  all night.
+- **Product.** The permission is the product: an SPL delegation the chain enforces (a ceiling the bot cannot exceed),
+  a daily cap and end date the executor enforces, a one-tap on-chain revoke, and every action on an audit trail with
+  explorer links.
+- **Target user.** A non-US retail investor who already holds USDC on Solana, wants exposure to US equities around
+  the clock, and wants automation without giving up custody. (xStocks are not for US persons.)
+- **Core loop.** Fund → grant a capped allowance → hire an agent → it buys xStocks with a stated reason and arms
+  exits that actually fire → you can buy and sell yourself → you see Token-2022-aware holdings and P&L → stop it all
+  on-chain in one tap → withdraw to an allowlisted address.
 
-### 0.3 Deploy (delta from reference)
+## 3. Goals and definitions of done
 
-- Executors = CLI uploads: `cd server && railway up --service xorr-solana-executor`. Migrations run as the
-  preDeploy step (`npm run migrate`). Web = `npm run deploy:web` (Vercel project to be created,
-  domain `app.xorr-solana.finance` unless the owner says otherwise).
-- **Never deploy against mainnet-beta without `ALLOW_MAINNET=yes`** — the server refuses to boot otherwise.
+- **Product done** — every P0 and P1 item in §6 verified in the running app on the fork.
+- **Technical done** — app + server typecheck, lint (0 errors), all unit tests, the on-chain fork proofs, and CI green
+  on `main`; no production path fabricates data; no Base-only screen reachable in the Solana build.
+- **Demo done** — a hosted Solana build a judge can sign into and use (fork-backed), plus a 2–3 minute video of the
+  full loop with real signatures visible.
+- **Hackathon done** — submitted on hackathons.solana.com before 2026-09-25 16:00 ET with a public GitHub repo,
+  hosted demo URL and video link; README is Solana-first.
 
-### 0.4 Verify
+## 4. Constraints and confirmed decisions (owner, 2026-09-19: "defaults")
 
-- App: `npm test` · `npx tsc --noEmit` · `npm run lint`
-- Server: `cd server && npm test` · `npm run test:chain` (spins `solana-test-validator`) · `npm run test:live`
-- Chain: `npm run setup:devnet`, `npm run test:chain`, fork scripts under `server/src/fork/`
-- E2E: Maestro flows in `e2e/` (5 flows, assert outcomes not renders)
-- Live: curl against the deployed executor (`GET /health`, `/api/status`, `/api/wallet/balance`)
+| # | Decision |
+|---|---|
+| D1 | **Scope = focused core + a mix.** Core: fund → grant → hire agent (buys with reasoning; exits fire) → buy **and sell** xStocks (Swap tab becomes xStock buy/sell) → Token-2022 holdings/P&L → kill switch → withdraw. Added: recurring buy (DCA) on xStocks, custom agents with xStock templates, close position, withdraw everything. **Hidden on the Solana build** (not deleted): perps/futures, Aave yield, limit orders, cross-chain, basenames, business, Graph, Approvals, Base strategy templates and the Base swap. |
+| D2 | **Clawpump track**: last and walled off — the agent's own token paired with an xStock on Meteora, 75 % fee share buying xStocks, shown only on the agent card. Owner runs the mainnet launch; no real SOL is spent without the owner's go-ahead at that moment. |
+| D3 | **Agent pacing**: ≤ 1 entry per symbol per agent per day; position cap per symbol 25 % of the grant; 60-minute cooldown between an agent's entries. |
+| D4 | **Selling**: sells the user makes are signed by the user's own wallet. The grant also approves the delegate on each tradable xStock account so the agent's exits can fire unattended. Revoke drops every approval. (Refined from "approve per buy": an autonomous buy has no user present to sign, so the xStock approvals are part of the one grant transaction.) |
+| D5 | **Where it runs**: hosted mainnet-fork validator + executor on Railway, web on Vercel, plus a video. **Paid Railway resources need the owner's approval before creation.** No real-money mainnet trading. |
+| D6 | **Fills on the fork**: re-clone pools (incl. sell routes) at boot and on a schedule; the labelled vault fallback stays as last resort. |
+| D7 | **Deposits**: no MoonPay keys exist → test-USDC faucet + a Solana "receive USDC" QR; card button hidden with its honest message until keys arrive. |
+| D8 | **AI**: OpenRouter with a capable model once the owner provides `OPENROUTER_API_KEY`; until then deterministic reasoning, and chat says plainly it has no model. |
+| D9 | **Privy**: same app; owner adds the hosted origin and confirms Solana embedded wallets; logins email + Google (X optional). |
+| D10 | **Platforms**: hosted web for judges; iOS simulator run in the video; push stays in-app (no EAS project). |
+| D11 | **Domains**: Solana build on `xorr-solana.vercel.app` (or `solana.xorr.finance` if the owner adds DNS); README Solana-first; the Base landing untouched except a "Now on Solana" link (landing lives in the xorr-eth repo). |
+| D12 | **Video**: scripted 2–3 min, recorded automatically; owner voiceover or captions. |
+| D13 | **Compliance**: one-time xStocks disclosure at onboarding; Terms/Risk updated; issuer eligibility check already on the ticket; no geo-block on a fork demo. |
+| D14 | **Git**: work in PRs, merge on green CI without review; `ao` workers are idle and left alone. |
+| D15 | **Submission**: repo public just before submitting; submission text prepared; owner submits. |
 
----
+Standing rules (from the repo and the owner): no mocks, fallbacks or stubs in production paths; every price real or
+labelled; one spend chokepoint (`guardAndSpend`); kill switch = on-chain revoke; never print a secret; never delete a
+Railway service, Postgres or env var; no mainnet action without `ALLOW_MAINNET=yes` and the owner's go-ahead.
 
-## 1. Why this migration is not find-and-replace
+## 5. Final product specification
 
-Solana and EVM differ in five ways that force structural decisions, not renamed files:
+**User types.** Signed-out visitor (can browse markets and prices); signed-in owner (one Privy Solana embedded wallet);
+the executor (holds the delegate key; never custody); agents (personas and custom agents — rows the executor runs).
 
-1. **Execution model.** EVM `approve` + `transferFrom` lets any contract spend an allowance with a single
-   signed tx. SPL Token's `approve` gives a **delegate authority** a capped `delegated_amount`; the delegate
-   signs `Transfer` instructions up to the cap. Routed swaps (Jupiter etc.) spend from the **signer's
-   authority**, not a delegate's, so the executor cannot silently fill a multi-hop swap the way 1inch does.
-   → Section 6 ("executor signing model on Solana") chooses the fill path.
-2. **Accounts vs addresses.** Token balances live in token accounts owned by wallets (ATAs). "Send USDC to a
-   venue" = transfer into the venue's ATA, which must exist (rent-funded). Every account touch costs rent.
-3. **Transactions are singles.** No try/catch, no reentrancy guards, no gas estimation then submit; one
-   failed instruction fails the tx and the payer loses the fee+priority fee. `humanFailure()` must map
-   blockhash/priority-fee/simulation errors.
-4. **No private RPC as the user's wallet.** The reference used Privy's embedded EVM wallet for signing. On
-   Solana the app signs via a wallet adapter or a local keypair; the executor never holds user keys.
-5. **Indexing.** There is no The Graph on Solana mainnet for arbitrary programs. Event streams must be
-   replaced by RPC polling, Helius/webhook DAS APIs, or Geyser gRPC (Section 9).
+**Screens in the Solana build (everything else hidden):**
+- Onboarding: welcome, sign-in, goals, xStocks disclosure, fund, delegate (grant).
+- Tabs: Home (balance, setup card, status chip, Agents / Gainers / Stocks tabs), Trade (was Swap: xStock buy/sell),
+  Messages (chat drawer).
+- Markets, xStocks catalogue, xStock ticket (buy/sell, quote breakdown, backing, eligibility), Search, Watchlist,
+  Movers.
+- Portfolio, Holdings (no target mix on Solana), position detail + close, P&L, disposals, export.
+- Agents: roster, agent profile (hire/fire, strategies, reasoning, Clawpump card last), new agent, risk, basket.
+- Strategies: list, recurring buy (xStock DCA), strategy detail, runs.
+- Safety (live status, stop, resume), Limits/daily cap, Allowlist, Delegation, Activity, audit entry, inbox,
+  notifications settings, Deposit, Send/withdraw, Withdraw everything, Settings, Profile, legal, System/health.
 
----
+**Backend capabilities.** Privy JWT auth; wallet binding; Solana grant record/revoke verified from chain; daily cap +
+expiry + pacing enforced in `guardAndSpend`; Jupiter quotes and routes on the fork (vault fallback labelled);
+user-signed sell transactions built server-side; delegate-signed exits; scheduler (DCA, exits, autonomous sweep);
+faucet (fork only); withdrawal allowlist with 24 h cooling-off; audit log hash chain; notifications (in-app).
 
-## 2. Target architecture (end state)
+**Data entities.** wallets, delegations, daily_spend, strategies, strategy_runs, positions, disposals, proposals,
+agents, withdrawal_addresses, audit_log, notifications, faucet_claims, price_observations.
 
-```
-app/ (Expo, RN)                    server/ (Hono + Postgres + Solana)
-────────────────────────          ─────────────────────────────────────
-app/network.tsx ── XORR_CHAIN ──► server/src/solana/clusters.ts (master switch)
-src/networks ───────────────────► solana/connection.ts (RPC + explorer + guard)
-src/wallet/* (sign via adapter)  solana/keys.ts (delegate/payer/dev-owner keypairs)
-                                 solana/delegation.ts (SPL approve/revoke/transfer)
-   │                                    │
-   │ REST /api/*                        │ reads + writes
-   ▼                                    ▼
-executor/place.ts ──guardAndSpend────►  Postgres (rules engine + audit log + chain-scope)
-  rule check → chain check (SPL) →     ▲
-  real mark (markets/*) → spend        │ signals
-  (SPL transfer signed by delegate) ───┤ scheduler.ts (tick: exits → strategies → entries)
-venues/ (Jupiter, Phoenix/OpenBook,     │
-  Marinade/Kamino, Hyperliquid, ...) ───┘
-blockchain: Solana (USDC EPjFWdd5…) + SPL Token program + optional Xorr programs (Phase F)
-indexer: RPC poller / Helius webhook → Postgres (replaces subgraph/)
-audit: hash-chained Postgres log + on-chain anchor via SPL Memo (replaces XorrAuditAnchor)
-```
+## 6. The 100 % checklist (P0 / P1 / P2)
 
-Non-custody invariant: user USDC sits in the user's own ATA. The bot holds an SPL delegation with a
-**capped `delegated_amount`**, spendable only on behalf of the user's account, revocable in one tx. The
-withdrawal allowlist (24 h cooling-off) stays server-side and is the only path back to an external wallet.
+Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done / broken · ⛔ blocked on owner.
 
----
-
-## 3. Env layering (first task — everything hangs off this)
-
-### 3.1 Values of `XORR_CHAIN`
-
-Server `server/src/solana/clusters.ts` and app `src/chain.ts` must both accept exactly:
-
-| `XORR_CHAIN` | Cluster | RPC source | Money class |
+### P0 — must work live
+| # | Item | Status | Evidence |
 |---|---|---|---|
-| `solana-localnet` | localnet | `SOLANA_RPC_URL` or `http://127.0.0.1:8899` | copy |
-| `solana-devnet` | devnet | `SOLANA_RPC_URL` or `clusterApiUrl('devnet')` | test |
-| `solana-fork` | mainnet | `FORK_RPC` | copy |
-| `solana-mainnet` | mainnet-beta | `SOLANA_RPC_URL` or `clusterApiUrl('mainnet-beta')` | real |
+| 1 | Sign in (email/Google) → Privy Solana wallet | ✅ | TESTPLAN B1/B2 |
+| 2 | Wallet bound to executor, unlinked refused | ✅ | B3 |
+| 3 | Home balance = chain USDC + xStocks | ✅ | B4 |
+| 4 | Test-USDC faucet | ✅ | C1 |
+| 5 | Receive-USDC QR on Solana | ❌ | QR hidden on Solana (`depositQrWorks` false) |
+| 6 | Grant capped SPL delegation from the app | ✅ | D1–D3 |
+| 7 | Kill switch: user-signed revoke from Safety | ✅ | H1, tx `4zgrs5nk…` (2026-09-19) |
+| 8 | After revoke every buy refused | ✅ | H2/F3 `delegation_revoked` |
+| 9 | Resume (re-grant) from Safety | ✅ | Solana plan from the grant record; resume tx `65z7Jnv7…` set USDC + NVDAx approvals |
+| 10 | Buy an xStock from the app | ✅ | F1 (fills may be vault-labelled, see #25) |
+| 11 | Sell an xStock from the app (user-signed) | ✅ | ticket Sell: 0.4462 NVDAx → $99.13, tx `gCbS3NMG…`, balances checked on chain |
+| 12 | Server sell path moves the user's shares | ✅ | delegate moves the owner's shares under the sell approval; exit sold 1.5648 NVDAx through Jupiter (`2DztwgJ8…`) |
+| 13 | Over-cap / over-allowance refusals | ✅ | F2 |
+| 14 | Hire / fire an agent | ✅ | G2 |
+| 15 | Agent buys autonomously with its reason shown | ✅ | G2 (template reasoning; LLM ⛔ #37) |
+| 16 | Agent exits (stop/take-profit) fire on Solana | ✅ | `solanaExits.ts` sweep each tick; forced stop fired unattended |
+| 17 | Agent pacing (D3) | ✅ | `pacingExclusions` + 60-min cooldown; tests |
+| 18 | Withdraw to allowlisted address, cooling-off enforced | ✅ | I1–I3, tx `5MyCZ2dP…` |
+| 19 | Trade tab = xStock buy/sell | ✅ | centre tab "Trade" → `/xstocks` (verified) |
+| 20 | Home Stocks tab opens a working xStock screen | ✅ | rows → `/xstock/[sym]`; `/oracle` redirects |
+| 21 | No Base-only screen reachable on Solana | ⚠️ | route guard + link filtering done; final full walk pending (P2 re-walk) |
+| 22 | Activity / audit trail with explorer links | ✅ | F5 |
+| 23 | No computable keys off localnet/fork | ✅ | `solana/keys.ts` refuses seeds off a loopback fork; `keys.test.ts` |
+| 24 | Hosted demo (fork + executor + web) | ❌ | nothing Solana hosted |
+| 25 | Fork fills Jupiter-routed (pool re-clone, sell routes) | ✅ | live route resolution at boot; `jupiter-route` buy and sell |
+| 26 | Demo video | ❌ | only Base videos exist |
+| 27 | README Solana-first | ❌ | README top says Base |
+| 28 | Submission | ❌ | not submitted |
+| 29 | CI green | ✅ | main green; PR #35 |
+| 30 | Token-2022 (Scaled UI) holdings and P&L | ✅ | F4 |
 
-If `XORR_CHAIN` is unset or unknown, **refuse to start** (same as reference `server/src/index.ts`).
+### P1 — important
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 31 | Recurring buy (DCA) on xStocks via Solana path | ⚠️ | created from the screen; run went through `runOnSolana` → `daily_cap` refusal; a fill awaits cap headroom |
+| 32 | Custom agents with xStock templates | ⚠️ | templates from `/market/tradable`; UI create not yet re-walked |
+| 33 | Close a position (Solana) | ✅ | position Close → `useXStockSell` (same verified path as #11) |
+| 34 | Withdraw everything (Solana) | ✅ | sold 0.018 NVDAx (`4dXwVMfj…`), sent 495.66 USDC (`48n4enDu…`) |
+| 35 | Holdings: no fixture target mix on Solana | ✅ | `/holdings` hidden on Solana; Portfolio is the holdings view |
+| 36 | Holding / Gainers rows open a tradable xStock screen | ✅ | `/asset/<xStock>` redirects to the ticket |
+| 37 | Agent reasoning + chat on a capable model | ⛔ | no `OPENROUTER_API_KEY` |
+| 38 | MoonPay card deposit | ⛔ | no MoonPay keys; honest message shown |
+| 39 | Withdrawal records correct (xStock sends, destination) | ✅ | `tokenMovement` reads any mint + recipient from the tx; unknown recipient refused; tests |
+| 40 | Send: real fee, balance refresh | ❌ | fee hardcoded; balance stale after send |
+| 41 | xStocks disclosure + Terms/Risk | ❌ | none |
+| 42 | Portfolio history snapshots on Solana | ❌ | `snapshots.ts` EVM |
+| 43 | Cap/expiry risk alerts on Solana | ❌ | `alerts/evaluate.ts` EVM `readPolicy` |
+| 44 | History screen on Solana (port or hide) | ❌ | reads Base logs |
+| 45 | Chat proposals on Solana (port or hide) | ❌ | `propose.ts` WETH/EVM |
+| 46 | Allowlist copy base58 on Solana | ❌ | placeholder "0x…" |
+| 47 | Solana env example + Solana web build | ❌ | `.env.example`, `build-web.mjs` EVM |
+| 48 | iOS simulator run of the Solana build | ❌ | never run |
+| 49 | Safety/Settings sub-screens Solana-correct (Flatten, Policy, Recovery) | ❌ | EVM |
+| 50 | Networks/fee chips Solana-correct | ❌ | `/networks` lists Base |
 
-### 3.2 Server env vars
-
-**Keep (chain-agnostic):** `DATABASE_URL`, `PORT`, `SCHEDULER`, `SCHEDULER_TICK_MS`, `EXECUTOR_TOKEN`,
-`OPERATOR_TOKEN`, `ALLOWED_ORIGINS`, `OPENROUTER_API_KEY`, `XORR_MODEL`, `ONEINCH_API_KEY` (unused after
-jeeter cut), `SUBGRAPH_URL` (replaced, see 3.3), `ANCHOR_EVERY_MS`.
-
-**Add (Solana):**
-
-| Var | Meaning |
-|---|---|
-| `XORR_CHAIN` | master switch (3.1) |
-| `SOLANA_RPC_URL` | override RPC (devnet/fork/mainnet) |
-| `SOLANA_MAINNET_RPC` | JSON-RPC for mainnet-native reads (staking inflation, etc.) |
-| `FORK_RPC` | local `solana-test-validator` URL for `solana-fork` |
-| `ALLOW_MAINNET` | `yes` only to run against real mainnet-beta |
-| `XORR_KEY_DIR` | dir holding delegate/payer/dev-owner keypair files |
-| `XORR_KEY_DELEGATE`, `XORR_KEY_PAYER`, `XORR_KEY_DEV_OWNER` | base58 secret per key (or file fallback) |
-| `XORR_DEVNET_STATE` | path to devnet-state.json (token accounts) |
-| `SOLANA_USDC_MINT`, `SOLANA_USDT_MINT`, `SOLANA_WSOL_MINT` | mint overrides (defaults in 8.4) |
-| `HELIUS_API_KEY` | optional mainnet webhook/price indexer |
-
-**Remove (EVM-only):** `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_AUTHORIZATION_KEY`,
-`PRIVY_KEY_QUORUM_ID`, `BASE_RPC`, `BASE_SEPOLIA_RPC`, `LOCAL_RPC`, `DELEGATION_ADDRESS`, `AQUA_BOOK_ADDRESS`,
-`SWAPVM_BOOK_ADDRESS`, `ANCHOR_ADDRESS`, `SUBGRAPH_DELEGATION_ADDRESS`, `FAUCET_PRIVATE_KEY`,
-`MONGODB_URI`/`MONGO_*` (keep if mirror desired), `DELEGATE_PRIVATE_KEY` (replaced by `XORR_KEY_*`).
-
-### 3.3 App env vars
-
-**Add:** `EXPO_PUBLIC_XORR_CHAIN` (must equal server), `EXPO_PUBLIC_API_URL`, plus `EXPO_PUBLIC_SOLANA_RPC`
-for the wallet adapter.
-
----
-
-## 4. App-side chain config (swap EVM → Solana)
-
-| File (reference) | Replace with | Task |
+### P2 / post-MVP
+| # | Item | Status |
 |---|---|---|
-| `src/chain.ts` (`MONEY`, `CHAINS`, `ChainKey`) | `src/chain.ts` → `MONEY`/`CLUSTERS` for the 4 clusters; export `ClusterKey` | Rewrite |
-| `src/networks/deployments.ts` (Deployment[]: key/name/chainId/api/explorer/test) | same shape but `cluster` field instead of `chainId`; api = xorr-solana executor URLs; explorer = `explorer.solana.com?cluster=` | Rewrite |
-| `app/network.tsx` (network picker) | list the 4 clusters, badge money class, warn on mainnet | Rewrite |
-| `app/networks.tsx` | per-cluster RPC/explorer/faucet status screen | Rewrite |
-| `src/wallet/` * | Solana signing model (Section 5) | Rewrite |
-| `app/basename.tsx` | optional: `.sol` names via SNS/Bonfida instead of Basenames | Optional |
-| `app/recovery.tsx` | devnet owner-key copy (from reference `server/src/solana/keys.ts`) | Edit copy |
-
-**Done =** switching `EXPO_PUBLIC_XORR_CHAIN` in the app and `XORR_CHAIN` on the server changes endpoints,
-explorer links, wallet cluster, and money-class behavior — and a mismatch is surfaced as a hard error.
-
----
-
-## 5. Wallet & signing (app-side)
-
-### 5.1 Signer choice — pick ONE for MVP, then production path
-
-1. **MVP (recommended): local keypair in `expo-secure-store`.** Key generation via `@solana/web3.js`
-   `Keypair.generate()` + bs58; export `react-native-get-random-values` already installed. Good enough for
-   devnet/e2e; NOT a mainnet wallet.
-2. **Mobile Wallet Adapter (production):** `@solana-mobile/mobile-wallet-adapter-protocol-web3js` +
-   `@solana-mobile/wallet-adapter-mobile` to let Phantom/Solfare sign on-device. `WrongChainError` becomes a
-   "switch to <cluster>" prompt; the RPC is the wallet's.
-3. **Privy Solana (if enabled in the Privy dashboard):** keep Privy auth + embedded Solana wallet — smallest
-   rework of `src/auth/`. Verify Solana support before relying on it.
-
-**Decision to record here when chosen** (owner gate): whatever we pick, the executor must see a
-**public key + signature**, never a private key.
-
-### 5.2 Module-by-module port
-
-| Reference `src/wallet/` | Solana version |
-|---|---|
-| `userSigning.ts` (Privy `eth_signTransaction` + app broadcast hack, `WrongChainError`) | `userSigning.ts`: build `Transaction`/`VersionedTransaction`, sign via adapter, verify signatures, broadcast via connection; cluster-match guard |
-| `grant.ts` (ERC-20 approve → delegation grant flow) | `grant.ts`: build `createApproveInstruction({ owner→delegate, delegated_amount })`, user signs, broadcast, POST to `/api/delegation/grant` |
-| `withdraw.ts` (withdraw flow) | `withdraw.ts`: `createTransferInstruction` user-signed to allowlisted address; cooling-off UI unchanged |
-| `approve.ts` (ERC-20 approve UX) | folded into grant/withdraw UI (the delegation IS the approve); keep screen + texts |
-| `signing.ts` | bs58/`Keypair` helpers, `signMessage`, tx serialization (legacy + v0) |
-
-## 6. Executor signing model on Solana (the critical design section)
-
-> Read before writing `server/src/solana/delegation.ts`.
-
-### 6.1 The constraint
-
-SPL `approve` gives `delegate` the right to sign `Transfer` up to `delegated_amount`. Jupiter-style
-aggregator swaps sign from the wallet's **authority**, not a delegate. So a filled multi-hop swap cannot be
-signed by the delegate key alone. The reference solved this with a contract + `transferFrom`; Solana forces
-a choice.
-
-### 6.2 Options (in build order)
-
-- **A — Delegate transfer into venue vault (MVP, matches the former xorr-dev prototype).**
-  `spendAsDelegate()` transfers capped USDC user-ATA → **venue ATA** (maker/vault account the executor also
-  controls with the payer key). The venue order is then placed from the vault by the executor key.
-  Non-custody preserved because the vault is itself under a bounded, allowlisted, revocable policy, and the
-  user's account only ever moves capped amounts. This is the default for Phase 1–4. **Never hold user funds
-  in a Genesis-less vault; the vault is a venue account, and the SPL cap is the guard.**
-- **B — User-signed per-trade fills (interactive).** For high-value trades, the app builds the full route
-  instruction (Jupiter v6 `/swap`), the user signs it (5.1), the app relays and broadcasts. Executor only
-  proposes (LLM `propose.ts` path), never signs. Used for manual / large orders while A is the bot default.
-- **C — Xorr escrow/route program (later, production).** An Anchor program holding user USDC with
-  on-chain policy (time, budget, venue), `XorrRoute` performing Jupiter CPI transfers as "itself", giving
-  the closest analogue to `XorrDelegation` + `1inch` fills. Requires a funded `xorr-escrow` program deploy
-  per cluster (Section 10).
-
-Record the chosen mix in `docs/ARCHITECTURE.md` under "spending paths".
-
-### 6.3 Spend chokepoint (`server/src/executor/place.ts`)
-
-`guardAndSpend()` keeps its 5-step chain, Solana-flavored:
-
-1. delegation row exists and not revoked/expired (DB)
-2. rules engine passes (kill switch, daily cap, spread, venue/withdrawal allowlist) (`rules/engine.ts`)
-3. on-chain check: `readDelegation(ownerAta)` → `delegate === delegateKeypair().publicKey` AND
-   `delegatedAmount >= wanted` (SPL is authoritative)
-4. real mark from `market/` (price guards, spread check)
-5. `spendAsDelegate()` (SPL `Transfer`, signer = delegate) → venue ATA; record signature + units in the same
-   DB tx.
-
-`SpendReceipt` gains `{ signature, slot }` (base58 + slot from `confirmTransaction`).
-
----
-
-## 7. DB schema
-
-### 7.1 Kept as-is (already chain-agnostic)
-`strategies`, `strategy_runs` (UNIQUE `period_key`), `proposals`, `daily_spend`, `messages`, `devices`,
-`exit_rules`, `price_alerts`, `position_closes` (UNIQUE `claim_key`), plus the 27 reference migrations
-(alert-firing, realised-pnl, idempotency, fill-quality, withdrawal allowlist, custom agents, treasuries…).
-
-### 7.2 Change
-
-- `wallets.cluster TEXT` — values become `solana-localnet | solana-devnet | solana-fork | solana-mainnet`
-  (reference already has the column; keep `chain-scope.ts` setting `xorr.chain_key`).
-- `delegations`: `owner_pubkey`, `delegate_pubkey`, `grant_signature`, `revoke_signature` — already base58;
-  add `grant_slot`, `revoke_slot`, `delegated_units` (or keep USD). Keep `venue_allowlist`,
-  `withdrawal_allowlist`.
-- `strategy_runs.signature`, `position_closes.signature`, `audit_log.signature` — now `v0`-capable base58
-  tx sigs + add `slot` columns.
-- New migration `028-solana.sql`: add `slot` columns, a `token_mint` on `wallets`, and a
-  `cluster` constraint against 3.1 + index on `(cluster, owner_pubkey)`.
-
-**Done =** `current_setting('xorr.chain_key')` gates every multi-tenant query (mirror `chain-scope.ts`).
-
----
-
-## 8. Module-by-module server mapping (the core of the work)
-
-### 8.1 `server/src/solana/` — the new seam (replaces `server/src/evm/`)
-
-| Reference `evm/` file | Solana replacement | Key contents |
-|---|---|---|
-| `chains.ts` (`RPCS`, `CHAINS`, `ADDRESSES`) | `solana/clusters.ts` | 3.1 table, `rpcUrl()`, `cluster`, `CLUSTER_KEY`, default mint addresses |
-| `money.ts` (`FACTS`: real/test/copy) | `solana/money.ts` | `FACTS` per cluster: settlement token = USDC mint, decimals (USDC 6, SOL 9), faucet behavior, mainnet guard |
-| `client.ts` (viem public/wallet client) | `solana/connection.ts` | `connection` (`Connection`, `confirmed`), `explorerTx(sig)`, mainnet guard at boot |
-| `keys.ts` (delegate key persistence) | `solana/keys.ts` | `Keypair` load/generate: `delegateKeypair`, `payerKeypair`, `devOwnerKeypair`; `XORR_KEY_*` + `XORR_KEY_DIR` |
-| `delegation.ts` (XorrDelegation ABI adapter) | `solana/delegation.ts` | `approveDelegate` (createApproveInstruction), `revokeDelegate` (createRevokeInstruction), `spendAsDelegate` (Transfer, delegate signer), `readDelegation` (getAccount → delegate/delegatedAmount/amount), `usdToBaseUnits`/`baseUnitsToUsd`, `returnToOwner` (venue→owner, payer signer), `DelegationState` |
-| `balances.ts` (erc20 reads) | `solana/balances.ts` | `getTokenAccountBalance` (ATA), `getBalance` (SOL); `ataFor(owner, mint)` helper |
-| `faucet.ts` (impersonate/Circle/refuse) | `solana/faucet.ts` + `solana/setup.ts` | localnet/devnet: `requestAirdrop` SOL + mint USDC (setup mints or devnet faucet); fork: pre-funded accounts; mainnet: refuse (money `real`) |
-| `gas.ts`, `gasDrip.ts`, `gas-price.ts` | `solana/gas.ts` | rent-exemption funding for ATAs/vault, priority fee from `getRecentPrioritizationFees`, `computeUnitPrice`, payer-signing funding tx |
-| `allowances.ts` | `solana/delegation.ts#readDelegation` | approved amount = `delegatedAmount` |
-| `measure-route.ts` | `venues/jupiter.ts` quote | quote path + price impact + slippage bound |
-| `logs.ts` | `solana/scan.ts` | `getSignaturesForAddress` + `getParsedTokenAccountsByOwner` polling; parse Trans/Memo logs |
-| `wait-for-tx.ts` | `confirmTransaction(commitment='confirmed')` + `getTransaction(…, { maxSupportedTransactionVersion: 0 })` | confirmed-slot + log harvest |
-| `basename.ts` | `solana/sns.ts` (optional) | `.sol` resolution via Bonfida |
-| `throttle.ts`, http/`breaker.ts` | keep | chain-agnostic |
-
-### 8.2 Executor (`server/src/executor/`)
-
-| File | Change |
-|---|---|
-| `place.ts` | 6.3 — `guardAndSpend` on SPL delegation |
-| `run.ts` | swap `explorerTx` import to `solana/connection`; `humanFailure()` → Solana error map (8.3); step 3 "execute on chain" = readDelegation → spendAsDelegate |
-| `exit.ts` | settlement = `returnToOwner()`; orphan-close = payer-sign transfer; audit payloads carry `explorerTx(sig)` |
-| `order.ts`, `entry.ts` | SPL spend via guardAndSpend; explorer links |
-| `scheduler.ts` | unchanged |
-| `schedule.ts`, `reconcile.ts`, `settle.ts`, `fill-quality.ts`, `fill-measure.ts`, `subcap-prove.ts`, `failure.ts` | keep, adapt tx refs → signature+slot |
-| `kinds/` (event-driven, momentum, planners) | chain-agnostic; keep |
-
-### 8.3 `humanFailure()` — Solana error map (in `run.ts`)
-
-Map to the same user-facing buckets, parsing for:
-- `Transaction simulation failed: Attempt to debit an account but found no record of a prior credit`
-- `insufficient funds`, `insufficient lamports`, `account is not rent exempt`
-- `blockhash not found`, `transaction too large`, `unknown signer`, `signature verification failure`
-- SPL Token custom-program errors (partial; codes are stable per token program version):
-  `custom program error: 0x0` (NotInitialized), `0x1` (AlreadyInUse), `0x4` (AuthorityTypeNotSupported),
-  `0x6` (InvalidDelegate…), and the classic `0x1771`/mint-authority collisions captured by unit tests
-- priority-fee / `Transaction simulation failed: Error processing instruction` → "network congestion — retry"
-
-Keep a table-driven `solana/errors.ts` (pure, unit-tested) mirroring reference `run.ts` tests.
-
-### 8.4 Venues (`server/src/venues/`)
-
-| Reference | Solana target | Notes |
-|---|---|---|
-| `oneinch.ts` | **Jupiter** `venues/jupiter.ts` | `quote-api.jup.ag/v6/quote` + `/v6/swap` (also `lite-api.jup.ag/swap/v1` legacy). TOKENS map → mint map: USDC `EPjFWdd5…`, USDT `Es9vMFre…`, wSOL `So111111…`, SOL symbol; slippage cap `DEFAULT_SLIPPAGE_BPS=30` |
-| `aqua.ts` (on-chain book) | **Phoenix** or **OpenBook v2** `venues/phoenix.ts` (or Jupiter Limit Order) | server places from venue vault (6.2-A); `delegatedFillArgs` equivalent = signed `PlaceOrder` via payer key |
-| `swapvm.ts` (second maker) | OpenBook v2 / Meteora `venues/makers.ts` | same pattern |
-| `aave.ts` (yield tier) | **Marinade** (SOL staking) `venues/marinade.ts` + **Kamino/Marginfi** `venues/kamino.ts` | yield rotation target; SOL inflation from `getInflationRate` (reference `staking.ts`) |
-| `fusion-plus.ts` | Solana native staking/restaking venues (Jito) | keep concept |
-| `limit-orders.ts` | Jupiter Limit Order / OpenBook | keep shape |
-| `stocks.ts`, `edgar.ts`, `hyperliquid.ts`, `perp.ts`, `yield.ts`, `history.ts`, `compare.ts`, `balance.ts`, `slippage.ts`, `symbols.ts` | **mostly unchanged** (chain-agnostic market data); `balance.ts` → token account read; `synbench`/`symbols.ts` extend mint map + CoinGecko (SOL already present) | — |
-| `staking.ts` (reference proto) | fold into `marinade.ts` + inflation read | — |
-
-### 8.5 Routes
-
-| Reference `routes/` group | Solana version |
-|---|---|
-| wallet | → `/api/wallet/balance` (token account balance + SOL), `/api/wallet/addresses` |
-| grant | → `/api/delegation/approve` (build approve tx for user signing), `/api/delegation/grant` (record), `/api/delegation/revoke` (kill switch), `/api/delegation` (reconcile DB row vs SPL via readDelegation → `onChainRemainingUsd`) |
-| portfolio / history / activity | unchanged shape; read DB + Solana signatures |
-| trade | unchanged (goes through executor chokepoint) |
-| strategy | unchanged |
-| faucet | → airdrop (devnet) / local mint (localnet/fork) / refused (mainnet) |
-| agent-keys | unchanged (scopes carry Solana base58 pubkeys) |
-| privy | removed (wallet signing moved app-side; see 5.1) — delete group |
-| status | unchanged + add `cluster`, `rpcUrl` |
-| verify | audit chain + Solana memo anchors |
-| market | unchanged (prices from CoinGecko; symbols SOL-aware) |
-| anchor | → memo-anchor (Section 12) |
-| migrate / params / revoke / extra / tokens / business / crosschain / limit-orders / withdrawal / panic / ops / mirror | keep; params exposes mints + decimals |
-
-### 8.6 Bot / LLM / news / backtest
-No chain code. `propose.ts` default symbol `SOL` already correct; `news/feed.ts` SOL mapping already present.
-Keep unchanged.
-
----
-
-## 9. Indexing (replaces `subgraph/` + `subgraph-aqua/`)
-
-| Reference | Solana replacement |
-|---|---|
-| `subgraph/` (delegations, spends, daily rollups) | **Postgres-fed poller**: `graph/poller.ts` polls Token `Transfer`/`Approve` signatures for each user ATA (`getSignaturesForAddress` + `getTransaction` every `POLL_TICK_MS`), converts log diffs into delegation/spend rows; daily rollups via existing SQL |
-| `subgraph-aqua/` (venue book index) | poll Phoenix/OpenBook program events the same way (or listen via their gRPC/websocket feeds) |
-| `graph/decide.ts` (pre-flight routing decision) | now reads `graph/poller` state + Jupiter quote; keep the decision logic and tests |
-
-**Mainnet later:** Helius DAS API + webhooks (`HELIUS_API_KEY`) or a Geyser gRPC stream; the write-side schema
-must not change (indexer-output-agnostic). Keep `graph/` tests green with a stubbed poller.
-
----
-
-## 10. Contracts → Solana programs
-
-| Reference `contracts/` | Solana outcome |
-|---|---|
-| `XorrDelegation` | **No custom program for MVP** — SPL `approve`/`revoke` + server rules (6.2-A). Later: `xorr-escrow` Anchor program (6.2-C) to hold policy (time/budget/venue) on-chain |
-| `XorrAquaBook` | Phoenix/OpenBook venue program (8.4) — no custom contract |
-| `XorrSwapVMBook` | second maker program (OpenBook v2 / Meteora) |
-| `XorrAuditAnchor` | **SPL Memo anchor** (Section 12) — no custom contract |
-| `contracts/deployments/*.json` | `deployments/` per cluster holding program pubkeys + mints (keypairs under `.keys/`, never committed) |
-| Foundry toolchain | **Anchor** (programs/) if/when `xorr-escrow` ships: `anchor build`, `anchor deploy`, tests via `solana-test-validator` |
-
-**Deployment gate:** any program deploy requires owner approval and a mainnet `ALLOW_MAINNET` + verify step
-(`solana program` addresses in docs).
-
----
-
-## 11. Fork / local infra (replaces `infra/base-fork`)
-
-`infra/solana-fork/`:
-- `Dockerfile` + entrypoint booting `solana-test-validator` with:
-  `--clone EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (USDC), `--clone <jupiter>`, `--clone <phoenix>`,
-  `--reset`, `--rpc-port 8899`, plus a **pre-funded dev owner** with real USDC (airdrop SOL + mint on fork).
-- Scripts (`scripts/`): `fork-bootstrap.ts` (start + fund), `fork-grant.ts`, `fork-e2e.ts`,
-  `fork-yield.ts`, `fork/ship-makers.ts`, `fork/orphans.ts`, `fork/guard.ts` — port each reference fork
-  script, replacing anvil/RPC impersonation with validator `--clone` + airdrop.
-- `.env.fork` → `XORR_CHAIN=solana-fork`, `FORK_RPC=http://127.0.0.1:8899`.
-
-**Done =** a full demo runs locally against cloned real USDC with real signatures and real venue fills.
-
----
-
-## 12. Audit & verify (replaces the EVM anchor)
-
-- `audit/once.ts`, `anchor-limit.ts`, `anchor-sweep.ts` — keep (ALREADY generic).
-- `audit/anchor.ts` → `solana/anchor.ts`: read `audit_log` chain-head hash → build a one-instruction tx using
-  the **SPL Memo program** (`MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`) containing the hash; broadcast with
-  the payer key; record sig + slot. Verify reads it back via `getTransaction`.
-- `verify/checks.ts` → verify the Postgres hash chain AND that each head memo exists on-chain for the anchor
-  cadence (`ANCHOR_EVERY_MS`).
-- Routes: keep `/api/verify` and the `app/audit/*` screens (explorer links now point at `explorer.solana.com`).
-
----
-
-## 13. Dependencies
-
-### 13.1 `server/package.json`
-
-**Add:** `@solana/web3.js` (^1.x), `@solana/spl-token` (^0.4), `bs58` (^6). **Remove:** `viem`,
-any foundry-only dep not used by the server, `@graphprotocol/*` only if the poller replaces it.
-**Scripts:** `setup:devnet` = `tsx src/solana/setup.ts`; `test:chain` = `CHAIN=1 vitest run src/**/*.chain.test.ts`.
-
-### 13.2 root `package.json`
-
-**Add:** `@solana/web3.js`, `@solana/spl-token`, `bs58`, `react-native-get-random-values` (already present),
-`@ethersproject/shims` (remove — EVM only), `viem` (remove), `react-native-passkeys`/Privy packages only if
-5.1 keeps Privy; **or** `@solana-mobile/mobile-wallet-adapter-protocol-web3js` + `@solana-mobile/wallet-adapter-mobile`
-if 5.1 uses MWA. **Polyfills:** ensure `Buffer`/`global.Buffer` exists in the RN entry (standard Solana RN
-setup; `react-native-quick-crypto` optional).
-
----
-
-## 14. Tests (mirror the reference's 271-check bar)
-
-| Suite | Content | Command |
-|---|---|---|
-| App unit | `src/**/*.test.ts` (store, derived, format, strategies, wallet allowlist, bot voice/facts) | `npm test` |
-| Server unit | rules engine, schedule/idempotency, delegation math (usd↔units), `humanFailure` map, audit log/once, venues compare/slippage, kind tests | `cd server && npm test` |
-| **Chain** | `solana/delegation.chain.test.ts`, `executor/executor.chain.test.ts` — against a real `solana-test-validator`: real signatures, SPL-enforced cap, revoke semantics, kill switch, orphan close | `cd server && npm run test:chain` |
-| Live | Jupiter quote, perps, staking inflation, airdrop | `npm run test:live` |
-| E2E | 5 Maestro flows (onboarding, DCA, proposal, kill-switch, expiry) — assert outcomes | `maestro test e2e` |
-| CI | `.github/workflows/ci.yml`: app job + server job (Postgres 16 service) + Solana job using `anza-xyz/setup-solana@v1` running `test:chain` | push |
-
-**Non-negotiable on-chain proofs (port from reference):**
-1. a transfer beyond `delegatedAmount` is rejected by the token program on-chain;
-2. `revoke` stops new orders while resting exits/TPs stay live;
-3. retrying a run with the same `period_key` collapses to one fill;
-4. a close returns the user's own asset (daily cap does not block closes);
-5. orphan detection settles a venue split.
-
----
-
-## 15. Security (delta from `docs/SECURITY.md`)
-
-- Keys: delegate/payer keypairs live only in `XORR_KEY_DIR` on the server; NEVER committed or logged.
-  Production: KMS-backed signer (e.g., AWS KMS/Solana signing or a Deco/signing service) — owner gate.
-- Non-custody blast radius: SPL cap is the authority; withdrawal allowlist + 24 h cooling-off; kill switch
-  on-chain revoke (three behaviors tested, 6/14).
-- Cluster guardrails: unknown `XORR_CHAIN` refuses boot; mainnet requires `ALLOW_MAINNET=yes`; faucet refuses
-  on `real` money; app/server cluster mismatch is a hard error.
-- Idempotency: `period_key`/`claim_key` UNIQUE; retries and concurrent runs collapse to one fill.
-- Audit: append-only hash-chained `audit_log` + memo anchor (Section 12).
-- Phishing: verify signed bytes client-side before broadcast where applicable; never broadcast on a cluster
-  the wallet isn't on (wrong-cluster prompt).
-- Certificate pinning, Sentry, quota/metrics dashboards: carry over as owner-approved hardening tasks.
-
----
-
-## 16. Rollout order & task list
-
-Status tags: **DONE** · **IN PROGRESS** · **NOT STARTED** · **BLOCKED — reason**.
-
-### Phase 0 — Foundations
-- [ ] 3.1–3.3 env layering; `server/src/solana/clusters.ts` + `money.ts`; app `src/chain.ts` + `networks/*`; unknown-chain refuses boot.
-- [ ] 13 deps: server (web3.js, spl-token, bs58), app (adapter choice + polyfills); prune viem/Privy.
-- [ ] `network.tsx` cluster picker + mismatch error.
-- [ ] CI skeleton: setup-solana action + validator job.
-
-### Phase 1 — `server/src/solana/` module
-- [ ] `connection.ts`, `keys.ts`, `setup.ts`, `delegation.ts`, `balances.ts`, `faucet.ts`, `gas.ts`, `errors.ts`.
-- [ ] `delegation.chain.test.ts` on `solana-test-validator`: approve/grant/revoke/kill-switch/cap.
-- [ ] `npm run setup:devnet` mint + fund flow.
-
-### Phase 2 — Routes
-- [ ] wallet balance/addresses, delegation approve/grant/revoke/read, faucet, status, params, migrate, verify, anchor (memo).
-- [ ] Remove privy route group + `src/auth/privy*`.
-
-### Phase 3 — Executor
-- [ ] `place.ts` guardAndSpend on SPL; `run.ts` + `humanFailure` map; `order.ts`/`entry.ts`; `values.ts` (atomic record+spend).
-- [ ] `exit.ts` settlement + orphan closes; `positions/`, `reconcile.ts`, `settle.ts`, `fill-quality.ts`.
-- [ ] `executor.chain.test.ts` (5 proofs in §14).
-
-### Phase 4 — Venues
-- [ ] `jupiter.ts` (quote/swap), `phoenix.ts`/OpenBook, `marinade.ts` + `kamino.ts`, fold `staking.ts` inflation; `compare.ts`, `limit-orders.ts`, `slippage.ts`.
-- [ ] Venue live tests (Jupiter + perps + staking inflation).
-
-### Phase 5 — App wallet & screens
-- [ ] `src/wallet/*` (sign model from §5), onboarding fund (faucet/SOL+USDC), delegation screen, approvals, send/withdraw, audit screens → solana explorer, basename → SNS.
-- [ ] Manual e2e on devnet: sign → grant → run DCA → kill switch.
-
-### Phase 6 — Indexing & audit
-- [ ] `graph/poller.ts` (subgraph replacement) + decide() rewire + tests.
-- [ ] `solana/anchor.ts` memo anchor + `verify/checks.ts`.
-
-### Phase 7 — Fork & E2E
-- [ ] `infra/solana-fork/` (test-validator `--clone`), fork scripts port, `.env.fork`.
-- [ ] 5 Maestro flows pass on fork; fork demo script runs end-to-end.
-
-### Phase 8 — Mainnet hardening (owner-gated)
-- [ ] KMS signer, mainnet `ALLOW_MAINNET` rehearsal on a cloned-mainnet fork, Sentry, certificate pinning, quotas.
-- [ ] Helius webhook indexer (replace poller), docs (ARCHITECTURE/SECURITY/RUNBOOK/STORE), store listing.
-
----
-
-## 17. Done definition (acceptance)
-
-1. `XORR_CHAIN` switch works end-to-end and mismatch is a hard error.
-2. All §14 suites green; the five on-chain proofs pass on a real validator; 271-check parity restored.
-3. Localnet + devnet demo: onboarding → fund → grant (SPL approve signed by user wallet) → DCA fill on the
-   book → position armed with exit rule → one-tap kill switch (on-chain revoke) with the three behaviors.
-4. Settlement is USDC on Solana; audit head anchored via Memo and verifiable.
-5. No EVM imports remain (`rg -n "viem|ethers|privy-io|eth_"` across `server/src`, `src`, `app` clean).
-6. No secrets in git; `git status` clean except `.claude/`; `.keys`/`.env*` ignored.
-
----
-
-## 18. Reading this plan
-
-Read in this order: §0 (rules + env) → §1 (why it's not find/replace) → §6 (signing model, the crux) →
-§8 (module map) → §3/§7 (env + DB) → §5/§9/§10/§12 (wallet, indexer, programs, audit) → §16 (tasks).
-Supporting docs in `docs/` (ARCHITECTURE, SECURITY, RUNBOOK, ADDING-A-CHAIN.md) are the EVM-flavored
-baseline; each must be rewritten for Solana as part of Phase 8.
+| 51 | Clawpump agent token (D2) | ⛔ owner mainnet launch + Clawpump key |
+| 52 | Push notifications (EAS) | post-MVP |
+| 53 | Audit anchoring on Solana | post-MVP (hidden) |
+| 54 | Perps, yield, limit orders, cross-chain on Solana | post-MVP (hidden) |
+
+## 7. Architecture and end-to-end flows
+
+- **App** — Expo Router (web + native), Privy (`@privy-io/react-auth/solana` on web, `@privy-io/expo` native).
+  `src/chain.ts` `isSolana` gates the build. The user signs grant, revoke, withdrawals and sells with the Privy
+  Solana wallet (`src/wallet/solanaSigner.*`); the app broadcasts to the cluster RPC.
+- **Executor** — Hono on Node (`server/`), Postgres, scheduler every 30 s. `XORR_CHAIN=solana-fork`. The only spend
+  path is `server/src/executor/place.ts` `guardAndSpend`: symbol on cluster → delegation on chain → allowance →
+  grant record (cap, expiry) → rules engine (fails closed) → pacing → issuer eligibility → quote → mark broadcast →
+  delegate transfer → Jupiter swap (vault fallback, labelled) → refund on failure → count spend.
+- **Chain** — `solana-test-validator --clone` of mainnet USDC, xStocks, Jupiter v6, Orca Whirlpool and the route
+  pools (`server/src/solana/fork-bootstrap.ts`). The fork's payer is the USDC mint authority (test money only).
+- **Flows** (entry → auth → action → backend → chain/DB → UI → failure):
+  1. Grant: delegate screen → Privy signs ApproveChecked (USDC + xStock accounts) → `/delegation/record` verifies
+     the tx on chain → `delegations` row → Safety LIVE. Failure: signature rejected → "not granted", chain unchanged.
+  2. Buy: ticket → `/xstocks/buy` (idempotency key) → `guardAndSpend` → receipt with signature/slot/venue → holdings.
+  3. Sell (user): ticket Sell → `/xstocks/sell/prepare` builds a tx (user signs the xStock leg; vault/route the
+     USDC leg) → Privy signs → app broadcasts → `/xstocks/sell/record` verifies and books the disposal.
+  4. Agent: scheduler sweep → hired personas only → pacing → setup → `guardAndSpend` → exits armed as Solana
+     exit-rules → scheduler checks marks → delegate sells the user's xStock (approved at grant) → notification.
+  5. Stop: Safety → Privy signs Revoke (USDC + every xStock account) → `/delegation/revoke` verifies → STOPPED.
+  6. Withdraw: allowlist (24 h cooling-off, server clock) → Send → Privy signs SPL transfer → `/withdrawals/record`.
+
+## 8. Current codebase state (2026-09-19)
+
+- 119 app routes; ~30 Solana-correct (see the screen audit in §9). Server Solana branches: wallet, balance, tokens,
+  delegation (read/params/record/revoke), limits, faucet, withdrawals, market tradable/watchable/stocks/xstocks,
+  `/xstocks/buy`, health/metrics, and the autonomous agent. Everything else is Base code.
+- Tests: app 2,603 + server 1,346 passing; 4 on-chain fork proofs passing; CI checks run on push/PR, the Solana fork
+  suite only on manual dispatch.
+- Env: `.env.fork` is Solana (local RPC). No MoonPay, OpenRouter, EAS, Helius or `XORR_KEY_*` values anywhere.
+
+## 9. Gap audit
+
+INITIAL COMPLETION: **30 %** (15 of 50 P0+P1 items verified; P0 15/30 = 50 %).
+
+| Gap | Evidence | Impact | Severity | Fix (phase) |
+|---|---|---|---|---|
+| Computable delegate/payer/vault keys | `server/src/solana/keys.ts:44-49` | Anyone could spend every user's delegated USDC on a hosted executor | BLOCKER | Refuse seed keys unless cluster is localnet/fork and not public; require `XORR_KEY_*` (P1) |
+| Sell swaps the vault's shares | `executor/place.ts` sell branch | Pays USDC while the user keeps shares | BLOCKER | Rebuild sell as user-signed / delegate-signed spend of the user's xStock (P3) |
+| No sell in the app | `app/xstock/[symbol].tsx` | Core loop incomplete | BLOCKER | Sell tab on the ticket (P3) |
+| Exits never fire | `bot/autonomous.ts` → `order.ts` → EVM `runStrategy` | Agent's stop-loss is a promise | BLOCKER | Solana exit runner + xStock approvals in grant (P3) |
+| Swap tab is Base | `app/swap.tsx`, `routes/extra.ts:602` | Main nav button broken | HIGH | Trade tab → xStock buy/sell (P2) |
+| Home Stocks tab → oracle 404 | `app/(tabs)/index.tsx`, `oracle/[symbol]` | 2-tap broken screen | HIGH | Route to `/xstock` on Solana (P2) |
+| Base screens reachable | `app/explore.tsx`, Futures tab, Approvals, Yield, Flatten… | Judges hit broken screens | HIGH | Chain-aware route guard + nav filtering (P2) |
+| Agent over-trades | audit log 2026-09-19 | Looks like a bug | HIGH | Pacing rules (P3) |
+| Resume uses EVM approvals | `app/safety.tsx:284,316` | Can't resume after stop | HIGH | Solana resume = re-grant (P3) |
+| DCA / strategies EVM | `executor/run.ts`, `routes/strategies.ts:118-146` | Recurring buy broken | HIGH | Solana strategy runner through `guardAndSpend` (P4) |
+| Custom-agent templates WETH | `src/strategies/agentStrategies.ts` | Custom agents fail | HIGH | xStock templates (P4) |
+| Close position / withdraw everything EVM | `routes/panic.ts`, `withdrawEverything.ts` | Broken flows | HIGH | Solana versions (P3/P4) |
+| Target mix fixture; Holdings rows not tradable | `holdings.tsx`, `src/data/tradable.ts` | Fiction on screen | HIGH | Hide mix on Solana; tradable from `/market/tradable` (P2) |
+| Withdrawal record wrong destination | `routes/withdrawals.ts:354-400` | Audit trail can lie | HIGH | Read destination from the tx; measure the token sent (P1) |
+| Fork pool drift; sells not cloned | TESTPLAN F1 | Vault fills in demo | HIGH | Re-clone at boot + schedule; clone sell routes (P5) |
+| Nothing hosted | infra audit | No live demo | BLOCKER | Hosted fork + executor + web (P6, owner approval for paid) |
+| Receive-USDC QR hidden | `deposit.tsx` | Can't fund from another wallet | MEDIUM | Solana Pay / address QR (P7) |
+| Send fee hardcoded; stale balance | `app/send.tsx:125-141` | Wrong number | LOW | Fee from `getFeeForMessage`; refresh after send (P7) |
+| No disclosure / Terms for xStocks | — | Compliance | MEDIUM | P7 |
+| Snapshots, alerts, history EVM | `snapshots.ts`, `alerts/evaluate.ts`, `history.ts` | Empty/erroring screens | MEDIUM | Port snapshots + alerts; hide History (P7) |
+| Chat proposals EVM | `bot/propose.ts` | Broken cards | MEDIUM | Hide on Solana until ported (P2) |
+| Allowlist "0x…" placeholder | `app/allowlist.tsx` | Wrong copy | LOW | P7 |
+| README/landing/videos Base | README, `docs/demo/*` | Confuses judges | HIGH | P8 |
+| LLM key missing | no `OPENROUTER_API_KEY` | Template reasoning only | MEDIUM | ⛔ owner key (P7 when provided) |
+| MoonPay keys missing | none in env | Card deposit hidden | MEDIUM | ⛔ owner keys |
+
+## 10. Implementation phases (status-tagged)
+
+### Phase 1 — Safety and correctness first
+Objective: nothing on a hosted executor can be spent by a stranger; records never lie.
+- [DONE] **1.1 Key guard.** `server/src/solana/keys.ts`: seed fallback only when `activeClusterKey()` is
+  `solana-localnet`/`solana-fork` **and** `XORR_ALLOW_SEED_KEYS=yes` or the RPC is loopback; otherwise throw at boot
+  naming the missing `XORR_KEY_*`. Tests: seed refused for devnet/mainnet and for a non-loopback fork without opt-in.
+- [DONE] **1.2 Withdrawal record.** `routes/withdrawals.ts`: read destination owner and amount from the
+  confirmed tx's token balance deltas for any mint; refuse to record if the destination is not an allowlisted,
+  usable address. Tests for USDC and an xStock.
+- [DONE] **1.3 Boot guard.** Unknown `XORR_CHAIN` already refuses (`evm/chains.ts`); the Solana mainnet guard
+  (`getClusterKey`) existed but was never called — now called at boot; verified: `XORR_CHAIN=solana-mainnet` without
+  `ALLOW_MAINNET=yes` refuses to start.
+Exit: tests green; executor refuses to boot on a public RPC without real keys.
+
+### Phase 2 — The Solana surface (what a judge can reach)
+- [DONE] **2.1 Route guard.** One list of Base-only routes (`src/nav/solanaHidden.ts`); on Solana a guard in
+  `app/_layout.tsx` redirects them to a "Not on Solana" screen; Explore, Settings, Profile, Safety, Portfolio and chat
+  shortcuts filter them out. Covers: perps/futures/funding, yield/rates, limit-orders, crosschain, basename,
+  business, graph/*, approvals, spend, sponsors, verify/judge, history, audit/anchor, route/crosscheck/tokens,
+  order/*, strategy/grid, strategy/yield, flatten, policy, networks, proposals (until ported), earnings (Base tickers).
+- [DONE] **2.2 Trade tab.** On Solana the centre tab opens `/xstocks` → ticket with Buy/Sell.
+- [DONE] **2.3 Home tabs.** Stocks rows → `/xstock/[sym]`; Futures tab hidden on Solana.
+- [DONE] **2.4 Tradable from the executor.** `isTradable` on Solana reads `/market/tradable`; Holdings,
+  Gainers and asset rows for xStocks open `/xstock/[sym]`.
+- [DONE] **2.5 Holdings.** Target mix hidden on Solana; positions from `/wallet/tokens`.
+Exit: a scripted walk of every reachable route on Solana shows no 4xx/5xx and no Base copy.
+
+### Phase 3 — Selling, exits, pacing, resume
+- [DONE] **3.1 Grant covers xStocks (D4).** `buildGrantTx` adds idempotent ATA creation + ApproveChecked for
+  each tradable xStock (Token-2022) to the delegate; `buildRevokeTx` revokes USDC + every xStock ATA that has a
+  delegate. Server verifies USDC as today and records which xStock approvals exist.
+- [DONE] **3.2 Server sell.** `guardAndSpend` sell: delegate moves the **user's** xStock (Token-2022
+  `transferChecked` as delegate) into the vault/route, swap to USDC, USDC to the user; refuse if no xStock approval
+  or balance. Fix the vault-drain bug; fork proof updated.
+- [DONE] **3.3 User sell from the app.** `/xstocks/sell/quote` + `/xstocks/sell/prepare` (server builds a
+  tx: user-signed xStock transfer to the vault + vault-signed USDC to the user at a live Jupiter quote, partially
+  signed by the vault) → Privy signs → broadcast → `/xstocks/sell/record` verifies and books the disposal.
+- [DONE] **3.4 Solana exits.** Exit-rules strategies on Solana run through a Solana branch in the runner:
+  read the live mark, fire stop/target/trailing via 3.2, notify, record.
+- [DONE] **3.5 Pacing (D3)** in `bot/autonomous.ts` + rules; tests.
+- [DONE] **3.6 Resume on Solana** = re-grant from Safety (no `/approvals`).
+- [DONE] **3.7 Close position** on Solana via 3.2; **withdraw everything** on Solana = sell all (3.2) then
+  send USDC.
+Exit: on the fork — user sell moves the user's shares and credits USDC; a forced stop-loss fires unattended;
+revoke drops all approvals; resume works.
+
+### Phase 4 — Strategies and custom agents on Solana
+- [DONE] **4.1** Strategy validation accepts xStocks on Solana (cluster tradable list), refuses Base tokens.
+- [DONE] **4.2** Solana runner branch for `dca` (and `exit-rules` from 3.4) → `guardAndSpend`.
+- [DONE] **4.3** Recurring-buy screen on Solana picks an xStock; custom-agent templates are xStocks.
+Exit: a DCA of $10 NVDAx runs on schedule on the fork and appears in runs, holdings, activity.
+
+### Phase 5 — Fork fidelity
+- [DONE] **5.1** Routes resolved live from Jupiter at boot (both directions, NVDAx/TSLAx/AAPLx/MSFTx/SPYx: 74 accounts,
+  4 programs); proof: `jupiter-route` buy `5DXhMq9p…`; exit sell routed through Jupiter `2DztwgJ8…`.
+- [DONE, limited] **5.2** A running `solana-test-validator` cannot re-clone accounts, so pool state freezes at boot and
+  drifts over hours; the remedy is `npm run setup:solana-fork` (re-resolves routes) before a demo or recording.
+  Drift shows as a labelled `venue-vault` fill, never a mislabelled one.
+Exit: buy and sell on the fork report `jupiter-route`.
+
+### Phase 6 — Hosting (owner approval for paid resources)
+- [NOT STARTED] **6.1** `.env.example` Solana section; Solana-aware `scripts/build-web.mjs` (sets
+  `EXPO_PUBLIC_SOLANA_RPC`, API URL, chain), new Vercel project `xorr-solana`.
+- [NOT STARTED] **6.2** Fork image (`infra/solana-fork`): current Agave installer, the bootstrap's clones and mint
+  overrides, volume, RPC + WS exposed.
+- [BLOCKED on owner approval] **6.3** Railway project: fork validator, executor (`XORR_KEY_*` generated and stored as
+  Railway secrets), Postgres. `ALLOWED_ORIGINS` set.
+- [BLOCKED on owner] **6.4** Privy dashboard: allow the hosted origin; Solana embedded wallets on.
+Exit: a fresh account on the hosted URL completes the core loop.
+
+### Phase 7 — Polish and remaining P1
+- [NOT STARTED] 7.1 Receive-USDC QR; 7.2 Send fee + refresh; 7.3 xStocks disclosure + Terms/Risk; 7.4 portfolio
+  snapshots on Solana; 7.5 cap/expiry alerts on Solana; 7.6 allowlist copy; 7.7 iOS simulator run.
+- [BLOCKED] 7.8 OpenRouter model (key); 7.9 MoonPay (keys).
+
+### Phase 8 — Demo and submission
+- [NOT STARTED] 8.1 README Solana-first (Base material moved to `docs/base/`); 8.2 demo script; 8.3 recording;
+  8.4 submission text; [owner] 8.5 repo public + submit.
+
+### Phase 9 — Clawpump (last, walled off)
+- [NOT STARTED] 9.1 launch script (dry-run by default) + agent card reading mainnet; [owner] 9.2 mainnet launch.
+
+## 11. Testing strategy
+Unit tests beside every changed module (vitest); the on-chain fork proofs (`fork.chain.test.ts`) extended with sell,
+exit, and revoke-all; a scripted browser walk of every Solana-reachable route (status codes + console); the
+TESTPLAN-SOLANA items re-run after each phase.
+
+## 12. Deployment and operations
+Railway: `server/railway.json` (migrate pre-deploy, `/health` check). Secrets as Railway variables only. Web on
+Vercel via `scripts/build-web.mjs`. Health: `/health` (postgres, rpc slot, payer SOL, upstreams).
+
+## 13. Demo strategy
+Must work live: sign in, faucet, grant, buy, agent buy with reason, exit firing, user sell, kill switch, withdraw.
+Safe to show as labelled: vault fills (if routes fail), template reasoning (if no LLM key).
+Must never be faked: signatures, balances, fills, the revoke.
+
+## 14. Critical path and parallel work
+Critical path: P1 → P2 → P3 → P6 → P8. Parallel: P4 and P5 alongside P3; P7 alongside P6.
+
+## 15. Risks
+Fork drift (P5); Privy iframe needs a visible browser for signing tests; hosting cost/RAM for the validator; the
+deadline; Jupiter API rate limits (keyless).
+
+## 16. Execution order
+1.1 → 1.2 → 1.3 → 2.1 → 2.2 → 2.3 → 2.4 → 2.5 → 3.1 → 3.2 → 3.3 → 3.4 → 3.5 → 3.6 → 3.7 → 4.x → 5.x → 6.1 → 6.2 →
+(owner approval) 6.3 → 7.x → 8.x → 9.x.
+
+## 17. Remaining unknowns
+OpenRouter key; MoonPay keys; Railway approval and budget; Privy dashboard changes; Clawpump key and mainnet wallet.

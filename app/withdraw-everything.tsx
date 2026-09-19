@@ -44,11 +44,14 @@ import { shortAddress } from '@/format';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
-import { withdrawals } from '@/data/withdrawals';
+import { withdrawals, type AavePosition, type SellPreview } from '@/data/withdrawals';
 import { useStore } from '@/state/store';
 import { delegationOrUnknown, delegationScope } from '@/accounts/delegationScope';
 import { useAllowlist, usableFromText, usableIn } from '@/wallet/allowlist';
 import { useWithdrawEverything } from '@/wallet/useWithdrawEverything';
+import { useWithdrawEverythingSolana } from '@/wallet/useWithdrawEverythingSolana';
+import { walletTokens } from '@/data/walletTokens';
+import { isSolana } from '@/chain';
 import { sellBlocked, type Step } from '@/wallet/withdrawEverything';
 
 const STATUS: Readonly<Record<Step['status'], { label: string; tone: TagTone }>> = {
@@ -58,13 +61,32 @@ const STATUS: Readonly<Record<Step['status'], { label: string; tone: TagTone }>>
   failed: { label: 'Stopped', tone: 'down' },
 };
 
+/** What would sell on Solana: every xStock the wallet holds, from its own token accounts. */
+async function solanaSellPreview(): Promise<SellPreview> {
+  const { tokens } = await walletTokens();
+  const legs = tokens
+    .filter((t) => t.symbol !== 'USDC' && t.symbol !== 'SOL' && t.units > 0)
+    .map((t) => ({ symbol: t.symbol, units: t.units, usd: t.usd ?? 0 }));
+  return { legs, totalUsd: legs.reduce((sum, l) => sum + l.usd, 0) };
+}
+
 export default function WithdrawEverything() {
   const goBack = useGoBack();
   const router = useRouter();
   const allowlist = useAllowlist();
-  const preview = useAsync(() => withdrawals.sellPreview(), []);
-  const aave = useAsync(() => withdrawals.aavePosition(), []);
-  const { steps, running, finished, run } = useWithdrawEverything();
+  /*
+   * Solana (2026-09-19): what would sell is read from the wallet's own token accounts, there is no savings step, and the
+   * run is `useWithdrawEverythingSolana` — the owner's signed sales, then the owner's signed send. The Base reads
+   * (`/panic/preview`, `/yield/position`) answered 502 here and the run crashed on its first step.
+   */
+  const preview = useAsync(() => (isSolana ? solanaSellPreview() : withdrawals.sellPreview()), []);
+  const aave = useAsync(
+    () => (isSolana ? Promise.resolve<AavePosition>({ suppliedUsd: 0, available: false }) : withdrawals.aavePosition()),
+    [],
+  );
+  const evmRun = useWithdrawEverything();
+  const solanaRun = useWithdrawEverythingSolana();
+  const { steps, running, finished } = isSolana ? solanaRun : evmRun;
   const [chosen, setChosen] = useState<string>();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string>();
@@ -95,7 +117,8 @@ export default function WithdrawEverything() {
       active: useStore((s) => s.wallet?.address),
     }),
   );
-  const blocked = sellBlocked(permission.data !== undefined ? permission.data : (storedPermission ?? undefined));
+  // On Solana the owner signs each sale, so a stopped permission does not block selling.
+  const blocked = isSolana ? undefined : sellBlocked(permission.data !== undefined ? permission.data : (storedPermission ?? undefined));
   const cannotSell = blocked !== undefined && (preview.data ? preview.data.legs.length > 0 : true);
 
   async function press() {
@@ -107,7 +130,8 @@ export default function WithdrawEverything() {
     setConfirming(false);
     setError(undefined);
     try {
-      await run({ address: destination.address, label: destination.label });
+      if (isSolana) await solanaRun.run(destination, allowlist.usable);
+      else await evmRun.run({ address: destination.address, label: destination.label });
     } catch (e) {
       setError(errorText(e));
     } finally {
@@ -222,9 +246,11 @@ export default function WithdrawEverything() {
               </Eyebrow>
               <SheetCard borderRadius={radius.note} padding={space.s16} style={{ marginTop: space.s10, gap: space.s12 }}>
                 <PlanLine n={1} title="Sell every position" detail={sells} figure={sellsFigure} />
-                <PlanLine n={2} title="Take your USDC out of savings" detail={exits} figure={exitsFigure} />
+                {isSolana ? null : (
+                  <PlanLine n={2} title="Take your USDC out of savings" detail={exits} figure={exitsFigure} />
+                )}
                 <PlanLine
-                  n={3}
+                  n={isSolana ? 2 : 3}
                   title="Send your USDC"
                   detail={`All of it, to ${destination ? destination.label : 'the address you choose'}. You sign it.`}
                 />
@@ -234,7 +260,7 @@ export default function WithdrawEverything() {
                 {preview.data?.skipped && preview.data.skipped.length > 0 && preview.data.dustBelowUsd !== undefined
                   ? `${preview.data.skipped.join(', ')} ${preview.data.skipped.length === 1 ? 'stays' : 'stay'}: under ${money(preview.data.dustBelowUsd)}. `
                   : ''}
-                ETH stays, for network fees.
+                {isSolana ? 'SOL stays, for network fees.' : 'ETH stays, for network fees.'}
               </Text>
 
               {confirming && destination ? (
@@ -290,7 +316,7 @@ export default function WithdrawEverything() {
         </>
       )}
       <Text variant="footnote" color={colors.ink55} align="center" style={{ marginTop: space.s12 }}>
-        The bot sells. Only you can send.
+        {isSolana ? "You sign each sale and the send." : "The bot sells. Only you can send."}
       </Text>
     </Screen>
   );

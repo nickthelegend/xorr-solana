@@ -393,6 +393,42 @@ describe('autonomous xStocks trading agent', () => {
       expect(guardAndSpendMock).not.toHaveBeenCalled();
     });
 
+    it('does not enter a symbol the same persona already entered today', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
+      guardAndSpendMock.mockResolvedValue(FILL);
+      armExitsMock.mockResolvedValue({ strategyId: 'x', sentence: 'Exit set' });
+      queryMock.mockImplementation(async (sql: string) => {
+        if (sql.includes('price_observations')) return readings(200, 240, 238);
+        if (sql.includes('FROM audit_log')) return [{ agent: 'Momentum Scout', symbol: 'NVDAx' }];
+        return [];
+      });
+
+      const result = await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
+      expect(result.executed).toBe(true);
+      if (result.executed) expect(result.setup.symbol).not.toBe('NVDAx');
+    });
+
+    it('does not grow a position past a quarter of the grant', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readPolicyMock.mockResolvedValue(policy(100)); // one day of $100 → a $25 ceiling per symbol
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 100 });
+      guardAndSpendMock.mockResolvedValue(FILL);
+      armExitsMock.mockResolvedValue({ strategyId: 'x', sentence: 'Exit set' });
+      queryMock.mockImplementation(async (sql: string) => {
+        if (sql.includes('price_observations')) return readings(200, 240, 238);
+        if (sql.includes('FROM positions')) {
+          return ['NVDAx', 'TSLAx', 'AAPLx', 'MSFTx'].map((symbol) => ({ symbol, cost_usd: '25' }));
+        }
+        return [];
+      });
+
+      const result = await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
+      expect(result.executed).toBe(false);
+      if (!result.executed) expect(result.reason).toBe('no_setup');
+    });
+
     it('sizes against the cap the owner chose, not the allowance left on the chain', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
       readPolicyMock.mockResolvedValue(policy(300));

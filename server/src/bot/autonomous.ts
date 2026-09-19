@@ -312,6 +312,8 @@ export async function evaluateBestSetup(
   settings: RiskSettings = settingsFor(DEFAULT_RISK_PROFILE),
   /** Only setups these personas would take — the agents this wallet hired. Every persona when omitted. */
   personas?: ReadonlySet<string>,
+  /** `persona:symbol` pairs not to take again — pacing (`pacingExclusions`). */
+  exclude?: ReadonlySet<string>,
 ): Promise<CandidateSetup | null> {
   const candidates: CandidateSetup[] = [];
   // Only what can settle here: a symbol with a price and no mint on this cluster is not a setup, it is a refund.
@@ -428,7 +430,9 @@ export async function evaluateBestSetup(
     }
   }
 
-  const eligible = personas ? candidates.filter((c) => personas.has(c.persona)) : candidates;
+  const eligible = candidates.filter(
+    (c) => (!personas || personas.has(c.persona)) && !exclude?.has(`${c.persona}:${c.symbol}`) && !exclude?.has(`*:${c.symbol}`),
+  );
   if (eligible.length === 0) return null;
 
   eligible.sort((a, b) => b.score - a.score);
@@ -524,8 +528,9 @@ export async function runAutonomousCycle(
     : DEFAULT_RISK_PROFILE;
   const settings = settingsFor(riskProfile);
 
-  // 4. The setup the caller brought, or the best one a hired agent would take.
-  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired));
+  // 4. The setup the caller brought, or the best one a hired agent would take — paced (D3, 2026-09-19).
+  const exclude = await pacingExclusions(walletId, policy);
+  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired, exclude));
   if (!bestSetup) {
     return {
       executed: false,
@@ -717,7 +722,7 @@ export async function autonomousAgentSweep(_now: Date = new Date()): Promise<num
           WHERE wallet_id = $1 AND decision = $2
             AND decided_at > now() - ($3 || ' minutes')::interval
           LIMIT 1`,
-        [w.id, AGENT_DECISION, String(settingsFor(profile).cooldownMinutes)],
+        [w.id, AGENT_DECISION, String(Math.max(MIN_COOLDOWN_MINUTES, settingsFor(profile).cooldownMinutes))],
       ).catch(() => null);
       if (recent) continue;
 
@@ -733,4 +738,48 @@ export async function autonomousAgentSweep(_now: Date = new Date()): Promise<num
     }
   }
   return executedCount;
+}
+
+/** An agent enters a symbol at most once a UTC day. */
+export const ENTRIES_PER_SYMBOL_PER_DAY = 1;
+/** No symbol may grow past this share of the whole grant (the daily cap for every day it runs). */
+export const POSITION_SHARE_OF_GRANT = 0.25;
+/** The least time between one wallet's autonomous entries, whatever the profile says. */
+export const MIN_COOLDOWN_MINUTES = 60;
+
+/**
+ * What pacing rules out for this wallet right now (2026-09-19): a symbol a persona already entered today
+ * (`persona:SYMBOL`), and a symbol whose position already holds a quarter of the grant (`*:SYMBOL`).
+ *
+ * Live, a hired Momentum Scout bought NVDAx every ten minutes until the day's cap was gone, two days running — every
+ * trade inside the rules, and together a single-stock bet nobody asked for.
+ */
+export async function pacingExclusions(
+  walletId: string,
+  policy: { dailyCapUsd: number; expiresAt: number; grantedAt: number | null },
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const personaBySymbol = await query<{ agent: string; symbol: string }>(
+    `SELECT agent, split_part(action, ' ', 2) AS symbol FROM audit_log
+      WHERE wallet_id = $1 AND action LIKE 'Bought %' AND at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`,
+    [walletId],
+  );
+  const personaIds: Record<string, string> = {
+    'Momentum Scout': 'momentum-scout',
+    'Earnings Desk': 'earnings-desk',
+    'Yield Keeper': 'yield-keeper',
+    'Drawdown Guard': 'drawdown-guard',
+  };
+  for (const r of personaBySymbol) {
+    const id = personaIds[r.agent];
+    if (id) out.add(`${id}:${r.symbol}`);
+  }
+  const days = policy.grantedAt ? Math.max(1, Math.ceil((policy.expiresAt - policy.grantedAt) / 86_400_000)) : 1;
+  const ceiling = POSITION_SHARE_OF_GRANT * policy.dailyCapUsd * days;
+  const held = await query<{ symbol: string; cost_usd: string }>(
+    `SELECT symbol, cost_usd FROM positions WHERE wallet_id = $1 AND side = 'long' AND units > 0`,
+    [walletId],
+  );
+  for (const h of held) if (Number(h.cost_usd) >= ceiling) out.add(`*:${h.symbol}`);
+  return out;
 }

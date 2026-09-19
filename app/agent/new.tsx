@@ -12,6 +12,9 @@
  *
  * Reached from the + on Home's agents, from Messages, and from the roster.
  */
+import { system } from '@/data/system';
+import { useAsync } from '@/data/useAsync';
+import { isSolana } from '@/chain';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -44,6 +47,7 @@ import { ReplayLine } from '@/strategies/ReplayLine';
 import {
   PRICED,
   STRATEGY_TEMPLATES,
+  solanaTemplates,
   marksOf,
   useAgentStrategies,
   useStrategyReplays,
@@ -78,8 +82,14 @@ export default function NewAgent() {
 
   const { quotes } = usePrices(PRICED);
   const marks = marksOf(quotes);
+  // Solana: recurring buys of what this cluster can settle, read from the executor (`solanaTemplates`).
+  const tradable = useAsync(() => (isSolana ? system.tradable() : Promise.resolve(null)), []);
+  const templates = isSolana
+    ? solanaTemplates((tradable.data ?? []).map((t) => t.symbol).filter((sym) => sym !== 'USDC'))
+    : STRATEGY_TEMPLATES;
   // Started here, so the picker opens on replays already on their way.
-  useStrategyReplays(marks, !signedOut);
+  // No replays on Solana: the Solana templates have none (no xStock price history to replay).
+  useStrategyReplays(marks, !signedOut && !isSolana);
   const chosen = useAgentStrategies((s) => s.chosen);
   const replays = useAgentStrategies((s) => s.replays);
   const toggle = useAgentStrategies((s) => s.toggle);
@@ -92,7 +102,7 @@ export default function NewAgent() {
     return clear;
   }, [forgetFailures, clear]);
 
-  const picked = STRATEGY_TEMPLATES.filter((t) => chosen.has(t.key));
+  const picked = templates.filter((t) => chosen.has(t.key));
   const shownName = name.trim();
   const limitUsd = limit.trim() === '' ? undefined : Number(limit);
   const limitOk = limitUsd === undefined || (Number.isFinite(limitUsd) && limitUsd > 0);

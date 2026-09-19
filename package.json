@@ -17,6 +17,7 @@
     "postinstall": "patch-package",
     "build:base": "node scripts/build-base.mjs",
     "deploy:web": "node scripts/build-web.mjs && cd dist-web && vercel link --yes --project xorr-eth && vercel deploy --prod --yes",
+    "deploy:web:solana": "node scripts/build-web.mjs && cd dist-web && vercel link --yes --project xorr-solana && vercel deploy --prod --yes",
     "deploy:executor": "node scripts/deploy-executor.mjs"
   },
   "dependencies": {

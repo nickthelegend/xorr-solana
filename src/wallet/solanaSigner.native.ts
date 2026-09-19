@@ -7,12 +7,13 @@
 import { useCallback } from 'react';
 import { PublicKey, type Transaction } from '@solana/web3.js';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
-import { broadcastSigned, prepareForSigning, solanaConnection } from './solanaTx';
+import { broadcastSigned, prepareForSigning, solanaConnection, type Prepared } from './solanaTx';
 
 export type SolanaSigner = {
   address?: string;
   ready: boolean;
-  signAndSend: (tx: Transaction) => Promise<string>;
+  /** Pass `prepared` for a transaction the executor built and co-signed; see solanaSigner.web.ts. */
+  signAndSend: (tx: Transaction, prepared?: Prepared) => Promise<string>;
 };
 
 export function useSolanaSigner(): SolanaSigner {
@@ -21,10 +22,10 @@ export function useSolanaSigner(): SolanaSigner {
   const address = wallet?.address;
 
   const signAndSend = useCallback(
-    async (tx: Transaction) => {
+    async (tx: Transaction, already?: Prepared) => {
       if (!wallet || !address) throw new Error('Your wallet is not ready yet. Give it a moment.');
       const conn = solanaConnection();
-      const prepared = await prepareForSigning(conn, tx, new PublicKey(address));
+      const prepared = already ?? (await prepareForSigning(conn, tx, new PublicKey(address)));
       const provider = await wallet.getProvider();
       const { signedTransaction } = await provider.request({ method: 'signTransaction', params: { transaction: tx } });
       return broadcastSigned(conn, new Uint8Array(signedTransaction.serialize()), prepared);

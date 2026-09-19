@@ -14,7 +14,9 @@
 import { PublicKey } from '@solana/web3.js';
 import { readDelegation, spendAsDelegate, returnToOwner, usdToBaseUnits, baseUnitsToUsd } from '../solana/delegation.js';
 import { markBroadcast } from '../http/request-id.js';
-import { delegateKeypair, venueVaultKeypair } from '../solana/keys.js';
+import { delegateKeypair, payerKeypair, venueVaultKeypair } from '../solana/keys.js';
+import { connection } from '../solana/connection.js';
+import { getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
 import { ataFor, tokenProgramForMint, readMintScale, toUiAmount, fromUiAmount } from '../solana/balances.js';
 import { DEFAULT_MINTS } from '../solana/clusters.js';
 import { evaluate, recordSpend, type RuleContext } from '../rules/engine.js';
@@ -45,6 +47,8 @@ export type SpendIntent = {
   slippageBps?: number;
   maxSpreadPct?: number;
   skipRulesEngine?: boolean;
+  /** For a sell: how many shares (as a holder sees them). Otherwise `usd` at the live mark decides. */
+  units?: number;
 };
 
 export type SpendReceipt = {
@@ -323,26 +327,73 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
       side: 'buy',
     };
   } else {
-    // SELL side (closes / exits): sells stock back to USDC
-    const inMint = stock ? stock.address : resolveMint(symbolKey);
+    /*
+     * SELL (closes, exits, sell-all): the OWNER's xStock is sold, and only through the delegate approval the owner gave
+     * on that account (2026-09-19). This used to quote and swap without moving the owner's shares at all — the vault
+     * sold its own inventory and paid the owner USDC, so a "sell" drained the vault and left the owner holding the
+     * shares it had just been paid for.
+     */
+    if (!stock) {
+      return { placed: false, status: 'blocked', reason: 'not_tradable', detail: `${intent.symbol} is not an xStock this can sell.` };
+    }
+    const inMint = stock.address;
+    const held = await readDelegation(intent.ownerPubkey, inMint);
+    const activeDelegate = delegateKeypair().publicKey.toBase58();
+    if (held.delegate !== activeDelegate || held.delegatedAmount === 0n) {
+      return {
+        placed: false,
+        status: 'blocked',
+        reason: 'no_sell_permission',
+        detail: `The permission does not cover selling your ${intent.symbol}, so nothing was sold. Grant again to include it.`,
+      };
+    }
     // Same reasoning as the buy leg: the multiplier decides how many raw units a holding is.
     const inScale = await readMintScale(inMint);
-    const inUnits = fromUiAmount(intent.usd / markPrice, inScale);
+    const wanted = intent.units !== undefined ? fromUiAmount(intent.units, inScale) : fromUiAmount(intent.usd / markPrice, inScale);
+    const inUnits = [wanted, held.balanceAmount, held.delegatedAmount].reduce((a, b) => (b < a ? b : a));
+    if (inUnits <= 0n) {
+      return { placed: false, status: 'blocked', reason: 'nothing_to_sell', detail: `You hold no ${intent.symbol} to sell.` };
+    }
 
-    const quoteRes = await quote({
-      inSymbolOrMint: inMint,
-      outSymbolOrMint: 'USDC',
-      amountUnits: inUnits,
-      slippageBps: intent.slippageBps ?? 50,
-    });
+    let quoteRes: Awaited<ReturnType<typeof quote>>;
+    try {
+      quoteRes = await quote({
+        inSymbolOrMint: inMint,
+        outSymbolOrMint: 'USDC',
+        amountUnits: inUnits,
+        slippageBps: intent.slippageBps ?? 50,
+      });
+    } catch (e) {
+      return {
+        placed: false,
+        status: 'blocked',
+        reason: 'no_quote',
+        detail: `No venue would quote a sale of ${intent.symbol} right now (${e instanceof Error ? e.message : String(e)}), so nothing was sold.`,
+      };
+    }
 
-    const swapRes = await swap({
-      quoteResponse: quoteRes,
-      userPublicKey: intent.ownerPubkey,
-      vaultKeypair: vault,
-    });
+    await markBroadcast();
+    // The owner's shares move into the vault under the delegate's approval; the swap then pays the owner in USDC.
+    const inProg = tokenProgramForMint(inMint);
+    const vaultInAta = (
+      await getOrCreateAssociatedTokenAccount(connection, payerKeypair(), new PublicKey(inMint), vault.publicKey, false, 'confirmed', undefined, inProg)
+    ).address;
+    await spendAsDelegate({ owner: intent.ownerPubkey, destinationAta: vaultInAta, amountUnits: inUnits, mint: inMint });
+
+    let swapRes: Awaited<ReturnType<typeof swap>>;
+    try {
+      swapRes = await swap({ quoteResponse: quoteRes, userPublicKey: intent.ownerPubkey, vaultKeypair: vault });
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      const back = await returnToOwner({ owner: intent.ownerPubkey, mint: inMint, amountUnits: inUnits, fromKeypair: vault }).then(
+        () => 'Your shares were returned.',
+        (err: unknown) => `Returning your shares ALSO failed (${err instanceof Error ? err.message : String(err)}); they are held in the venue vault.`,
+      );
+      return { placed: false, status: 'blocked', reason: 'sell_failed', detail: `The sale did not fill (${why}). ${back}` };
+    }
 
     const outUsd = baseUnitsToUsd(swapRes.outAmount, 6);
+    const soldUnits = toUiAmount(inUnits, inScale);
     return {
       placed: true,
       venue: swapRes.venue,
@@ -350,8 +401,8 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
       slot: swapRes.slot,
       inUnits,
       outUnits: swapRes.outAmount,
-      filledUnits: toUiAmount(inUnits, inScale),
-      fillPrice: outUsd / (toUiAmount(inUnits, inScale) || 1),
+      filledUnits: soldUnits,
+      fillPrice: outUsd / (soldUnits || 1),
       symbol: symbolKey,
       usd: outUsd,
       side: 'sell',

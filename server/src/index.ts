@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { ON_SOLANA, activeClusterKey } from './solana/clusters.js';
+import { ON_SOLANA, activeClusterKey, getClusterKey } from './solana/clusters.js';
 import { connection as solanaConnection } from './solana/connection.js';
 import { delegateKeypair } from './solana/keys.js';
 import { Hono } from 'hono';
@@ -38,6 +38,9 @@ import { authMiddleware } from './auth/middleware.js';
 import { errorResponse } from './http/errors.js';
 import { DATABASE_URL, pool } from './db/index.js';
 import { withoutPassword } from './db/redact.js';
+
+// Real-money Solana needs ALLOW_MAINNET=yes, as the EVM side already requires; this guard existed and nothing called it.
+if (ON_SOLANA) getClusterKey();
 
 const app = new Hono();
 

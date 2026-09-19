@@ -696,7 +696,7 @@ routes.get('/approvals', async (c) => {
 routes.get('/delegation/params', async (c) => {
   requireUser(c);
   // Solana: whom the owner delegates to, and the token and decimals (2026-09-19). No contract to name.
-  if (ON_SOLANA) return c.json(solanaGrantParams());
+  if (ON_SOLANA) return c.json(await solanaGrantParams());
   return c.json({
     contract: DELEGATION_ADDRESS,
     delegate: delegatePublicKey,

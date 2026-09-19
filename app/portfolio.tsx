@@ -9,6 +9,7 @@
  * chain over the last week (PLAN.md 2.10) — and its caption says how far back that line actually reaches.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { shownHere } from '@/nav/solanaRoutes';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -477,6 +478,8 @@ export default function Portfolio() {
               <Price variant="rowPrimary">—</Price>
             )}
           </View>
+          {/* Savings are Aave on Base; the Solana build has no yield (`src/nav/solanaRoutes.ts`). */}
+          {shownHere('/yield') ? (
           <Press
             onPress={() => router.push('/yield')}
             accessibilityRole="button"
@@ -492,6 +495,7 @@ export default function Portfolio() {
               <Price variant="rowPrimary">—</Price>
             )}
           </Press>
+          ) : null}
         </Rise>
       </ScrollView>
     </Screen>

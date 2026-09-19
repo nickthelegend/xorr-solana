@@ -20,6 +20,7 @@
  * the agent's own screens, which show its work from real records, and a question typed anyway is told why nothing answers.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { shownHere } from '@/nav/solanaRoutes';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -428,7 +429,7 @@ export function Chat({
             }}
           >
             {shortcuts
-              ? shortcuts.map((s) => (
+              ? shortcuts.filter((s) => shownHere(typeof s.href === "string" ? s.href : s.href.pathname)).map((s) => (
                   <Chip
                     key={s.label}
                     label={s.label}

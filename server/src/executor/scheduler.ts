@@ -8,6 +8,8 @@
  * Safety comes from runStrategy's period claim, not from this loop: two schedulers, a restart
  * mid-run, or a manual trigger racing the tick all converge on one run per period.
  */
+import { solanaExitSweep } from './solanaExits.js';
+import { ON_SOLANA } from '../solana/clusters.js';
 import { query } from '../db/index.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
 import { log } from '../http/request-id.js';
@@ -62,6 +64,7 @@ export async function tick(now: Date = new Date()): Promise<number> {
     `SELECT * FROM strategies
      WHERE state IN ('live','watch') AND next_run_at IS NOT NULL AND next_run_at <= $1
        AND chain = ${THIS_CHAIN}
+       ${ON_SOLANA ? "AND kind <> 'exit-rules'" : ''}
      ORDER BY next_run_at ASC LIMIT 20`,
     [now],
   );
@@ -80,6 +83,17 @@ export async function tick(now: Date = new Date()): Promise<number> {
       console.log(`[scheduler] ${s.label}: ${outcome.status}`);
     } catch (e) {
       log.error(`[scheduler] ${s.label} threw:`, e instanceof Error ? e.message : e);
+    }
+  }
+
+  /*
+   * Exits on Solana, every tick (2026-09-19): a stop-loss checked once a day is not a stop. `solanaExits.ts`.
+   */
+  if (ON_SOLANA) {
+    try {
+      ran += await solanaExitSweep(now);
+    } catch (e) {
+      log.error('[scheduler] exit sweep failed:', e instanceof Error ? e.message : e);
     }
   }
 

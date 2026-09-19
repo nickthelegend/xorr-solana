@@ -10,6 +10,9 @@
  * wallet lookup now comes from `wallet-context.ts` rather than being duplicated. `server/index.ts`
  * mounts this the same way it already mounts `market`, `alerts` and the rest.
  */
+import { readSolanaPolicy } from '../solana/grant.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { XSTOCKS, xStockKey } from '../venues/xstocks.js';
 import { randomUUID } from 'node:crypto';
 import { httpStatusFor } from '../executor/failure.js';
 import { Hono, type Context } from 'hono';
@@ -41,6 +44,9 @@ import type { Address } from 'viem';
 import { placeOrder } from '../executor/order.js';
 import { placeSwap } from '../executor/swap.js';
 import { currentWallet, requireWallet, type WalletRow } from './wallet-context.js';
+
+/** The strategy kinds the Solana runner executes (`executor/run.ts` runOnSolana, `executor/solanaExits.ts`). */
+const SOLANA_KINDS = new Set(['dca', 'exit-rules']);
 
 export const strategyRoutes = new Hono();
 
@@ -116,6 +122,19 @@ const StrategyInput = z.object({
    * tradable symbols with positive percents of the whole portfolio summing to 100 or less — what is not
    * targeted stays cash, which is why the settlement token itself is not a target.
    */
+  /*
+   * Solana (2026-09-19): what runs here is a recurring buy or an exit, on an xStock. This checked the Base token list,
+   * so every xStock was refused and WETH was accepted — a strategy that could never settle.
+   */
+  if (ON_SOLANA) {
+    if (!SOLANA_KINDS.has(s.kind)) {
+      ctx.addIssue({ code: 'custom', path: ['kind'], message: `a ${s.kind} strategy does not run on Solana — recurring buys (dca) and exits do` });
+    }
+    if (!XSTOCKS[xStockKey(s.symbol) ?? s.symbol]) {
+      ctx.addIssue({ code: 'custom', path: ['symbol'], message: `not an xStock — one of: ${Object.keys(XSTOCKS).join(', ')}` });
+    }
+    return;
+  }
   if (s.symbol !== PORTFOLIO) {
     if (!(canonicalSymbol(s.symbol) in TOKENS)) {
       ctx.addIssue({
@@ -212,7 +231,8 @@ async function commitmentRefusal(
   w: WalletRow,
   ask: { allocationUsd: number; closeOnly: boolean; doing: string; excludeId?: string },
 ): Promise<{ error: string; message: string } | null> {
-  const policy = await readPolicy(w.address as Address);
+  // Solana (2026-09-19): the permission is the SPL delegation plus its grant record, not a Base contract.
+  const policy = ON_SOLANA ? await readSolanaPolicy(w) : await readPolicy(w.address as Address);
   if (!policy || policy.revoked) {
     return {
       error: 'no_delegation',

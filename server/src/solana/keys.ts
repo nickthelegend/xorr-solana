@@ -3,8 +3,10 @@
  *
  * Manages delegate, payer, dev-owner, and venue-vault keypairs.
  * Keys are loaded from environment variables (base58 secret) or JSON keypair files
- * in XORR_KEY_DIR. If not found, deterministic fallback keypairs are derived in
- * development/fork/localnet mode.
+ * in XORR_KEY_DIR. If not found, deterministic keypairs are derived — but ONLY for a localnet or fork whose RPC is on
+ * this machine (or with XORR_ALLOW_SEED_KEYS=yes, for a disposable CI validator). The seed is a public string, so
+ * anyone can compute those keys: on any reachable cluster the delegate would be a key that can spend every user's
+ * delegated USDC. Anywhere else a missing key is a refusal to boot, naming the variable to set (2026-09-19).
  *
  * NEVER logs or prints secret keys — only public keys are logged.
  */
@@ -12,6 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
+import { activeClusterKey, rpcUrl } from './clusters.js';
 
 const KEY_DIR = process.env.XORR_KEY_DIR ?? path.resolve(process.cwd(), '.keys');
 
@@ -41,12 +44,45 @@ function loadOrDeriveKey(name: string, envVar?: string): Keypair {
     // Ignore file read error and fall back
   }
 
-  // 3. Fallback: deterministic seed from name for repeatable local development
+  // 3. Fallback: deterministic seed from name for repeatable local development — never on a reachable cluster.
+  const refusal = seedKeyRefusal();
+  if (refusal) {
+    throw new Error(
+      `No ${name} key: set ${envVarName(name)} (a base58 or JSON secret) or put ${name}.json in XORR_KEY_DIR. ${refusal}`,
+    );
+  }
   // 32-byte seed derived predictably from key name
   const seed = new Uint8Array(32);
   const nameBytes = new TextEncoder().encode(`xorr-solana-seed-${name}`);
   seed.set(nameBytes.subarray(0, 32));
   return Keypair.fromSeed(seed);
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
+function envVarName(name: string): string {
+  return `XORR_KEY_${name.toUpperCase().replace(/-/g, '_')}`;
+}
+
+/**
+ * Why the publicly derivable keys may not be used here, or null when they may: a localnet or fork whose RPC is on
+ * this machine, or an explicit XORR_ALLOW_SEED_KEYS=yes (a throwaway CI validator).
+ */
+export function seedKeyRefusal(): string | null {
+  const cluster = activeClusterKey();
+  if (cluster !== 'solana-localnet' && cluster !== 'solana-fork') {
+    return `Derived keys are for a local validator only, and this is ${cluster}.`;
+  }
+  if (process.env.XORR_ALLOW_SEED_KEYS === 'yes') return null;
+  let host: string;
+  try {
+    host = new URL(rpcUrl(cluster)).hostname;
+  } catch {
+    return 'The cluster RPC is not a URL this can check.';
+  }
+  return LOOPBACK.has(host)
+    ? null
+    : `The RPC (${host}) is not on this machine, so a key anyone can derive would control real delegations.`;
 }
 
 let cachedDelegate: Keypair | undefined;

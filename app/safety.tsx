@@ -8,6 +8,7 @@
  * The stop is held, not tapped (FEATURES.md #3).
  */
 import React, { useEffect, useState } from 'react';
+import { shownHere } from '@/nav/solanaRoutes';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { isAddress } from 'viem';
@@ -59,7 +60,7 @@ import { isSolana, pinnedDelegation } from '@/chain';
 import { isSolanaAddress, useAllowlist } from '@/wallet/allowlist';
 import { solanaChainOnlyStanding } from '@/wallet/solanaStanding';
 import { useApprovals, type ApprovalsView } from '@/wallet/useApprovals';
-import { planResume, type GrantOptions } from '@/wallet/grantPlan';
+import { planResume, previousDurationMs, type GrantOptions, type ResumePlan } from '@/wallet/grantPlan';
 import { chainAccess } from '@/wallet/chainAccess';
 import { standingOnChain, type ChainStanding } from '@/wallet/delegationChain';
 import { useAuth } from '@/auth/useAuth';
@@ -309,7 +310,19 @@ export default function Safety() {
    * last grant ran, and only the approvals no longer enough — read when the button is pressed, since an allowance can
    * move while the screen is open.
    */
-  async function planFromChain() {
+  async function planFromChain(): Promise<ResumePlan> {
+    /*
+     * Solana (2026-09-19): no ERC-20 approvals to plan — the grant transaction carries every approval it needs — so a
+     * resume re-signs the cap and length of the grant on record. `/approvals` reads Base contracts and failed here, so
+     * Resume never worked on Solana.
+     */
+    if (isSolana) {
+      const permission = await repos.wallet.delegation();
+      if (!permission || !(permission.dailyCapUsd > 0)) return { kind: 'choose', reason: 'no_permission' };
+      const durationMs = previousDurationMs(permission);
+      if (durationMs === undefined) return { kind: 'choose', reason: 'duration_unknown' };
+      return { kind: 'resume', dailyCapUsd: permission.dailyCapUsd, durationMs, approvals: [] };
+    }
     const [permission, params, allowances] = await Promise.all([
       repos.wallet.delegation(),
       system.delegationParams(),
@@ -531,7 +544,7 @@ export default function Safety() {
               <Row
                 title="Agent key"
                 // On Solana the key holds an SPL approval: it can move the approved USDC, and only that (2026-09-19).
-                secondary={isSolana ? 'Only your approved USDC' : 'Can’t withdraw'}
+                secondary={isSolana ? 'Your approved USDC, and selling your xStocks' : 'Can’t withdraw'}
                 value={
                   <Text variant="rowPrimary" color={colors.ink55} selectable>
                     {delegateShown ? shortAddress(delegateShown) : '—'}
@@ -598,6 +611,8 @@ export default function Safety() {
 
           {signedOut ? null : (
             <SheetCard borderRadius={radius.panel} padding={space.s16}>
+              {/* The Privy wallet policy is the Base build's; Solana has no policy row (`src/nav/solanaRoutes.ts`). */}
+              {shownHere('/policy') ? (
               <Row
                 title="Wallet policy"
                 value={
@@ -609,6 +624,7 @@ export default function Safety() {
                 height={SETTING_ROW}
                 onPress={() => router.push('/policy')}
               />
+              ) : null}
               <Row
                 title="Allowlist"
                 value={
@@ -695,7 +711,7 @@ export default function Safety() {
       />
 
       {/* Stopping and exiting are different needs: exiting is a quiet link, never a second red button. */}
-      {signedOut ? null : (
+      {signedOut || !shownHere('/flatten') ? null : (
         <Press
           onPress={() => router.push('/flatten')}
           accessibilityRole="button"

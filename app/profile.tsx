@@ -11,6 +11,7 @@
  * one. The address is shortened on screen and copied whole.
  */
 import React, { useState } from 'react';
+import { shownHere } from '@/nav/solanaRoutes';
 import { ScrollView, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
@@ -50,12 +51,14 @@ const AVATAR = 84;
 const LINK_GLYPH = 18;
 
 /** Where the detail went. Each row is a screen that already exists. */
-const LINKS: readonly { label: string; icon: IconName; href: string }[] = [
+const ALL_LINKS: readonly { label: string; icon: IconName; href: string }[] = [
   { label: 'Activity', icon: 'activity', href: '/activity' },
   { label: 'Permissions', icon: 'shield', href: '/delegation' },
   { label: 'Approvals', icon: 'check', href: '/approvals' },
   { label: 'Settings', icon: 'gear', href: '/settings' },
 ];
+/** Approvals are ERC-20 allowances on Base; the Solana build does not list them. */
+const LINKS = ALL_LINKS.filter((l) => shownHere(l.href));
 
 export default function Profile() {
   const goBack = useGoBack();

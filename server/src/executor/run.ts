@@ -10,6 +10,9 @@
  *     "act" for a retry to slip through, because the check IS the write.
  *   - The spend is recorded in the SAME transaction that records the run.
  */
+import { guardAndSpend } from './place.js';
+import { notifyEntry } from '../notifications/alerts.js';
+import { ON_SOLANA } from '../solana/clusters.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { one, query, tx } from '../db/index.js';
@@ -304,6 +307,9 @@ async function runStrategyInner(
       return failRun({ runId, walletId, strategy, error: messageOf(e), sent: false, at });
     }
   }
+
+  // ── Solana (2026-09-19): recurring buys through the one Solana spend path; everything below is the Base runner. ──
+  if (ON_SOLANA) return runOnSolana({ runId, walletId, strategy, usd, at });
 
   // ── 2. Limits, enforced here and not in the client. ──
   /*
@@ -1379,4 +1385,85 @@ async function finishBlocked(
   }).catch(() => undefined);
 
   return { status: 'blocked', runId, reason, detail };
+}
+
+/**
+ * A strategy run on Solana (2026-09-19).
+ *
+ * The runner above reads a Solidity delegation and places through 1inch, so on Solana every scheduled strategy failed:
+ * recurring buys, custom agents' templates, all of it. Here a recurring buy (`dca`) goes through `guardAndSpend` — the
+ * permission and grant record on chain, the daily cap, the issuer's gates, a live quote — and is booked like any fill.
+ * Exits are checked every tick by `solanaExits.ts`, not here. Any other kind says plainly it does not run on Solana.
+ */
+async function runOnSolana(p: { runId: string; walletId: string; strategy: StrategyRow; usd: number; at: Date }): Promise<RunOutcome> {
+  const { runId, walletId, strategy, usd } = p;
+  if (strategy.kind !== 'dca') {
+    return finishBlocked(
+      runId,
+      walletId,
+      strategy,
+      'kind_not_on_solana',
+      `A "${strategy.kind}" strategy does not run on Solana. Recurring buys and exits do.`,
+    );
+  }
+  try {
+    const wallet = await one<{ address: string; agents_stopped?: boolean }>(
+      `SELECT address, agents_stopped FROM wallets WHERE id = $1`,
+      [walletId],
+    );
+    if (!wallet?.address) return finishBlocked(runId, walletId, strategy, 'no_wallet', 'This wallet has no address on file.');
+    if (wallet.agents_stopped) {
+      return finishBlocked(runId, walletId, strategy, 'agents_stopped', 'You stopped the agents, so nothing was placed.');
+    }
+    if (strategy.agent_id) {
+      const limit = await agentLimitRefusal(strategy.agent_id, usd);
+      if (limit) return finishBlocked(runId, walletId, strategy, limit.reason, limit.detail);
+    }
+    const outcome = await guardAndSpend({ walletId, ownerPubkey: wallet.address, symbol: strategy.symbol, usd, side: 'buy' });
+    if (!outcome.placed) return finishBlocked(runId, walletId, strategy, outcome.reason, outcome.detail);
+
+    await tx(async (client) => {
+      await client.query(
+        `UPDATE strategy_runs
+            SET status='filled', signature=$2, units=$3, price=$4, usd=$5, quoted_units=$3, venue=$6, side='buy',
+                asset_class='equity', finished_at=now()
+          WHERE id=$1`,
+        [runId, outcome.signature, outcome.filledUnits, outcome.fillPrice, outcome.usd, outcome.venue],
+      );
+      await settleSchedule(client, strategy, new Date());
+      await applyFill(client, {
+        walletId,
+        symbol: outcome.symbol,
+        units: outcome.filledUnits,
+        usd: outcome.usd,
+        attribution: { source: 'strategy', id: strategy.id, label: strategy.label },
+      });
+      await append(
+        {
+          walletId,
+          agent: agentForKind(strategy.kind),
+          action: `Bought ${outcome.symbol}`,
+          detail: `${strategy.label}: ${outcome.filledUnits.toFixed(6)} ${outcome.symbol} at $${outcome.fillPrice.toFixed(2)} through ${outcome.venue === 'jupiter-route' ? 'Jupiter' : 'the venue vault'}.`,
+          amount: `$${outcome.usd.toFixed(2)}`,
+          kind: 'trade',
+          signature: outcome.signature,
+          payload: { runId, strategyId: strategy.id, venue: outcome.venue, slot: outcome.slot },
+        },
+        client,
+      );
+    });
+    void notifyEntry({
+      walletId,
+      symbol: outcome.symbol,
+      strategyKind: strategy.kind,
+      notionalUsd: outcome.usd,
+      units: outcome.filledUnits,
+      price: outcome.fillPrice,
+      signature: outcome.signature,
+      agentName: agentForKind(strategy.kind),
+    }).catch(() => undefined);
+    return { status: 'filled', runId, signature: outcome.signature, units: outcome.filledUnits, price: outcome.fillPrice };
+  } catch (e) {
+    return failRun({ runId, walletId, strategy, error: messageOf(e), sent: false, at: p.at });
+  }
 }

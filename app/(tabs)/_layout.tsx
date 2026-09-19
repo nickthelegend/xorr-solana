@@ -12,6 +12,7 @@
  * The bar lives HERE and nowhere else. A screen inside this group must not render its own — the layout already draws one,
  * and two bars stack.
  */
+import { isSolana } from '@/chain';
 import React, { useEffect, useMemo } from 'react';
 import { View } from 'react-native';
 import { Tabs, usePathname, useRouter } from 'expo-router';
@@ -54,7 +55,7 @@ export default function TabsLayout() {
           <TabBar
             active={pathname === '/' ? 'home' : null}
             onHome={() => router.navigate('/')}
-            onSwap={() => router.push('/swap')}
+            onSwap={() => router.push(isSolana ? '/xstocks' : '/swap')}
             onMessages={() => show()}
             unread={unread}
             hidden={drawerRaised}

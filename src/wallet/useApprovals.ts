@@ -13,6 +13,7 @@
  * The revoke is signed by the USER, like every other transaction that changes what may happen to
  * their money. The executor cannot do this on their behalf and should not be able to.
  */
+import { isSolana } from '@/chain';
 import { useCallback, useState } from 'react';
 import { encodeFunctionData, erc20Abi, type Address, type Hex } from 'viem';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
@@ -58,7 +59,11 @@ export function useApprovals() {
   const [revoking, setRevoking] = useState<string>();
   const [error, setError] = useState<string>();
   // A failed read is kept for the Approvals screen, which has to say so; Safety simply shows no card without data.
-  const { data, loading, error: loadError, reload } = useAsync(() => api.get<ApprovalsView>('/approvals'), []);
+  // ERC-20 allowances are a Base fact; on Solana the grant's own approvals are revoked with it, and there is nothing to read.
+  const { data, loading, error: loadError, reload } = useAsync(
+    () => (isSolana ? Promise.resolve(null) : api.get<ApprovalsView>('/approvals')),
+    [],
+  );
 
   const revoke = useCallback(
     async (token: TokenApproval, spender: Address) => {

@@ -32,6 +32,7 @@
  *
  * The bottom padding is the real inset, floored so a device that reports none still clears the edge.
  */
+import { isSolana } from '@/chain';
 import React, { useEffect } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -167,7 +168,7 @@ export function TabBar({ active, onHome, onSwap, onMessages, unread = 0, hidden 
         <Item label="Home" place selected={home} onPress={onHome} reduced={reduced}>
           <HomeGlyph color={home ? colors.ink : colors.ink55} />
         </Item>
-        <Item label="Swap" onPress={onSwap}>
+        <Item label={isSolana ? "Trade" : "Swap"} onPress={onSwap}>
           <SwapGlyph color={colors.ink55} />
         </Item>
         <Item label="Messages" onPress={onMessages} badge={unread > 0 ? (unread > 9 ? '9+' : String(unread)) : undefined}>

@@ -29,6 +29,7 @@ import { append } from '../audit/log.js';
 import { notifyEntry } from '../notifications/alerts.js';
 import { ON_SOLANA } from '../solana/clusters.js';
 import { explorerTx } from '../solana/connection.js';
+import { SellRefused, prepareUserSell, verifyUserSell } from '../solana/userSell.js';
 
 export const xstockRoutes = new Hono();
 
@@ -183,5 +184,82 @@ xstockRoutes.post('/xstocks/buy', async (c) => {
     signature: outcome.signature,
     slot: outcome.slot,
     explorer: explorerTx(outcome.signature),
+  });
+});
+
+const SellPrepareInput = z.object({ symbol: z.string().min(1).max(16), units: z.number().positive() });
+const SellRecordInput = z.object({ symbol: z.string().min(1).max(16), signature: z.string().min(64).max(100) });
+
+/**
+ * POST /xstocks/sell/prepare — the sale the owner will sign (2026-09-19): their shares into the venue vault and the
+ * vault's USDC to them, in one transaction at a live Jupiter quote, with the vault's leg already signed. Nothing moves
+ * until the owner signs and broadcasts it.
+ */
+xstockRoutes.post('/xstocks/sell/prepare', async (c) => {
+  if (!ON_SOLANA) return c.json({ error: 'not_solana', message: 'xStocks are sold on a Solana executor.' }, 400);
+  const body = SellPrepareInput.parse(await c.req.json());
+  const w = await requireWallet(c);
+  try {
+    return c.json(await prepareUserSell({ owner: w.address, symbol: body.symbol, units: body.units }));
+  } catch (e) {
+    if (e instanceof SellRefused) return c.json({ status: 'blocked', reason: e.reason, message: e.message }, 409);
+    throw e;
+  }
+});
+
+/**
+ * POST /xstocks/sell/record — a sale the owner signed and broadcast, read back from the chain before it is booked:
+ * the disposal in the position ledger, the audit row, the notification. Recording the same signature twice is a no-op.
+ */
+xstockRoutes.post('/xstocks/sell/record', async (c) => {
+  if (!ON_SOLANA) return c.json({ error: 'not_solana', message: 'xStocks are sold on a Solana executor.' }, 400);
+  const body = SellRecordInput.parse(await c.req.json());
+  const w = await requireWallet(c);
+  let sold: Awaited<ReturnType<typeof verifyUserSell>>;
+  try {
+    sold = await verifyUserSell({ owner: w.address, signature: body.signature, symbol: body.symbol });
+  } catch (e) {
+    if (e instanceof SellRefused) return c.json({ status: 'blocked', reason: e.reason, message: e.message }, 409);
+    throw e;
+  }
+  const orderId = randomUUID();
+  const duplicate = await tx(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [w.id]);
+    const seen = await client.query('SELECT 1 FROM audit_log WHERE wallet_id = $1 AND signature = $2 LIMIT 1', [w.id, body.signature]);
+    if ((seen.rowCount ?? 0) > 0) return true;
+    await applyFill(client, {
+      walletId: w.id,
+      symbol: sold.symbol,
+      units: -sold.units,
+      usd: sold.usd,
+      attribution: { source: 'manual', id: orderId, label: 'You' },
+    });
+    await append(
+      {
+        walletId: w.id,
+        agent: 'You',
+        action: `Sold ${sold.symbol}`,
+        detail: `${sold.units.toFixed(6)} ${sold.symbol} at $${sold.price.toFixed(2)} against the venue vault, at Jupiter's live quote. You signed it.`,
+        amount: `$${sold.usd.toFixed(2)}`,
+        kind: 'trade',
+        signature: body.signature,
+        payload: { orderId, venue: 'venue-vault', slot: sold.slot, side: 'sell' },
+      },
+      client,
+    );
+    return false;
+  });
+  return c.json({
+    status: 'filled',
+    duplicate,
+    orderId,
+    symbol: sold.symbol,
+    units: sold.units,
+    usd: sold.usd,
+    price: sold.price,
+    venue: 'venue-vault',
+    signature: body.signature,
+    slot: sold.slot,
+    explorer: explorerTx(body.signature),
   });
 });

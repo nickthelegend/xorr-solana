@@ -9,15 +9,19 @@ import { useCallback } from 'react';
 import { PublicKey, type Transaction } from '@solana/web3.js';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import { useAuth } from '@/auth/useAuth';
-import { broadcastSigned, prepareForSigning, solanaConnection, unsignedBytes } from './solanaTx';
+import { broadcastSigned, prepareForSigning, solanaConnection, unsignedBytes, type Prepared } from './solanaTx';
 
 export type SolanaSigner = {
   /** The owner's base58 address, once Privy has made the wallet. */
   address?: string;
   /** The wallet can sign right now. */
   ready: boolean;
-  /** Sign as the owner and broadcast; resolves to the confirmed signature. */
-  signAndSend: (tx: Transaction) => Promise<string>;
+  /**
+   * Sign as the owner and broadcast; resolves to the confirmed signature. Pass `prepared` for a transaction the executor
+   * built and co-signed (a sale against the venue vault): its blockhash and fee payer are already set, and re-stamping
+   * them would void the executor's signature.
+   */
+  signAndSend: (tx: Transaction, prepared?: Prepared) => Promise<string>;
 };
 
 export function useSolanaSigner(): SolanaSigner {
@@ -27,10 +31,10 @@ export function useSolanaSigner(): SolanaSigner {
   const wallet = address ? wallets.find((w) => w.address === address) : undefined;
 
   const signAndSend = useCallback(
-    async (tx: Transaction) => {
+    async (tx: Transaction, already?: Prepared) => {
       if (!address || !wallet) throw new Error('Your wallet is not ready yet. Give it a moment.');
       const conn = solanaConnection();
-      const prepared = await prepareForSigning(conn, tx, new PublicKey(address));
+      const prepared = already ?? (await prepareForSigning(conn, tx, new PublicKey(address)));
       const { signedTransaction } = await signTransaction({ transaction: unsignedBytes(tx), wallet });
       return broadcastSigned(conn, signedTransaction, prepared);
     },
