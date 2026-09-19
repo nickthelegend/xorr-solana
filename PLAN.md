@@ -23,6 +23,8 @@ Swap tab, strategies, exits, sells, flatten, and ~40 screens reachable from Expl
 
 **Initial completion: 15 / 50 P0+P1 checklist items verified = 30 %** (P0 alone: 15 / 30 = 50 %). See §9.
 
+**Final completion (2026-09-19, same checklist): 41 / 50 = 82 %** (P0 27 / 30 = 90 %). What remains is in §17.
+
 ## 2. Vision, problem, users
 
 - **Problem.** Handing a bot your money is a trust problem, not a trading problem. Brokerage "robo" products custody
@@ -123,10 +125,10 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 18 | Withdraw to allowlisted address, cooling-off enforced | ✅ | I1–I3, tx `5MyCZ2dP…` |
 | 19 | Trade tab = xStock buy/sell | ✅ | centre tab "Trade" → `/xstocks` (verified) |
 | 20 | Home Stocks tab opens a working xStock screen | ✅ | rows → `/xstock/[sym]`; `/oracle` redirects |
-| 21 | No Base-only screen reachable on Solana | ⚠️ | route guard + link filtering done; final full walk pending (P2 re-walk) |
+| 21 | No Base-only screen reachable on Solana | ✅ | route guard + link filtering; walk of all 46 Solana-listed screens: 0 failed requests (2026-09-19) |
 | 22 | Activity / audit trail with explorer links | ✅ | F5 |
 | 23 | No computable keys off localnet/fork | ✅ | `solana/keys.ts` refuses seeds off a loopback fork; `keys.test.ts` |
-| 24 | Hosted demo (fork + executor + web) | ❌ | nothing Solana hosted |
+| 24 | Hosted demo (fork + executor + web) | ⚠️ | LIVE: web https://xorr-solana.vercel.app, executor https://executor-production-a672.up.railway.app, fork https://solana-fork-production.up.railway.app. Verified on hosted: new-account sign-in, fee SOL, faucet, grant (ARMED), buy. Pending (needs the Browser pane visible for Privy): hosted Jupiter-routed buy after the legacy-route fix, sell, stop. |
 | 25 | Fork fills Jupiter-routed (pool re-clone, sell routes) | ✅ | live route resolution at boot; `jupiter-route` buy and sell |
 | 26 | Demo video | ❌ | only Base videos exist |
 | 27 | README Solana-first | ✅ | rewritten 2026-09-19 |
@@ -138,24 +140,24 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | # | Item | Status | Evidence |
 |---|---|---|---|
 | 31 | Recurring buy (DCA) on xStocks via Solana path | ⚠️ | created from the screen; run went through `runOnSolana` → `daily_cap` refusal; a fill awaits cap headroom |
-| 32 | Custom agents with xStock templates | ⚠️ | templates from `/market/tradable`; UI create not yet re-walked |
-| 33 | Close a position (Solana) | ✅ | position Close → `useXStockSell` (same verified path as #11) |
+| 32 | Custom agents with xStock templates | ✅ | custom agent "NVDA Stacker" created from the UI with a live "$25 of NVDAx, weekly" |
+| 33 | Close a position (Solana) | ⚠️ | Close uses the verified signed-sale hook; not clicked live (no holding while the cap was spent) |
 | 34 | Withdraw everything (Solana) | ✅ | sold 0.018 NVDAx (`4dXwVMfj…`), sent 495.66 USDC (`48n4enDu…`) |
 | 35 | Holdings: no fixture target mix on Solana | ✅ | `/holdings` hidden on Solana; Portfolio is the holdings view |
 | 36 | Holding / Gainers rows open a tradable xStock screen | ✅ | `/asset/<xStock>` redirects to the ticket |
 | 37 | Agent reasoning + chat on a capable model | ⛔ | no `OPENROUTER_API_KEY` |
 | 38 | MoonPay card deposit | ⛔ | no MoonPay keys; honest message shown |
 | 39 | Withdrawal records correct (xStock sends, destination) | ✅ | `tokenMovement` reads any mint + recipient from the tx; unknown recipient refused; tests |
-| 40 | Send: real fee, balance refresh | ✅ | fee hardcoded; balance stale after send |
+| 40 | Send: real fee, balance refresh | ✅ | Send shows ≈ $0.23 = cluster fee + rent for the recipient account |
 | 41 | xStocks disclosure + Terms/Risk | ✅ | none |
-| 42 | Portfolio history snapshots on Solana | ✅ | `snapshots.ts` EVM |
-| 43 | Cap/expiry risk alerts on Solana | ✅ | `alerts/evaluate.ts` EVM `readPolicy` |
+| 42 | Portfolio history snapshots on Solana | ✅ | sweep now selects base58 wallets; 2 Solana snapshots written |
+| 43 | Cap/expiry risk alerts on Solana | ✅ | cap alert fired: "$0 left of today's $200 cap." |
 | 44 | History screen on Solana (port or hide) | ✅ | hidden | reads Base logs |
-| 45 | Chat proposals on Solana (port or hide) | ✅ | answers plainly | `propose.ts` WETH/EVM |
-| 46 | Allowlist copy base58 on Solana | ✅ | placeholder "0x…" |
+| 45 | Chat proposals on Solana (port or hide) | ✅ | /proposals/generate answers plainly on Solana |
+| 46 | Allowlist copy base58 on Solana | ✅ | placeholder "A Solana address" |
 | 47 | Solana env example + Solana web build | ✅ | `.env.example`, `build-web.mjs` EVM |
 | 48 | iOS simulator run of the Solana build | ❌ | never run |
-| 49 | Safety/Settings sub-screens Solana-correct (Flatten, Policy, Recovery) | ⚠️ | Flatten/Policy hidden; Recovery (key export) unchecked | EVM |
+| 49 | Safety/Settings sub-screens Solana-correct (Flatten, Policy, Recovery) | ⚠️ | Flatten/Policy hidden; key export switched to Privy's Solana export, not opened live |
 | 50 | Networks/fee chips Solana-correct | ✅ | `/networks` lists Base |
 
 ### P2 / post-MVP
@@ -344,5 +346,21 @@ deadline; Jupiter API rate limits (keyless).
 1.1 → 1.2 → 1.3 → 2.1 → 2.2 → 2.3 → 2.4 → 2.5 → 3.1 → 3.2 → 3.3 → 3.4 → 3.5 → 3.6 → 3.7 → 4.x → 5.x → 6.1 → 6.2 →
 (owner approval) 6.3 → 7.x → 8.x → 9.x.
 
-## 17. Remaining unknowns
-OpenRouter key; MoonPay keys; Railway approval and budget; Privy dashboard changes; Clawpump key and mainnet wallet.
+## 17. Remaining items (2026-09-19)
+
+| # | Item | Why it is open | Next step |
+|---|---|---|---|
+| 24 | Hosted: Jupiter-routed buy, sell, stop | Privy's signing sheet needs the Browser pane visible | With the pane open: sign in on https://xorr-solana.vercel.app, faucet, grant, buy (expect "Routed by Jupiter"), sell, stop |
+| 26 | Demo video | needs a visible screen to record | follow `docs/DEMO-SCRIPT-SOLANA.md`; redeploy the fork first |
+| 28 | Submission | owner | `docs/SUBMISSION-STOCKLANA.md`; make the repo public first |
+| 31 | Recurring-buy fill | today's cap was spent; the run correctly refused `daily_cap` | the scheduled run after 00:00 UTC fills, or re-grant a higher cap |
+| 33 | Close position live | same as 24 | Portfolio → a position → Close |
+| 37 | LLM reasoning/chat | needs `OPENROUTER_API_KEY` | set it on the Railway executor |
+| 38 | Card deposits | needs MoonPay sandbox keys | set `MOONPAY_*` on the Railway executor |
+| 48 | iOS simulator run | internal disk has ~3 GB free; an iOS build needs far more | free disk space, then `expo prebuild` + simulator |
+| 49 | Key export live | same as 24 | Safety → Recovery |
+| 51 | Clawpump token | owner mainnet launch + Clawpump key | after submission-critical work |
+
+Operational notes: Railway deploys go by `railway up <ctx> --path-as-root` (the Railway GitHub app has no access to this
+repo); the fork re-bootstraps on every deploy (all balances reset; the faucet lock and fee SOL follow the chain). Keys
+for the hosted services are in `server/.env.railway-solana` (gitignored) and in Railway only.
