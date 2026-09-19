@@ -213,7 +213,7 @@ export default function XStockTicket() {
         ))}
         {side === 'sell' && heldUsd > 0 ? (
           // Everything held, at the chain's balance and the live price; the quote then sizes the shares exactly.
-          <Pill label="All" light onPress={() => setOrderAmt(heldUsd.toFixed(2))} testID="xstock-sell-all" />
+          <Pill label="All" light onPress={() => setOrderAmt(String(Math.floor(heldUsd * 100) / 100))} testID="xstock-sell-all" />
         ) : null}
       </View>
 
