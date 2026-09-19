@@ -228,6 +228,10 @@ accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim
 | CH26 | PASS | Trade tab → xStocks; sector filter narrows the list; Add funds on an agent opens Deposit. |
 | CH27 | PASS | Final console and network sweep across Home, xStocks, ticket, Portfolio, Activity, Strategies and Safety: no errors, nothing ≥ 400. |
 
+| CH28 | PASS | Exit fires unattended on hosted: a take-profit armed from Auto Close at +0.5% was crossed and sold on the next sweep — AAPLx 0.0745 → 0 on chain, "reached the target at $337.14: sold 0.074523 at $334.39 through Jupiter" (`34nxEs4b…`). The delegate moved the owner's shares under the sell approval. |
+| CH29 | PASS | iOS: the Solana bundle runs on the iPhone 17 Pro simulator against the hosted executor and fork — Home, xStocks with live Jupiter prices and issuer logos, the NVDAx ticket quoting 1.1221 NVDAx at mark $223.77. No red screen; the only native log is the honest "[push] not registered (unconfigured)". |
+| CH30 | PASS | Re-measure after every fix: app 2,646 and server 1,367 tests, both typechecks, CI green on main, no mock/stub/TODO in any production path, hosted console and network clean, and each fix still live (local Activity times, "Not listed", Sources naming Jupiter and Backed, no deposit-as-gain on Portfolio). |
+
 | HS16 | PASS | xStock logos: `/market/logos` answers each xStock from Jupiter's registry (`source: jupiter`, issuer icon); hosted Watchlist, xStocks list, Home Stocks, ticket header, Portfolio cards and position screen all render `NVDAx.png`…`QQQx.png`. |
 | HS17 | PASS | Watchlist: Stocks tab first on Solana; its own tab choice (no longer Home's index); 11 prices, 23 sparkline paths, sparkline skeleton while loading; no response ≥ 400. |
 | HS18 | PASS | xStock charts: `/market/ohlc?symbol=NVDAx&days=1` → 27 half-hour rows from recorded Jupiter prices; Portfolio cards draw a chart ("No price history yet" gone). |

@@ -23,7 +23,7 @@ Swap tab, strategies, exits, sells, flatten, and ~40 screens reachable from Expl
 
 **Initial completion: 15 / 50 P0+P1 checklist items verified = 30 %** (P0 alone: 15 / 30 = 50 %). See §9.
 
-**Final completion (2026-09-19, same checklist): 44 / 50 = 88 %** (P0 28 / 30 = 93 %: the demo video and the submission, both the owner's). What remains is in §17.
+**Final completion (2026-09-20, same checklist): 46 / 50 = 92 %** (P0 28 / 30 = 93 %). What remains is four items: the demo video and the submission (both the owner's), and two blocked on credentials that exist nowhere in the repo — `OPENROUTER_API_KEY` (#37) and the MoonPay keys (#38). See §17.
 
 ## 2. Vision, problem, users
 
@@ -116,11 +116,11 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 9 | Resume (re-grant) from Safety | ✅ | Solana plan from the grant record; resume tx `65z7Jnv7…` set USDC + NVDAx approvals |
 | 10 | Buy an xStock from the app | ✅ | F1 (fills may be vault-labelled, see #25) |
 | 11 | Sell an xStock from the app (user-signed) | ✅ | ticket Sell: 0.4462 NVDAx → $99.13, tx `gCbS3NMG…`, balances checked on chain |
-| 12 | Server sell path moves the user's shares | ✅ | delegate moves the owner's shares under the sell approval; exit sold 1.5648 NVDAx through Jupiter (`2DztwgJ8…`) |
+| 12 | Server sell path moves the user's shares | ✅ | Re-verified hosted 2026-09-20: the delegate moved the owner's AAPLx under the sell approval — `34nxEs4b…`, through Jupiter. |
 | 13 | Over-cap / over-allowance refusals | ✅ | F2 |
 | 14 | Hire / fire an agent | ✅ | G2 |
 | 15 | Agent buys autonomously with its reason shown | ✅ | G2 (template reasoning; LLM ⛔ #37) |
-| 16 | Agent exits (stop/take-profit) fire on Solana | ✅ | `solanaExits.ts` sweep each tick; forced stop fired unattended |
+| 16 | Agent exits (stop/take-profit) fire on Solana | ✅ | Re-verified hosted 2026-09-20: a take-profit armed from Auto Close fired unattended on the next sweep; AAPLx 0.0745 → 0 on chain, "reached the target at $337.14". |
 | 17 | Agent pacing (D3) | ✅ | `pacingExclusions` + 60-min cooldown; tests |
 | 18 | Withdraw to allowlisted address, cooling-off enforced | ✅ | I1–I3, tx `5MyCZ2dP…` |
 | 19 | Trade tab = xStock buy/sell | ✅ | centre tab "Trade" → `/xstocks` (verified) |
@@ -139,7 +139,7 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 ### P1 — important
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 31 | Recurring buy (DCA) on xStocks via Solana path | ⚠️ | created from the screen; run went through `runOnSolana` → `daily_cap` refusal; a fill awaits cap headroom |
+| 31 | Recurring buy (DCA) on xStocks via Solana path | ✅ | Hosted 2026-09-20: created from the screen, Run now filled $50 of NVDAx through Jupiter, a second Run now answered "Already ran this period" with USDC unchanged. |
 | 32 | Custom agents with xStock templates | ✅ | custom agent "NVDA Stacker" created from the UI with a live "$25 of NVDAx, weekly" |
 | 33 | Close a position (Solana) | ✅ | Hosted: Close 50% of 0.4501 NVDAx → sold 0.2251 for $49.97, chain USDC 400 → 449.97; realised P&L shown. |
 | 34 | Withdraw everything (Solana) | ✅ | sold 0.018 NVDAx (`4dXwVMfj…`), sent 495.66 USDC (`48n4enDu…`) |
@@ -156,7 +156,7 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 45 | Chat proposals on Solana (port or hide) | ✅ | /proposals/generate answers plainly on Solana |
 | 46 | Allowlist copy base58 on Solana | ✅ | placeholder "A Solana address" |
 | 47 | Solana env example + Solana web build | ✅ | `.env.example`, `build-web.mjs` EVM |
-| 48 | iOS simulator run of the Solana build | ❌ | never run |
+| 48 | iOS simulator run of the Solana build | ✅ | Hosted 2026-09-20: the Solana bundle runs on the iPhone 17 Pro simulator against the hosted executor and fork — Home, xStocks with live Jupiter prices and issuer logos, the NVDAx ticket quoting 1.1221 NVDAx at mark $223.77. |
 | 49 | Safety/Settings sub-screens Solana-correct (Flatten, Policy, Recovery) | ✅ | Flatten/Policy hidden; Recovery → Export opens Privy's own Solana export window (hosted, key not revealed). |
 | 50 | Networks/fee chips Solana-correct | ✅ | `/networks` lists Base |
 
