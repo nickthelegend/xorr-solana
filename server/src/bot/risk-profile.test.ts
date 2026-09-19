@@ -113,6 +113,11 @@ describe('the names mean what they say', () => {
     expect(balanced.cooldownMinutes).toBeGreaterThan(aggressive.cooldownMinutes);
   });
 
+  // The agent never waits less than the pacing floor (60 minutes, `MIN_COOLDOWN_MINUTES`), so no profile may promise less.
+  it('never states a wait shorter than the pacing floor', () => {
+    for (const p of RISK_PROFILES) expect(RISK_SETTINGS[p].cooldownMinutes).toBeGreaterThanOrEqual(60);
+  });
+
   /* The floor is a fee question, not a risk appetite one, so it does not move with the profile. */
   it('keeps the same minimum trade size across all three', () => {
     expect(new Set(RISK_PROFILES.map((p) => RISK_SETTINGS[p].minTradeUsd)).size).toBe(1);

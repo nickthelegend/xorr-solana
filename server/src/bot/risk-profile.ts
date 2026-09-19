@@ -51,7 +51,11 @@ export type RiskSettings = {
   corporateActionWindowHours: number;
   /** The widest projection error, in days, that still makes an earnings window tradeable. */
   earningsErrorToleranceDays: number;
-  /** How long a wallet waits between autonomous entries. */
+  /**
+   * How long a wallet waits between autonomous entries. Never below the pacing floor (`MIN_COOLDOWN_MINUTES`, 60): the
+   * profiles said 30, 10 and 5 while the agent waited 60 regardless, and every screen that quoted them understated the
+   * wait (2026-09-19).
+   */
   cooldownMinutes: number;
 };
 
@@ -77,7 +81,7 @@ export const RISK_SETTINGS: Readonly<Record<RiskProfile, RiskSettings>> = Object
     corporateActionWindowHours: 96,
     // Only a projection the filing record pins to within a day.
     earningsErrorToleranceDays: 1,
-    cooldownMinutes: 30,
+    cooldownMinutes: 180,
   },
   balanced: {
     maxTradeUsd: 25,
@@ -88,7 +92,7 @@ export const RISK_SETTINGS: Readonly<Record<RiskProfile, RiskSettings>> = Object
     minObservations: 6,
     corporateActionWindowHours: 48,
     earningsErrorToleranceDays: 3,
-    cooldownMinutes: 10,
+    cooldownMinutes: 90,
   },
   aggressive: {
     maxTradeUsd: 50,
@@ -99,7 +103,7 @@ export const RISK_SETTINGS: Readonly<Record<RiskProfile, RiskSettings>> = Object
     minObservations: 4,
     corporateActionWindowHours: 24,
     earningsErrorToleranceDays: 5,
-    cooldownMinutes: 5,
+    cooldownMinutes: 60,
   },
 });
 
