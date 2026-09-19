@@ -105,19 +105,26 @@ export default function XStockTicket() {
   const tradable = useAsync(() => system.tradable(), []);
   /** Every xStock this build lists, to tell "not listed at all" from "listed but not settleable on this cluster". */
   const catalog = useAsync(() => system.xstocks(), []);
+  /*
+   * Nothing is asked about a symbol until the catalogue says it exists (2026-09-20). `/xstock/FAKEx` fired the quote
+   * and all four panels before the screen could know better: four 404s and a 502 in the network tab, for a token this
+   * build does not list. Undefined while the catalogue is still answering, so a listed symbol waits only for one
+   * cached read before its own reads start.
+   */
+  const listed = catalog.data ? catalog.data.rows.some((r) => r.symbol === symbol) : undefined;
   const canSettle = !!tradable.data?.some((t) => t.symbol === symbol);
   const [buying, setBuying] = useState(false);
 
   // What backs the token, and whether the issuer's own gates let this wallet hold it — each read from its route, each
   // saying so in words when it could not be read.
   const { address } = useAuth();
-  const backing = useAsync(() => (symbol ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol]);
-  const detail = useAsync(() => (symbol ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol]);
-  const history = useAsync(() => (symbol ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol]);
-  const income = useAsync(() => (symbol ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol]);
+  const backing = useAsync(() => (listed ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol, listed]);
+  const detail = useAsync(() => (listed ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol, listed]);
+  const history = useAsync(() => (listed ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol, listed]);
+  const income = useAsync(() => (listed ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol, listed]);
   const eligibility = useAsync(
-    () => (symbol && address ? fetchEligibility(symbol, address) : Promise.resolve(undefined)),
-    [symbol, address],
+    () => (listed && address ? fetchEligibility(symbol, address) : Promise.resolve(undefined)),
+    [symbol, address, listed],
   );
   const [showBacking, setShowBacking] = useState(false);
 
@@ -135,10 +142,10 @@ export default function XStockTicket() {
   const quoteUsd = cappedToHolding ? heldUsd : quoted;
   const quote = useAsync(
     () =>
-      quoteUsd > 0 && symbol
+      quoteUsd > 0 && listed
         ? system.xstockQuote({ symbol, side, usd: quoteUsd })
         : Promise.resolve(null),
-    [symbol, side, quoteUsd],
+    [symbol, side, quoteUsd, listed],
   );
   const { sell: sellShares, selling, ready: canSell } = useXStockSell();
   const [sold, setSold] = useState<XStockSellOutcome>();
