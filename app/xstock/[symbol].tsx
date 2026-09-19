@@ -97,13 +97,6 @@ export default function XStockTicket() {
    * decoration, and one measured buy waited 153 seconds before failing on a price that had moved.
    */
   const quoted = useDebounced(amount);
-  const quote = useAsync(
-    () =>
-      quoted > 0 && symbol
-        ? system.xstockQuote({ symbol, side, usd: quoted })
-        : Promise.resolve(null),
-    [symbol, side, quoted],
-  );
 
   const signedOut = useSignedOut();
   const keys = useIntentKeys();
@@ -130,6 +123,20 @@ export default function XStockTicket() {
   const held = tokens.data?.tokens.find((t) => t.symbol === symbol);
   const heldUnits = held?.units ?? 0;
   const heldUsd = held?.usd ?? 0;
+  /*
+   * A sale is never sized past the holding, so the breakdown is not quoted past it either (2026-09-20). Typing $1,009
+   * against 0.4499 NVDAx drew "Expected 997.52 USDC" over a button that would sell $100 of shares: the panel described
+   * a trade that could not happen. Only once the chain has answered — until then the typed amount stands.
+   */
+  const cappedToHolding = side === 'sell' && !!tokens.data && heldUsd > 0 && quoted > heldUsd;
+  const quoteUsd = cappedToHolding ? heldUsd : quoted;
+  const quote = useAsync(
+    () =>
+      quoteUsd > 0 && symbol
+        ? system.xstockQuote({ symbol, side, usd: quoteUsd })
+        : Promise.resolve(null),
+    [symbol, side, quoteUsd],
+  );
   const { sell: sellShares, selling, ready: canSell } = useXStockSell();
   const [sold, setSold] = useState<XStockSellOutcome>();
   const [sellError, setSellError] = useState<string>();
@@ -385,7 +392,9 @@ export default function XStockTicket() {
             <Text variant="footnote" color={colors.sheet.muted} align="center">
               {tokens.data
                 ? heldUnits > 0
-                  ? `You hold ${quantity(heldUnits)} ${symbol}.`
+                  ? cappedToHolding
+                    ? `You hold ${quantity(heldUnits)} ${symbol}, so this sells all of it.`
+                    : `You hold ${quantity(heldUnits)} ${symbol}.`
                   : `You hold no ${symbol} to sell.`
                 : `Reading what you hold…`}
             </Text>
