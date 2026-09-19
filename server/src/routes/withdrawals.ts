@@ -44,6 +44,7 @@ import { waitForTx } from '../evm/delegation.js';
 import { readChain } from '../http/chain-read.js';
 import { canonicalSymbol } from '../venues/oneinch.js';
 import { snapshotWallet } from '../portfolio/snapshots.js';
+import { XSTOCKS } from '../venues/xstocks.js';
 import { functioningHere } from './market.js';
 import { isSolanaCluster, getClusterConfig } from '../solana/clusters.js';
 import { getConnection, explorerTx as solanaExplorerTx } from '../solana/connection.js';
@@ -349,24 +350,20 @@ export async function recordSolanaWithdrawal(w: WalletRow, signature: string): P
   let transferredUnits = 0n;
   let destination = '';
   let tokenSymbol = 'USDC';
+  let tokenMint = usdcMint;
 
-  const preToken = txData.meta?.preTokenBalances?.find((b) => b.owner === ownerAddress && b.mint === usdcMint);
-  const postToken = txData.meta?.postTokenBalances?.find((b) => b.owner === ownerAddress && b.mint === usdcMint);
-
-  if (preToken && postToken) {
-    const preUnits = BigInt(preToken.uiTokenAmount.amount);
-    const postUnits = BigInt(postToken.uiTokenAmount.amount);
-    if (preUnits > postUnits) {
-      transferredUnits = preUnits - postUnits;
-      transferredAmount = Number(transferredUnits) / 1e6;
-
-      const destToken = txData.meta?.postTokenBalances?.find(
-        (b) => b.mint === usdcMint && b.owner && b.owner !== ownerAddress,
-      );
-      if (destToken?.owner) {
-        destination = destToken.owner;
-      }
-    }
+  /*
+   * Any token, read from the balances the chain recorded (2026-09-19). This measured USDC alone, so an xStock sent from
+   * the Send screen was recorded as nothing, and a destination it could not see was filled in with the first address on
+   * the allowlist — the trail naming a recipient the chain never paid.
+   */
+  const moved = tokenMovement(txData.meta, ownerAddress);
+  if (moved) {
+    transferredUnits = moved.units;
+    transferredAmount = Number(moved.units) / 10 ** moved.decimals;
+    destination = moved.to ?? '';
+    tokenMint = moved.mint;
+    tokenSymbol = moved.mint === usdcMint ? 'USDC' : (xStockSymbolFor(moved.mint) ?? `${moved.mint.slice(0, 4)}…`);
   }
 
   if (transferredUnits === 0n && txData.meta?.preBalances && txData.meta?.postBalances) {
@@ -396,8 +393,14 @@ export async function recordSolanaWithdrawal(w: WalletRow, signature: string): P
   }
 
   if (!destination) {
-    const { addresses } = await listAddresses(w.id);
-    destination = addresses.length > 0 && addresses[0] ? addresses[0].address : 'recipient';
+    // Nothing on the chain names a recipient: say so rather than borrowing one from the allowlist.
+    return {
+      status: 422,
+      body: {
+        status: 'unknown',
+        detail: 'That transaction moved nothing out of this wallet that this app can attribute to a recipient, so nothing was recorded.',
+      },
+    };
   }
 
   const verdict = await destinationStatus(w.id, destination);
@@ -449,7 +452,7 @@ export async function recordSolanaWithdrawal(w: WalletRow, signature: string): P
 
   const transfers = [
     {
-      token: tokenSymbol === 'USDC' ? usdcMint : 'So11111111111111111111111111111111111111112',
+      token: tokenSymbol === 'SOL' ? 'So11111111111111111111111111111111111111112' : tokenMint,
       symbol: tokenSymbol,
       to: destination,
       amount: transferredAmount.toString(),
@@ -587,3 +590,32 @@ withdrawalRoutes.post('/withdrawals/record', async (c) => {
   const { txHash } = RecordInput.parse(await c.req.json());
   return reply(c, await recordWithdrawal(w, txHash));
 });
+
+type TokenBalance = { accountIndex: number; mint: string; owner?: string; uiTokenAmount: { amount: string; decimals: number } };
+
+/**
+ * What left `owner` in a confirmed transaction, and who received it: the mint whose balance under `owner` fell, and the
+ * owner of the account of that mint whose balance rose. Null when no token balance of `owner` fell.
+ */
+export function tokenMovement(
+  meta: { preTokenBalances?: TokenBalance[] | null; postTokenBalances?: TokenBalance[] | null } | null | undefined,
+  owner: string,
+): { mint: string; units: bigint; decimals: number; to: string | null } | null {
+  const pre = meta?.preTokenBalances ?? [];
+  const post = meta?.postTokenBalances ?? [];
+  const before = (i: number) => BigInt(pre.find((b) => b.accountIndex === i)?.uiTokenAmount.amount ?? '0');
+  for (const after of post) {
+    if (after.owner !== owner) continue;
+    const fell = before(after.accountIndex) - BigInt(after.uiTokenAmount.amount);
+    if (fell <= 0n) continue;
+    const receiver = post.find(
+      (b) => b.mint === after.mint && b.owner && b.owner !== owner && BigInt(b.uiTokenAmount.amount) > before(b.accountIndex),
+    );
+    return { mint: after.mint, units: fell, decimals: after.uiTokenAmount.decimals, to: receiver?.owner ?? null };
+  }
+  return null;
+}
+
+function xStockSymbolFor(mint: string): string | null {
+  return Object.values(XSTOCKS).find((x) => x.address === mint)?.symbol ?? null;
+}
