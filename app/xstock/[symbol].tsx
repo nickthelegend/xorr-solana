@@ -25,6 +25,7 @@ import { Linking, ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
+  AssetMark,
   Button,
   CloseButton,
   SignInButton,
@@ -43,6 +44,8 @@ import {
   space,
 } from '@/ui';
 import { useAsync } from '@/data/useAsync';
+import { useLogo } from '@/data/useLogos';
+import { assetGradient } from '@/design/gradients';
 import { useDebounced } from '@/data/useDebounced';
 import { useStore } from '@/state/store';
 import { system, type XStockBuyOutcome, type XStockSellOutcome } from '@/data/system';
@@ -73,6 +76,7 @@ const FORMAT = { money, quantity, price: fmtPrice };
 
 export default function XStockTicket() {
   const { symbol = '' } = useLocalSearchParams<{ symbol: string }>();
+  const logo = useLogo(symbol || undefined);
   const goBack = useGoBack();
 
   // The same store the order ticket types into, so moving between the two keeps the amount.
@@ -167,9 +171,12 @@ export default function XStockTicket() {
   return (
     <Screen light gutter="sheet">
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="sheetTitle" color={colors.sheet.ink}>
-          {symbol}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s10, flexShrink: 1 }}>
+          <AssetMark gradient={assetGradient(symbol)} {...logo} size={30} />
+          <Text variant="sheetTitle" color={colors.sheet.ink}>
+            {symbol}
+          </Text>
+        </View>
         <CloseButton onPress={() => goBack()} light />
       </View>
 

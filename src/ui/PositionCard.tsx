@@ -32,6 +32,8 @@ export type PositionStat = { label: string; value: string; value2?: number; figu
 
 export interface PositionCardProps {
   symbol: string;
+  /** The asset's mark (its logo), drawn before the symbol. */
+  mark?: React.ReactNode;
   side: 'long' | 'short';
   /** The live price, formatted. */
   price: string;
@@ -71,6 +73,7 @@ function Pill({ label, bg, ink }: { label: string; bg: string; ink: string }) {
 
 export function PositionCard({
   symbol,
+  mark,
   side,
   price,
   pnl,
@@ -117,6 +120,7 @@ export function PositionCard({
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8, flexShrink: 1 }}>
+          {mark}
           <Text variant="cardTitle">{symbol}</Text>
           <Pill label={side.toUpperCase()} bg={colors.neutralBg} ink={colors.ink65} />
           <Pill label={status} bg={statusBg} ink={statusInk} />

@@ -35,7 +35,10 @@ import {
   toCandles,
   NoteStrip,
   SignInPrompt,
+  AssetMark,
 } from '@/ui';
+import { assetGradient } from '@/design/gradients';
+import { logoProps, useLogos } from '@/data/useLogos';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { PositionCard, PositionCardSkeleton, type PositionLevel } from '@/ui/PositionCard';
 import { AllocationDonut } from '@/ui/charts/AllocationDonut';
@@ -159,6 +162,8 @@ export default function Portfolio() {
   // Dust a sale left behind is not a position: it would read as an open trade worth $0.00.
   const book = useMemo(() => (positions.data ?? []).filter((p) => p.notional >= DUST_USD), [positions.data]);
   const symbolsKey = book.map((p) => p.symbol).join(',');
+  const bookSymbols = useMemo(() => (symbolsKey ? symbolsKey.split(',') : []), [symbolsKey]);
+  const logos = useLogos(bookSymbols);
   const daily = useClosesBySymbol(symbolsKey, CARD_TF);
 
   /*
@@ -403,6 +408,7 @@ export default function Portfolio() {
               <PositionCard
                 key={p.id}
                 symbol={p.symbol}
+                mark={<AssetMark gradient={assetGradient(p.symbol)} {...logoProps(logos, p.symbol)} size={24} />}
                 side={p.side}
                 price={fmtPrice(p.mark)}
                 pnl={signedMoney(p.unrealised)}

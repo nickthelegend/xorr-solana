@@ -27,7 +27,7 @@ import { STOCKS, equitiesFunctional, isStock, observedHistory } from '../venues/
 import { classificationFor, earningsCalendar } from '../market/edgar.js';
 import { aavePoolIsDeployedHere, usdcSupplyYield, usdcReserve } from '../market/yield.js';
 import { logosFor, warmLogos } from '../market/logos.js';
-import { dayChangePct, hourlyCloses, observedDay } from '../market/observed.js';
+import { bucketFor, dayChangePct, hourlyCloses, observedDay, observedSince, ohlcRows } from '../market/observed.js';
 import { withdrawCalldata } from '../venues/aave.js';
 import { suppliedUsd } from '../evm/balances.js';
 import { publicClient } from '../evm/client.js';
@@ -229,13 +229,24 @@ market.get('/market/ohlc', async (c) => {
    * symbol nothing prices is a 404 that says which.
    */
   if (!symbol) return c.json({ error: 'missing_symbol', detail: 'Pass ?symbol=, for example ?symbol=BTC.' }, 400);
-  const id = COINGECKO_IDS[symbol];
-  if (!id) return c.json({ error: 'no_feed', detail: `No price feed for ${symbol}.` }, 404);
-
   const days = Number(c.req.query('days') ?? 30);
   if (!Number.isFinite(days) || days <= 0) {
     return c.json({ error: 'invalid_days', detail: 'days is a number of days above zero.' }, 400);
   }
+
+  /*
+   * An xStock's rows are the executor's own recorded Jupiter prices (2026-09-20): no candle feed has them, and every
+   * xStock chart read "No price history yet". The series starts when this deployment started watching, and is no longer
+   * than that.
+   */
+  const equity = ON_SOLANA ? xStockKey(symbol) : undefined;
+  if (equity) {
+    const rows = ohlcRows(await observedSince(equity, Math.min(days, 365)), bucketFor(days));
+    return c.json({ symbol: equity, days, rows, source: 'observed' });
+  }
+
+  const id = COINGECKO_IDS[symbol];
+  if (!id) return c.json({ error: 'no_feed', detail: `No price feed for ${symbol}.` }, 404);
 
   try {
     const rows = await getWithStale<[number, number, number, number, number][]>(
@@ -433,7 +444,10 @@ market.get('/market/stocks/history', async (c) => {
 });
 
 /** GET /market/symbols — which symbols have a real feed. */
-market.get('/market/symbols', (c) => c.json(Object.keys(COINGECKO_IDS)));
+market.get('/market/symbols', (c) =>
+  // On Solana the xStocks have a series too: the observed one `/market/ohlc` serves for them.
+  c.json(ON_SOLANA ? [...Object.keys(COINGECKO_IDS), ...Object.keys(XSTOCKS)] : Object.keys(COINGECKO_IDS)),
+);
 
 /**
  * GET /market/logos?symbols=BTC,NVDAc — real logos, from the registries that actually know.

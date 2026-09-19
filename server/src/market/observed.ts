@@ -56,3 +56,41 @@ export function observedDay(symbol: string): Promise<Observation[]> {
   held.set(symbol, { at: Date.now(), rows });
   return rows;
 }
+
+/** One OHLC row, `[start ms, open, high, low, close]`, as `/market/ohlc` answers for the crypto feed. */
+export type OhlcRow = [number, number, number, number, number];
+
+/**
+ * Observations folded into rows of `bucketMs`, oldest first; an empty bucket is absent, never filled in. Pure.
+ *
+ * The same row lengths the crypto feed answers with (thirty minutes over a day, four hours beyond), so the client cuts
+ * xStock candles exactly as it cuts BTC's.
+ */
+export function ohlcRows(rows: readonly Observation[], bucketMs: number): OhlcRow[] {
+  const out = new Map<number, OhlcRow>();
+  for (const r of [...rows].sort((a, b) => a.at - b.at)) {
+    const start = Math.floor(r.at / bucketMs) * bucketMs;
+    const row = out.get(start);
+    if (!row) out.set(start, [start, r.usd, r.usd, r.usd, r.usd]);
+    else {
+      row[2] = Math.max(row[2], r.usd);
+      row[3] = Math.min(row[3], r.usd);
+      row[4] = r.usd;
+    }
+  }
+  return [...out.values()].sort((a, b) => a[0] - b[0]);
+}
+
+/** The row length the crypto feed uses for a window of `days`. */
+export function bucketFor(days: number): number {
+  return days <= 1 ? 30 * 60_000 : 4 * HOUR_MS;
+}
+
+/** Every observation of `symbol` in the last `days`. */
+export async function observedSince(symbol: string, days: number): Promise<Observation[]> {
+  const rows = await query<{ at: Date; usd: string }>(
+    `SELECT at, usd FROM price_observations WHERE symbol = $1 AND at > now() - ($2 || ' days')::interval ORDER BY at`,
+    [symbol, String(days)],
+  );
+  return rows.map((o) => ({ at: new Date(o.at).getTime(), usd: Number(o.usd) }));
+}

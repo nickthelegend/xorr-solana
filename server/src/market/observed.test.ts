@@ -33,3 +33,24 @@ describe('dayChangePct', () => {
     expect(dayChangePct([{ at: T0, usd: 100 }, { at: T0 + 6 * H, usd: 120 }])).toBeUndefined();
   });
 });
+
+describe('ohlcRows', () => {
+  it('folds readings into open/high/low/close per bucket, skipping empty buckets', async () => {
+    const { ohlcRows } = await import('./observed.js');
+    const M = 60_000;
+    const rows = ohlcRows(
+      [
+        { at: T0 + 5 * M, usd: 10 },
+        { at: T0 + 10 * M, usd: 12 },
+        { at: T0 + 20 * M, usd: 9 },
+        { at: T0 + 25 * M, usd: 11 },
+        { at: T0 + 95 * M, usd: 20 },
+      ],
+      30 * M,
+    );
+    expect(rows).toEqual([
+      [T0, 10, 12, 9, 11],
+      [T0 + 90 * M, 20, 20, 20, 20],
+    ]);
+  });
+});
