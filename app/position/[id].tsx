@@ -56,7 +56,7 @@ import {
   useReducedMotion,
 } from '@/ui';
 import { signedMoney } from '@/format';
-import { CLOSE_STEPS, closeCta, driftSentence, holdingDrift, quotedClose } from '@/state/derived';
+import { CLOSE_STEPS, closeCta, driftSentence, holdingDrift, closeSellUsd, quotedClose } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { fetchTimedHistory, fillsOf, type HistoryRange } from '@/data/marketData';
@@ -138,7 +138,7 @@ export default function PositionScreen() {
    * On Solana the close is a sale at the venue's live quote, so the preview is that quote for those units: priced at the
    * mark it promised a gain the fill did not deliver. Base keeps its book figures.
    */
-  const sellUsd = p ? Number(((p.units * closePct * p.mark) / 100).toFixed(6)) : 0;
+  const sellUsd = p ? closeSellUsd(p, closePct) : 0;
   const sellQuote = useAsync(
     () =>
       isSolana && p && sellUsd > 0

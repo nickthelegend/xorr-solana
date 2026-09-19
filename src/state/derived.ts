@@ -187,6 +187,11 @@ export const CLOSE_STEPS = [25, 50, 75, 100] as const;
  * read "Realises +$0.31" over a close that realised −$0.03 once impact and the pool's own price were in it. Proceeds are
  * the quote's expected USDC; the gain is those proceeds less what the units cost at the position's average entry.
  */
+/** The dollar size to ask the venue to quote for closing `pct`: those units at the mark, to the micro-dollar. */
+export function closeSellUsd(p: { units: number; mark: number }, pct: number): number {
+  return Math.round(((p.units * pct) / 100) * p.mark * 1e6) / 1e6;
+}
+
 export function quotedClose(
   p: { units: number; entry: number },
   pct: number,
