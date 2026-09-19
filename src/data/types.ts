@@ -87,6 +87,8 @@ export type ActivityKind = 'trade' | 'risk' | 'block' | 'yield';
 
 export type ActivityEvent = {
   id: string;
+  /** When it happened, epoch ms. Formatted in the reader's timezone; `t` is the server's older preformatted string. */
+  at?: number;
   t: string;
   agent: string;
   action: string;
