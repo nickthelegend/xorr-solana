@@ -8,6 +8,9 @@
  * The next-runs preview exists so that verification is possible at the moment of setup,
  * not after the fact.
  */
+import { system } from '@/data/system';
+import { useAsync } from '@/data/useAsync';
+import { isSolana } from '@/chain';
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
@@ -54,7 +57,7 @@ const CADENCES = [
  */
 const SYMBOLS = RECURRING_BUY_SYMBOLS.map((s) => ({ value: s, label: s }));
 
-type Symbol = RecurringBuySymbol;
+type Symbol = RecurringBuySymbol | string;
 
 /** The cadence in the sentence the CTA and the label both speak. */
 function phrase(c: Cadence): string {
@@ -65,7 +68,15 @@ export default function DcaSetup() {
   const goBack = useGoBack();
   const [amount, setAmount] = useState('50');
   const [cadence, setCadence] = useState<Cadence>('weekly');
-  const [symbol, setSymbol] = useState<Symbol>('WETH');
+  /*
+   * On Solana (2026-09-19) a recurring buy buys an xStock the cluster can settle, read from the executor — the Base list
+   * (WETH, cbBTC) does not exist here, and the executor refuses it.
+   */
+  const tradable = useAsync(() => (isSolana ? system.tradable() : Promise.resolve(null)), []);
+  const solanaSymbols = (tradable.data ?? []).map((t) => t.symbol).filter((sym) => sym !== 'USDC');
+  const options = isSolana ? solanaSymbols.map((sym) => ({ value: sym, label: sym })) : SYMBOLS;
+  const [picked, setSymbol] = useState<Symbol>();
+  const symbol: Symbol = picked ?? (isSolana ? (solanaSymbols[0] ?? '') : 'WETH');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
   const signedOut = useSignedOut();
@@ -119,7 +130,7 @@ export default function DcaSetup() {
       </View>
 
       <Segmented
-        options={SYMBOLS}
+        options={options}
         value={symbol}
         onChange={setSymbol}
         light

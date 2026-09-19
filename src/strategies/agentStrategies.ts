@@ -177,6 +177,49 @@ function stops(sym: PricedSymbol): StrategyTemplate {
   };
 }
 
+/**
+ * The templates on Solana (2026-09-19): a weekly and a daily recurring buy of each xStock this cluster can settle, read
+ * from `/market/tradable` by the caller. The Base list is WETH and cbBTC, which do not exist here, and its momentum,
+ * range and yield kinds have no Solana runner. No replay: the executor has no price history for an xStock to replay.
+ * Exits are not a template here — the agent arms one on every entry it makes.
+ */
+export function solanaTemplates(symbols: readonly string[]): StrategyTemplate[] {
+  return symbols.flatMap((sym) => [
+    {
+      key: `dca-weekly-${sym}`,
+      group: 'buys' as const,
+      title: `Weekly ${sym} buy`,
+      what: 'The same amount every week, whatever the price.',
+      build: (usd: number) => ({
+        kind: 'dca',
+        state: 'live' as const,
+        label: `$${usd} of ${sym}, weekly`,
+        symbol: sym,
+        params: { usd },
+        cadence: 'weekly' as const,
+        nextRunAt: Date.now(),
+        dailyAllocationUsd: usd,
+      }),
+    },
+    {
+      key: `dca-daily-${sym}`,
+      group: 'buys' as const,
+      title: `Daily ${sym} buy`,
+      what: 'A smaller amount every day, so no single day decides the price.',
+      build: (usd: number) => ({
+        kind: 'dca',
+        state: 'live' as const,
+        label: `$${usd} of ${sym}, daily`,
+        symbol: sym,
+        params: { usd },
+        cadence: 'daily' as const,
+        nextRunAt: Date.now(),
+        dailyAllocationUsd: usd,
+      }),
+    },
+  ]);
+}
+
 export const STRATEGY_TEMPLATES: readonly StrategyTemplate[] = [
   weeklyBuy('WETH'),
   weeklyBuy('CBBTC'),

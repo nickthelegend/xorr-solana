@@ -6,6 +6,9 @@
  * listed first once every replay is in. Narrowed by what it does, or to the working ones; "Select all" picks everything
  * showing. The pick is shared with New agent, which makes the agent and gives it each strategy.
  */
+import { system } from '@/data/system';
+import { useAsync } from '@/data/useAsync';
+import { isSolana } from '@/chain';
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
@@ -31,6 +34,7 @@ import { ReplayLine } from '@/strategies/ReplayLine';
 import {
   PRICED,
   STRATEGY_TEMPLATES,
+  solanaTemplates,
   isWorking,
   marksOf,
   scoreOf,
@@ -62,7 +66,13 @@ export default function PickStrategies() {
   const signedOut = useSignedOut();
   const { quotes } = usePrices(PRICED);
   const marks = marksOf(quotes);
-  useStrategyReplays(marks, !signedOut);
+  // Solana: recurring buys of what this cluster can settle, read from the executor (`solanaTemplates`).
+  const tradable = useAsync(() => (isSolana ? system.tradable() : Promise.resolve(null)), []);
+  const templates = isSolana
+    ? solanaTemplates((tradable.data ?? []).map((t) => t.symbol).filter((sym) => sym !== 'USDC'))
+    : STRATEGY_TEMPLATES;
+  // No replays on Solana: the Solana templates have none (no xStock price history to replay).
+  useStrategyReplays(marks, !signedOut && !isSolana);
   const chosen = useAgentStrategies((s) => s.chosen);
   const replays = useAgentStrategies((s) => s.replays);
   const toggle = useAgentStrategies((s) => s.toggle);
@@ -89,8 +99,8 @@ export default function PickStrategies() {
   }
 
   // Sorted once every replay is in, so a row never moves under a finger that is reaching for it.
-  const settled = STRATEGY_TEMPLATES.every((t) => !t.replay || !!replays[t.key]);
-  const visible = STRATEGY_TEMPLATES.filter((t) =>
+  const settled = templates.every((t) => !t.replay || !!replays[t.key]);
+  const visible = templates.filter((t) =>
     filter === 'all' ? true : filter === 'working' ? isWorking(replays[t.key]) : t.group === filter,
   );
   const ordered = settled ? [...visible].sort((a, b) => scoreOf(b, replays[b.key]) - scoreOf(a, replays[a.key])) : visible;
