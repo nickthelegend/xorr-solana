@@ -17,6 +17,8 @@ import { spentToday } from '../rules/engine.js';
 import { connection as defaultConnection } from './connection.js';
 import { DEFAULT_MINTS } from './clusters.js';
 import { delegateKeypair } from './keys.js';
+import { mintsOnCluster } from './settleable.js';
+import { XSTOCKS } from '../venues/xstocks.js';
 import { readDelegation, usdToBaseUnits, baseUnitsToUsd } from './delegation.js';
 
 /** Where the grant lets the bot trade. Jupiter is the only venue this build routes through. */
@@ -172,13 +174,21 @@ export async function recordSolanaRevoke(
   );
 }
 
-/** What the app needs to build the grant: whom to delegate to, and the token and program it applies to. */
-export function solanaGrantParams() {
+/**
+ * What the app needs to build the grant: whom to delegate to, the token and program it applies to, and the xStocks the
+ * grant also lets the bot SELL (2026-09-19) — those whose mint is on this cluster. An agent's stop-loss fires with nobody
+ * present to sign, so the one grant transaction approves the delegate on each of those accounts too; revoking drops
+ * them all.
+ */
+export async function solanaGrantParams() {
+  const all = Object.values(XSTOCKS);
+  const here = await mintsOnCluster(all.map((x) => x.address));
   return {
     chain: 'solana' as const,
     delegate: delegateKeypair().publicKey.toBase58(),
     token: new PublicKey(DEFAULT_MINTS.USDC).toBase58(),
     decimals: 6,
     venues: [...SOLANA_VENUES],
+    sellable: all.filter((x) => here.has(x.address)).map((x) => ({ symbol: x.symbol, mint: x.address, decimals: x.decimals })),
   };
 }

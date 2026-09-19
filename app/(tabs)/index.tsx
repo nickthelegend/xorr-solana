@@ -81,12 +81,14 @@ import { usePoll } from '@/data/usePoll';
 
 type SheetTab = 'agents' | 'gainers' | 'stocks' | 'futures';
 
-const TABS: readonly { key: SheetTab; label: string }[] = [
+const ALL_TABS: readonly { key: SheetTab; label: string }[] = [
   { key: 'agents', label: 'Agents' },
   { key: 'gainers', label: 'Gainers' },
   { key: 'stocks', label: 'Stocks' },
   { key: 'futures', label: 'Futures' },
 ];
+/** Futures are Hyperliquid data with nothing tradable on Solana, so the Solana build has no Futures tab. */
+const TABS = isSolana ? ALL_TABS.filter((t) => t.key !== 'futures') : ALL_TABS;
 
 const AVATAR = 40;
 const GRABBER_W = 36;
@@ -831,7 +833,7 @@ export default function Home() {
                       <Row
                         height={size.rowLg}
                         divider={i < stockRows.length - 1}
-                        onPress={() => router.push(`/oracle/${s.symbol}`)}
+                        onPress={() => router.push(isSolana ? `/xstock/${s.symbol}` : `/oracle/${s.symbol}`)}
                         left={<AssetMark gradient={assetGradient(s.symbol)} {...logoProps(logos, s.symbol)} size={size.mark} />}
                         title={s.symbol}
                         secondary={s.name}

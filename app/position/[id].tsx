@@ -11,6 +11,8 @@
  * entire job is closing a position did nothing. It now calls the executor, which picks the
  * price, splits the cost basis and signs the transfer — see `POST /positions/:id/close`.
  */
+import { isSolana } from '@/chain';
+import { useXStockSell } from '@/markets/useXStockSell';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -147,11 +149,22 @@ export default function PositionScreen() {
    */
   const keys = useIntentKeys();
 
+  // Solana (2026-09-19): a close is the owner's own signed sale (`useXStockSell`); `/positions/close` is the Base path.
+  const { sell: sellShares } = useXStockSell();
+
   const close = useCallback(async () => {
     if (!p || closing) return;
     setClosing(true);
     setCloseError(undefined);
     try {
+      if (isSolana) {
+        const res = await sellShares(p.symbol, (p.units * closePct) / 100);
+        if (res.status === 'filled') {
+          setClosed({ proceeds: res.usd, units: res.units, replayed: res.duplicate });
+          reload();
+        } else setCloseError(res.message);
+        return;
+      }
       const ask = { symbol: p.symbol, fraction: closePct / 100 };
       const res = await keys.send(ask, (idempotencyKey) => repos.portfolio.close(ask, { idempotencyKey }));
       if (res.status === 'closed') {
@@ -169,7 +182,7 @@ export default function PositionScreen() {
     } finally {
       setClosing(false);
     }
-  }, [p, closePct, closing, reload, keys]);
+  }, [p, closePct, closing, reload, keys, sellShares]);
 
   const header = (
     <View

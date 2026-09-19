@@ -111,19 +111,19 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 6 | Grant capped SPL delegation from the app | ✅ | D1–D3 |
 | 7 | Kill switch: user-signed revoke from Safety | ✅ | H1, tx `4zgrs5nk…` (2026-09-19) |
 | 8 | After revoke every buy refused | ✅ | H2/F3 `delegation_revoked` |
-| 9 | Resume (re-grant) from Safety | ❌ | Resume path reads EVM `/approvals` |
+| 9 | Resume (re-grant) from Safety | ✅ | Solana plan from the grant record; resume tx `65z7Jnv7…` set USDC + NVDAx approvals |
 | 10 | Buy an xStock from the app | ✅ | F1 (fills may be vault-labelled, see #25) |
-| 11 | Sell an xStock from the app (user-signed) | ❌ | "Selling from the phone is not built yet" |
-| 12 | Server sell path moves the user's shares | ❌ | `place.ts` sell swaps the vault's xStock |
+| 11 | Sell an xStock from the app (user-signed) | ✅ | ticket Sell: 0.4462 NVDAx → $99.13, tx `gCbS3NMG…`, balances checked on chain |
+| 12 | Server sell path moves the user's shares | ✅ | delegate moves the owner's shares under the sell approval; exit sold 1.5648 NVDAx through Jupiter (`2DztwgJ8…`) |
 | 13 | Over-cap / over-allowance refusals | ✅ | F2 |
 | 14 | Hire / fire an agent | ✅ | G2 |
 | 15 | Agent buys autonomously with its reason shown | ✅ | G2 (template reasoning; LLM ⛔ #37) |
-| 16 | Agent exits (stop/take-profit) fire on Solana | ❌ | `order.ts` exits run on EVM `runStrategy` |
-| 17 | Agent pacing (D3) | ❌ | bought NVDAx every 10 min to the cap |
+| 16 | Agent exits (stop/take-profit) fire on Solana | ✅ | `solanaExits.ts` sweep each tick; forced stop fired unattended |
+| 17 | Agent pacing (D3) | ✅ | `pacingExclusions` + 60-min cooldown; tests |
 | 18 | Withdraw to allowlisted address, cooling-off enforced | ✅ | I1–I3, tx `5MyCZ2dP…` |
-| 19 | Trade tab = xStock buy/sell | ❌ | `app/swap.tsx` is 1inch/Base |
-| 20 | Home Stocks tab opens a working xStock screen | ❌ | goes to `/oracle` → 404 `not_an_equity` |
-| 21 | No Base-only screen reachable on Solana | ❌ | Explore lists ~40 Base screens; Futures tab; Approvals; Yield |
+| 19 | Trade tab = xStock buy/sell | ✅ | centre tab "Trade" → `/xstocks` (verified) |
+| 20 | Home Stocks tab opens a working xStock screen | ✅ | rows → `/xstock/[sym]`; `/oracle` redirects |
+| 21 | No Base-only screen reachable on Solana | ⚠️ | route guard + link filtering done; final full walk pending (P2 re-walk) |
 | 22 | Activity / audit trail with explorer links | ✅ | F5 |
 | 23 | No computable keys off localnet/fork | ✅ | `solana/keys.ts` refuses seeds off a loopback fork; `keys.test.ts` |
 | 24 | Hosted demo (fork + executor + web) | ❌ | nothing Solana hosted |
@@ -139,10 +139,10 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 |---|---|---|---|
 | 31 | Recurring buy (DCA) on xStocks via Solana path | ❌ | `runStrategy` EVM; validation uses Base `TOKENS` |
 | 32 | Custom agents with xStock templates | ❌ | templates WETH/CBBTC |
-| 33 | Close a position (Solana) | ❌ | `/positions/close` EVM |
-| 34 | Withdraw everything (Solana) | ❌ | crashes (`withdrawEverything.ts:148`) |
-| 35 | Holdings: no fixture target mix on Solana | ❌ | TARGET MIX fixture |
-| 36 | Holding / Gainers rows open a tradable xStock screen | ❌ | `TRADABLE` Base list → "Not tradable here" |
+| 33 | Close a position (Solana) | ✅ | position Close → `useXStockSell` (same verified path as #11) |
+| 34 | Withdraw everything (Solana) | ✅ | sold 0.018 NVDAx (`4dXwVMfj…`), sent 495.66 USDC (`48n4enDu…`) |
+| 35 | Holdings: no fixture target mix on Solana | ✅ | `/holdings` hidden on Solana; Portfolio is the holdings view |
+| 36 | Holding / Gainers rows open a tradable xStock screen | ✅ | `/asset/<xStock>` redirects to the ticket |
 | 37 | Agent reasoning + chat on a capable model | ⛔ | no `OPENROUTER_API_KEY` |
 | 38 | MoonPay card deposit | ⛔ | no MoonPay keys; honest message shown |
 | 39 | Withdrawal records correct (xStock sends, destination) | ✅ | `tokenMovement` reads any mint + recipient from the tx; unknown recipient refused; tests |
@@ -245,33 +245,33 @@ Objective: nothing on a hosted executor can be spent by a stranger; records neve
 Exit: tests green; executor refuses to boot on a public RPC without real keys.
 
 ### Phase 2 — The Solana surface (what a judge can reach)
-- [NOT STARTED] **2.1 Route guard.** One list of Base-only routes (`src/nav/solanaHidden.ts`); on Solana a guard in
+- [DONE] **2.1 Route guard.** One list of Base-only routes (`src/nav/solanaHidden.ts`); on Solana a guard in
   `app/_layout.tsx` redirects them to a "Not on Solana" screen; Explore, Settings, Profile, Safety, Portfolio and chat
   shortcuts filter them out. Covers: perps/futures/funding, yield/rates, limit-orders, crosschain, basename,
   business, graph/*, approvals, spend, sponsors, verify/judge, history, audit/anchor, route/crosscheck/tokens,
   order/*, strategy/grid, strategy/yield, flatten, policy, networks, proposals (until ported), earnings (Base tickers).
-- [NOT STARTED] **2.2 Trade tab.** On Solana the centre tab opens `/xstocks` → ticket with Buy/Sell.
-- [NOT STARTED] **2.3 Home tabs.** Stocks rows → `/xstock/[sym]`; Futures tab hidden on Solana.
-- [NOT STARTED] **2.4 Tradable from the executor.** `isTradable` on Solana reads `/market/tradable`; Holdings,
+- [DONE] **2.2 Trade tab.** On Solana the centre tab opens `/xstocks` → ticket with Buy/Sell.
+- [DONE] **2.3 Home tabs.** Stocks rows → `/xstock/[sym]`; Futures tab hidden on Solana.
+- [DONE] **2.4 Tradable from the executor.** `isTradable` on Solana reads `/market/tradable`; Holdings,
   Gainers and asset rows for xStocks open `/xstock/[sym]`.
-- [NOT STARTED] **2.5 Holdings.** Target mix hidden on Solana; positions from `/wallet/tokens`.
+- [DONE] **2.5 Holdings.** Target mix hidden on Solana; positions from `/wallet/tokens`.
 Exit: a scripted walk of every reachable route on Solana shows no 4xx/5xx and no Base copy.
 
 ### Phase 3 — Selling, exits, pacing, resume
-- [NOT STARTED] **3.1 Grant covers xStocks (D4).** `buildGrantTx` adds idempotent ATA creation + ApproveChecked for
+- [DONE] **3.1 Grant covers xStocks (D4).** `buildGrantTx` adds idempotent ATA creation + ApproveChecked for
   each tradable xStock (Token-2022) to the delegate; `buildRevokeTx` revokes USDC + every xStock ATA that has a
   delegate. Server verifies USDC as today and records which xStock approvals exist.
-- [NOT STARTED] **3.2 Server sell.** `guardAndSpend` sell: delegate moves the **user's** xStock (Token-2022
+- [DONE] **3.2 Server sell.** `guardAndSpend` sell: delegate moves the **user's** xStock (Token-2022
   `transferChecked` as delegate) into the vault/route, swap to USDC, USDC to the user; refuse if no xStock approval
   or balance. Fix the vault-drain bug; fork proof updated.
-- [NOT STARTED] **3.3 User sell from the app.** `/xstocks/sell/quote` + `/xstocks/sell/prepare` (server builds a
+- [DONE] **3.3 User sell from the app.** `/xstocks/sell/quote` + `/xstocks/sell/prepare` (server builds a
   tx: user-signed xStock transfer to the vault + vault-signed USDC to the user at a live Jupiter quote, partially
   signed by the vault) → Privy signs → broadcast → `/xstocks/sell/record` verifies and books the disposal.
-- [NOT STARTED] **3.4 Solana exits.** Exit-rules strategies on Solana run through a Solana branch in the runner:
+- [DONE] **3.4 Solana exits.** Exit-rules strategies on Solana run through a Solana branch in the runner:
   read the live mark, fire stop/target/trailing via 3.2, notify, record.
-- [NOT STARTED] **3.5 Pacing (D3)** in `bot/autonomous.ts` + rules; tests.
-- [NOT STARTED] **3.6 Resume on Solana** = re-grant from Safety (no `/approvals`).
-- [NOT STARTED] **3.7 Close position** on Solana via 3.2; **withdraw everything** on Solana = sell all (3.2) then
+- [DONE] **3.5 Pacing (D3)** in `bot/autonomous.ts` + rules; tests.
+- [DONE] **3.6 Resume on Solana** = re-grant from Safety (no `/approvals`).
+- [DONE] **3.7 Close position** on Solana via 3.2; **withdraw everything** on Solana = sell all (3.2) then
   send USDC.
 Exit: on the fork — user sell moves the user's shares and credits USDC; a forced stop-loss fires unattended;
 revoke drops all approvals; resume works.

@@ -14,7 +14,11 @@
  * Buying is here since 2026-09-19: `POST /xstocks/buy` is a door to `executor/place.ts`, the only path that can spend,
  * held by everything that path checks — the permission, the rules, the chain, the issuer's gates, a live quote. The
  * button is enabled only for a symbol this cluster can settle and a size a quote has priced; the receipt is the
- * transaction the chain confirmed, with where it filled. Selling from the phone is not built, and says so.
+ * transaction the chain confirmed, with where it filled.
+ *
+ * Selling is here since 2026-09-19, signed by the owner: the executor builds one transaction — the owner's shares into
+ * the venue vault, the vault's USDC to the owner at Jupiter's live quote — and co-signs its leg; the owner signs theirs
+ * in Privy and it is broadcast; the executor reads it back from the chain before booking it.
  */
 import React, { useMemo, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
@@ -41,7 +45,9 @@ import {
 import { useAsync } from '@/data/useAsync';
 import { useDebounced } from '@/data/useDebounced';
 import { useStore } from '@/state/store';
-import { system, type XStockBuyOutcome } from '@/data/system';
+import { system, type XStockBuyOutcome, type XStockSellOutcome } from '@/data/system';
+import { walletTokens } from '@/data/walletTokens';
+import { useXStockSell } from '@/markets/useXStockSell';
 import { useIntentKeys } from '@/data/useIntentKeys';
 import { errorText } from '@/data/apiError';
 import { useSignedOut } from '@/auth/useSignedOut';
@@ -113,6 +119,29 @@ export default function XStockTicket() {
     [symbol, address],
   );
   const [showBacking, setShowBacking] = useState(false);
+
+  // What the owner holds of this xStock, read from the chain — a sale is never sized past it.
+  const tokens = useAsync(() => (address ? walletTokens() : Promise.resolve(null)), [address, side]);
+  const held = tokens.data?.tokens.find((t) => t.symbol === symbol);
+  const heldUnits = held?.units ?? 0;
+  const heldUsd = held?.usd ?? 0;
+  const { sell: sellShares, selling, ready: canSell } = useXStockSell();
+  const [sold, setSold] = useState<XStockSellOutcome>();
+  const [sellError, setSellError] = useState<string>();
+  /** Shares this sale is for: what the quote says the dollar amount buys back, never more than is held. */
+  const sellUnits = side === 'sell' && quote.data ? Math.min(quote.data.pay, heldUnits) : 0;
+
+  async function sell() {
+    if (selling || !(sellUnits > 0)) return;
+    setSellError(undefined);
+    setSold(undefined);
+    try {
+      setSold(await sellShares(symbol, sellUnits));
+      tokens.reload();
+    } catch (e) {
+      setSellError(errorText(e));
+    }
+  }
   const [result, setResult] = useState<XStockBuyOutcome>();
   const [buyError, setBuyError] = useState<string>();
 
@@ -182,6 +211,10 @@ export default function XStockTicket() {
         {QUICK.map((q) => (
           <Pill key={q} label={q} light onPress={() => setOrderAmt(q.slice(1))} />
         ))}
+        {side === 'sell' && heldUsd > 0 ? (
+          // Everything held, at the chain's balance and the live price; the quote then sizes the shares exactly.
+          <Pill label="All" light onPress={() => setOrderAmt(heldUsd.toFixed(2))} testID="xstock-sell-all" />
+        ) : null}
       </View>
 
       <ScrollView
@@ -302,9 +335,54 @@ export default function XStockTicket() {
           )}
         </View>
       ) : (
-        <Text variant="footnote" color={colors.sheet.muted} align="center" style={{ paddingVertical: space.s14 }}>
-          Selling from the phone is not built yet. This shows what a sale would cost.
-        </Text>
+        <View style={{ paddingTop: space.s12, gap: space.s8 }}>
+          {sold?.status === 'filled' ? (
+            <View style={{ gap: space.s4 }}>
+              <Text variant="rowPrimary" color={colors.sheet.ink} align="center">
+                {`Sold ${quantity(sold.units)} ${sold.symbol} for ${money(sold.usd)}`}
+              </Text>
+              <Text variant="footnote" color={colors.sheet.muted} align="center">
+                {`Against the venue vault at Jupiter's live quote · slot ${sold.slot}`}
+              </Text>
+              <Text
+                variant="footnote"
+                color={colors.sheet.ink}
+                align="center"
+                onPress={() => void Linking.openURL(sold.explorer)}
+                accessibilityRole="link"
+              >
+                {`Transaction ${sold.signature.slice(0, 8)}…${sold.signature.slice(-6)}`}
+              </Text>
+            </View>
+          ) : sold?.status === 'blocked' ? (
+            <Text variant="footnote" color={colors.down} align="center">
+              {sold.message}
+            </Text>
+          ) : sellError ? (
+            <Text variant="footnote" color={colors.down} align="center">
+              {sellError}
+            </Text>
+          ) : (
+            <Text variant="footnote" color={colors.sheet.muted} align="center">
+              {tokens.data
+                ? heldUnits > 0
+                  ? `You hold ${quantity(heldUnits)} ${symbol}.`
+                  : `You hold no ${symbol} to sell.`
+                : `Reading what you hold…`}
+            </Text>
+          )}
+          {signedOut ? (
+            <SignInButton label="Sign in to sell" />
+          ) : (
+            <Button
+              label={selling ? 'Selling' : sellUnits > 0 ? `Sell ${quantity(sellUnits)} ${symbol}` : `Sell ${symbol}`}
+              loading={selling}
+              disabled={!(sellUnits > 0) || !canSell}
+              onPress={sell}
+              testID="xstock-sell"
+            />
+          )}
+        </View>
       )}
     </Screen>
   );

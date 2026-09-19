@@ -656,6 +656,41 @@ export type XStockBuyOutcome =
     }
   | { status: 'blocked'; reason: string; message: string };
 
+/** A sale the executor has built and co-signed, for the owner to sign (2026-09-19). */
+export type XStockSellPrepared = {
+  transaction: string;
+  blockhash: string;
+  lastValidBlockHeight: number;
+  symbol: string;
+  units: number;
+  usd: number;
+  price: number;
+};
+
+/** What a sale the owner signed came to, read back from the chain; or the executor's reason for refusing it. */
+export type XStockSellOutcome =
+  | {
+      status: 'filled';
+      duplicate: boolean;
+      orderId: string;
+      symbol: string;
+      units: number;
+      usd: number;
+      price: number;
+      venue: 'venue-vault';
+      signature: string;
+      slot: number;
+      explorer: string;
+    }
+  | { status: 'blocked'; reason: string; message: string };
+
+type Blocked = { status: 'blocked'; reason: string; message: string };
+function refusal(e: unknown): Blocked | null {
+  return e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object' && 'status' in e.body
+    ? (e.body as Blocked)
+    : null;
+}
+
 export const system = {
   /* trust */
   verifyReport: (owner?: string) =>
@@ -743,6 +778,27 @@ export const system = {
       if (e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object' && 'status' in e.body) {
         return e.body as XStockBuyOutcome;
       }
+      throw e;
+    }
+  },
+
+  /** Build the sale for `units` shares; the owner signs it next. A refusal (409) is returned as `blocked`. */
+  xstockSellPrepare: async (body: { symbol: string; units: number }): Promise<XStockSellPrepared | Blocked> => {
+    try {
+      return await api.post<XStockSellPrepared>('/xstocks/sell/prepare', body);
+    } catch (e) {
+      const r = refusal(e);
+      if (r) return r;
+      throw e;
+    }
+  },
+  /** Book a sale the owner signed; the executor reads it from the chain first. Idempotent on the signature. */
+  xstockSellRecord: async (body: { symbol: string; signature: string }): Promise<XStockSellOutcome> => {
+    try {
+      return await api.post<XStockSellOutcome>('/xstocks/sell/record', body);
+    } catch (e) {
+      const r = refusal(e);
+      if (r) return r;
       throw e;
     }
   },

@@ -3,7 +3,8 @@
  * Don't author custom ones."
  */
 import React, { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, router, usePathname } from 'expo-router';
+import { solanaRedirect } from '@/nav/solanaRoutes';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -50,6 +51,19 @@ function DeviceRegistration() {
  * At the root and inside the Stack's provider, because it navigates: a hook that pushes a route
  * needs a router, and the router does not exist above `<Stack>`.
  */
+/**
+ * On the Solana build, a Base-only screen is never drawn: its route is replaced with its Solana counterpart or with
+ * `/not-here` before it can read the wrong chain (`src/nav/solanaRoutes.ts`).
+ */
+function SolanaRouteGuard() {
+  const path = usePathname();
+  useEffect(() => {
+    const to = solanaRedirect(path);
+    if (to && to !== path) router.replace(to as never);
+  }, [path]);
+  return null;
+}
+
 function NotificationRouting() {
   useNotificationRoute();
   return null;
@@ -163,6 +177,7 @@ export default function RootLayout() {
         </Stack>
         {/* After the Stack, so `useRouter` resolves against a mounted navigator. */}
         <NotificationRouting />
+        <SolanaRouteGuard />
         <ChatDrawer />
         </PhoneFrame>
         </ReachabilityProvider>

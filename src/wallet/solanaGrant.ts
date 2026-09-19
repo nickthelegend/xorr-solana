@@ -9,8 +9,9 @@
  * Stopping is the owner's SPL `Revoke` on the same account: the chain drops the delegate, and from that block the bot
  * can move nothing, whatever the executor thinks.
  */
-import { PublicKey, Transaction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import {
+  TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createApproveCheckedInstruction,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -19,11 +20,27 @@ import {
 } from '@solana/spl-token';
 import { parseUnits } from 'viem';
 import { api } from '@/data/api';
+import { solanaConnection } from './solanaTx';
 
 const DAY_MS = 86_400_000;
 
 /** What `/delegation/params` answers on a Solana executor. */
-export type SolanaGrantParams = { chain: 'solana'; delegate: string; token: string; decimals: number; venues: string[] };
+export type SolanaGrantParams = {
+  chain: 'solana';
+  delegate: string;
+  token: string;
+  decimals: number;
+  venues: string[];
+  /** The xStocks on this cluster the grant also lets the bot sell (Token-2022). Absent on an older executor. */
+  sellable?: { symbol: string; mint: string; decimals: number }[];
+};
+
+/**
+ * The most an SPL approval can name. A sell approval is not a spending allowance: it lets the bot sell whatever of that
+ * xStock the owner comes to hold (an agent's stop-loss on shares it bought an hour ago), and the executor only ever
+ * moves it into a sale that pays the owner. Revoke drops it with the rest.
+ */
+const ANY_AMOUNT = 2n ** 64n - 1n;
 
 /** The allowance a grant delegates: the daily cap for each day it runs, in the token's base units. */
 export function grantAllowance(dailyCapUsd: number, durationMs: number, decimals: number): bigint {
@@ -54,13 +71,46 @@ export function buildGrantTx(params: {
       [],
       TOKEN_PROGRAM_ID,
     ),
+    // Selling: one approval per xStock this cluster holds, on the owner's Token-2022 account (created if absent).
+    ...(params.grant.sellable ?? []).flatMap((x) => {
+      const xMint = new PublicKey(x.mint);
+      const xAta = getAssociatedTokenAddressSync(xMint, params.owner, false, TOKEN_2022_PROGRAM_ID);
+      return [
+        createAssociatedTokenAccountIdempotentInstruction(params.owner, xAta, params.owner, xMint, TOKEN_2022_PROGRAM_ID),
+        createApproveCheckedInstruction(xAta, xMint, delegate, params.owner, ANY_AMOUNT, x.decimals, [], TOKEN_2022_PROGRAM_ID),
+      ];
+    }),
   );
 }
 
-/** The kill switch, unsigned: the owner revokes whatever delegate their USDC account names. */
-export function buildRevokeTx(params: { owner: PublicKey; token: string }): Transaction {
+/** A token account of the owner's that names a delegate, and the program that owns it. */
+export type DelegatedAccount = { account: PublicKey; programId: PublicKey };
+
+/**
+ * The kill switch, unsigned: the owner revokes the delegate on their USDC account and on every other account that
+ * names one (the xStock sell approvals). The USDC revoke is always included, so the stop works even when the chain
+ * read of the other accounts comes back empty.
+ */
+export function buildRevokeTx(params: { owner: PublicKey; token: string; delegated?: DelegatedAccount[] }): Transaction {
   const ata = getAssociatedTokenAddressSync(new PublicKey(params.token), params.owner, false, TOKEN_PROGRAM_ID);
-  return new Transaction().add(createRevokeInstruction(ata, params.owner, [], TOKEN_PROGRAM_ID));
+  const others = (params.delegated ?? []).filter((d) => !d.account.equals(ata));
+  return new Transaction().add(
+    createRevokeInstruction(ata, params.owner, [], TOKEN_PROGRAM_ID),
+    ...others.map((d) => createRevokeInstruction(d.account, params.owner, [], d.programId)),
+  );
+}
+
+/** Every token account of `owner`, under both token programs, that names a delegate — read from the chain. */
+export async function delegatedAccounts(conn: Connection, owner: PublicKey): Promise<DelegatedAccount[]> {
+  const out: DelegatedAccount[] = [];
+  for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
+    const res = await conn.getParsedTokenAccountsByOwner(owner, { programId }, 'confirmed');
+    for (const { pubkey, account } of res.value) {
+      const info = (account.data as { parsed?: { info?: { delegate?: string } } }).parsed?.info;
+      if (info?.delegate) out.push({ account: pubkey, programId });
+    }
+  }
+  return out;
 }
 
 /**
@@ -95,7 +145,10 @@ export async function revokeOnSolana(params: {
   const token = await api
     .get<SolanaGrantParams>('/delegation/params')
     .then((p) => p.token, () => USDC_MINT);
-  const signature = await params.signAndSend(buildRevokeTx({ owner: new PublicKey(params.owner), token }));
+  const owner = new PublicKey(params.owner);
+  // Read from the chain, not the executor, so the stop drops every approval even with the executor down.
+  const delegated = await delegatedAccounts(solanaConnection(), owner).catch(() => []);
+  const signature = await params.signAndSend(buildRevokeTx({ owner, token, delegated }));
   await api.post('/delegation/revoke', { signature }).catch(() => undefined);
   return signature;
 }

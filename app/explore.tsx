@@ -11,6 +11,7 @@ import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import { Eyebrow, Fill, HeaderBar, Press, Screen, Text, colors, divider, size, space } from '@/ui';
 import { Icon } from '@/design/Icon';
+import { shownHere } from '@/nav/solanaRoutes';
 
 type Item = { route: string; title: string; detail: string };
 type Group = { title: string; items: Item[] };
@@ -112,6 +113,11 @@ const GROUPS: Group[] = [
   },
 ];
 
+/** The groups as this build draws them: a Base-only screen is not listed on Solana (`src/nav/solanaRoutes.ts`). */
+const SHOWN: Group[] = GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => shownHere(i.route)) })).filter(
+  (g) => g.items.length > 0,
+);
+
 export default function Explore() {
   const goBack = useGoBack();
   const router = useRouter();
@@ -127,7 +133,7 @@ export default function Explore() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: space.gutter, paddingBottom: space.s30 }}
         >
-          {GROUPS.map((g) => (
+          {SHOWN.map((g) => (
             <View key={g.title} style={{ marginTop: space.s22 }}>
               <Eyebrow>{g.title}</Eyebrow>
               {g.items.map((item) => (

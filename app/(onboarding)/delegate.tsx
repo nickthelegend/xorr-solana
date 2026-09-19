@@ -145,11 +145,23 @@ export default function GrantDelegation() {
             detail={isSolana ? `Up to ${capLabel(cap)}, which xorr holds it to each day.` : `Up to ${capLabel(cap)}.`}
           />
           {isSolana ? (
-            <ConsequenceCard
-              tone="down"
-              label="It can move only the USDC you approve"
-              detail={`At most ${usd(cap * grantDays)} in all, and xorr only spends it on buys through Jupiter. Nothing else in your wallet is reachable.`}
-            />
+            <>
+              <ConsequenceCard
+                tone="down"
+                label="It can spend only the USDC you approve"
+                detail={`At most ${usd(cap * grantDays)} in all, and xorr only spends it on xStock buys through Jupiter.`}
+              />
+              {/*
+                The grant also approves the bot on your xStock accounts (2026-09-19), so a stop-loss can sell while you are
+                away. Said plainly: the chain lets that approval move those shares; xorr only ever moves them into a sale that
+                pays you USDC, and the stop revokes it with the rest.
+              */}
+              <ConsequenceCard
+                tone="down"
+                label="It can sell the xStocks you hold"
+                detail="So a stop-loss or take-profit can fire while you are away. xorr only moves them into a sale that pays you USDC. Nothing else in your wallet is reachable."
+              />
+            </>
           ) : (
             <ConsequenceCard
               tone="down"

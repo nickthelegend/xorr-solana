@@ -14,6 +14,7 @@
  * and exactly what the kill switch ends in one tap. It cannot withdraw, cannot name a destination,
  * and cannot pick a price.
  */
+import { ON_SOLANA } from '../solana/clusters.js';
 import { randomUUID } from 'node:crypto';
 import type { Address } from 'viem';
 import { one, query } from '../db/index.js';
@@ -161,6 +162,6 @@ export async function armExits(
   );
   return {
     strategyId: row!.id,
-    sentence: `Exit set: sells your ${p.symbol} if it falls to ${money(p.stopPrice)} or reaches ${money(p.targetPrice)}, checked daily.`,
+    sentence: `Exit set: sells your ${p.symbol} if it falls to ${money(p.stopPrice)} or reaches ${money(p.targetPrice)}, ${ON_SOLANA ? 'checked every 30 seconds' : 'checked daily'}.`,
   };
 }
