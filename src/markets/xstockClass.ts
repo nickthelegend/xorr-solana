@@ -8,7 +8,7 @@
  */
 import { assetGradient } from '@/design/gradients';
 import type { StockQuote } from '@/data/marketData';
-import type { AssetClass } from '@/data/types';
+import type { AssetClass, Instrument } from '@/data/types';
 
 export function withXStocks(
   classes: readonly AssetClass[],
@@ -40,4 +40,35 @@ export function withXStocks(
       }),
     };
   });
+}
+
+/**
+ * Home's Gainers on Solana (2026-09-20): the xStocks that are up over 24h, largest first.
+ *
+ * It ranked the crypto feed (AAVE, TON, DOGE…), none of which trades on this build. A change exists only where the
+ * executor's record of that xStock reaches back a day, so `measured` says whether any did: "nothing is up" and "not a
+ * day of prices yet" are different sentences.
+ */
+export function xStockGainers(
+  rows: readonly { symbol: string; name: string; price: number | null; feed: 'live' | 'unavailable'; change24h?: number }[],
+  count: number,
+  fmt: { price: (n: number) => string; percent: (n: number) => string },
+): { gainers: Instrument[]; measured: boolean } {
+  const measured = rows.some((r) => r.change24h !== undefined);
+  const gainers = rows
+    .filter((r) => r.feed === 'live' && r.price != null && r.change24h !== undefined && r.change24h > 0)
+    .sort((a, b) => b.change24h! - a.change24h!)
+    .slice(0, count)
+    .map((r) => ({
+      ...assetGradient(r.symbol),
+      sym: r.symbol,
+      name: r.name.replace(/ xStock$/, ''),
+      tag: 'xStock',
+      px: fmt.price(r.price!),
+      chg: fmt.percent(r.change24h!),
+      up: true,
+      classId: 'stocks' as const,
+      feed: 'live' as const,
+    }));
+  return { gainers, measured };
 }

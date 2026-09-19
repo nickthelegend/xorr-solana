@@ -72,6 +72,7 @@ import {
 } from '@/state/derived';
 import type { Address } from 'viem';
 import { isSolana, pinnedDelegation } from '@/chain';
+import { xStockGainers } from '@/markets/xstockClass';
 import { chainAccess } from '@/wallet/chainAccess';
 import { standingOnChain } from '@/wallet/delegationChain';
 import { killSwitchChip } from '@/state/killSwitch';
@@ -293,7 +294,9 @@ export default function Home() {
   const classes = useAsync(() => repos.markets.listClasses(), []);
   const stocksOpened = opened.has('stocks');
   const futuresOpened = opened.has('futures');
-  const stocks = useAsync(async () => (stocksOpened ? system.stocks() : null), [stocksOpened]);
+  // On Solana, Gainers ranks the xStocks, so it reads the same snapshot as the Stocks tab.
+  const stocksWanted = stocksOpened || (isSolana && opened.has('gainers'));
+  const stocks = useAsync(async () => (stocksWanted ? system.stocks() : null), [stocksWanted]);
   const futures = useAsync(async () => (futuresOpened ? repos.perps.markets() : null), [futuresOpened]);
   /* What this deployment trades and watches: nothing to trade beside things to watch is a chain that fills nothing. */
   const tradable = useAsync(() => system.tradable(), []);
@@ -307,7 +310,12 @@ export default function Home() {
    * Only live feeds — an instrument with no feed behind it has no change to rank, and ranking the
    * design prototype's numbers is how an app ends up recommending a move that never happened.
    */
+  const xGainers = useMemo(
+    () => (isSolana ? xStockGainers(stocks.data ?? [], GAINERS, { price: fmtPrice, percent: (n) => percent(n, 2) }) : null),
+    [stocks.data],
+  );
   const gainers = useMemo<Instrument[]>(() => {
+    if (xGainers) return xGainers.gainers;
     const seen = new Set<string>();
     return (classes.data ?? [])
       .flatMap((c) => c.instruments)
@@ -318,7 +326,7 @@ export default function Home() {
       })
       .sort((a, b) => magnitude(b.chg) - magnitude(a.chg))
       .slice(0, GAINERS);
-  }, [classes.data]);
+  }, [classes.data, xGainers]);
   const gainerSyms = useMemo(() => gainers.map((g) => g.sym), [gainers]);
   const sparks = useAsync(() => repos.markets.sparklines(gainerSyms), [gainerSyms.join(',')]);
 
@@ -776,13 +784,19 @@ export default function Home() {
                   </View>
                 )
               ) : tab === 'gainers' ? (
-                classes.loading && !classes.data ? (
+                (isSolana ? stocks.loading && !stocks.data : classes.loading && !classes.data) ? (
                   <LoadingRows count={4} height={size.rowLg} spark />
-                ) : classes.error ? (
+                ) : isSolana && stocks.error ? (
+                  <TabFailed what="prices" error={stocks.error} onRetry={stocks.reload} />
+                ) : !isSolana && classes.error ? (
                   <TabFailed what="prices" error={classes.error} onRetry={classes.reload} />
                 ) : gainers.length === 0 ? (
                   <Text variant="body" color={colors.ink55} style={{ marginTop: space.s16 }}>
-                    No gainers today.
+                    {xGainers && !xGainers.measured
+                      ? 'Gainers show once a full day of xStock prices is recorded.'
+                      : isSolana
+                        ? 'No xStock is up over the last day.'
+                        : 'No gainers today.'}
                   </Text>
                 ) : (
                   gainers.map((g, i) => {

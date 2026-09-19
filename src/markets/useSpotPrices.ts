@@ -48,7 +48,8 @@ export function useSpotPrices(symbols: readonly string[]) {
     if (sharePriced(symbol)) {
       if (shares.loading || !shares.data) return { loading: true };
       const row = shares.data[symbol];
-      return { loading: false, quote: row?.price != null ? { price: row.price } : null };
+      if (row?.price == null) return { loading: false, quote: null };
+      return { loading: false, quote: row.change24h === undefined ? { price: row.price } : { price: row.price, change24h: row.change24h } };
     }
     if (feed.loading || !feed.data) return { loading: true };
     const q = feed.data[symbol];

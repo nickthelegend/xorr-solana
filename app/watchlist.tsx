@@ -16,6 +16,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { isSolana } from '@/chain';
 import { useGoBack } from '@/nav/useGoBack';
 import { assetGradient } from '@/design/gradients';
 import {
@@ -35,6 +36,7 @@ import {
   Screen,
   Sparkline,
   Text,
+  chart,
   colors,
   percent,
   pnlTone,
@@ -47,7 +49,6 @@ import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { sharePriced, useSpotPrices } from '@/markets/useSpotPrices';
-import { useStore } from '@/state/store';
 import { Icon } from '@/design/Icon';
 import { applyOrder, canMove, move, orderChanged, orderToSave } from '@/markets/watchOrder';
 import { errorText } from '@/data/apiError';
@@ -55,19 +56,24 @@ import { errorText } from '@/data/apiError';
 const ROW_H = 64;
 const NONE: readonly string[] = [];
 
-/** The watchable tokens as tabs — crypto, then shares — keeping only the tabs with something in them. */
+/**
+ * The watchable tokens as tabs, keeping only the tabs with something in them. Crypto first on Base; on Solana the
+ * xStocks are what the bot trades and Crypto holds only USDC, so Stocks opens first there (2026-09-20).
+ */
 function groupsOf(symbols: readonly string[]): { label: string; symbols: string[] }[] {
-  return [
-    { label: 'Crypto', symbols: symbols.filter((s) => !sharePriced(s)) },
-    { label: 'Stocks', symbols: symbols.filter((s) => sharePriced(s)) },
-  ].filter((g) => g.symbols.length > 0);
+  const crypto = { label: 'Crypto', symbols: symbols.filter((s) => !sharePriced(s)) };
+  const stocks = { label: 'Stocks', symbols: symbols.filter((s) => sharePriced(s)) };
+  return (isSolana ? [stocks, crypto] : [crypto, stocks]).filter((g) => g.symbols.length > 0);
 }
 
 export default function Watchlist() {
   const router = useRouter();
   const goBack = useGoBack();
-  const tab = useStore((s) => s.tab);
-  const setTab = useStore((s) => s.setTab);
+  /*
+   * Its own choice, by label (2026-09-20). It read the store's `tab`, which is Home's Agents/Gainers/Stocks index: picking
+   * Stocks on Home opened the watchlist on whatever sat third here, and reordering the tabs changed what an old index meant.
+   */
+  const [tabLabel, setTabLabel] = useState<string>();
 
   const watchable = useAsync(() => system.watchable(), []);
   /*
@@ -88,7 +94,7 @@ export default function Watchlist() {
     const all = (watchable.data ?? []).map((t) => t.symbol);
     return groupsOf(applyOrder(all, saved));
   }, [watchable.data, saved]);
-  const group = groups[tab] ?? groups[0];
+  const group = groups.find((g) => g.label === tabLabel) ?? groups[0];
   const symbols = group?.symbols ?? NONE;
   const key = symbols.join(',');
 
@@ -139,8 +145,8 @@ export default function Watchlist() {
 
       {groups.length > 1 ? (
         <PillRow style={{ marginTop: space.s16, flexGrow: 0 }}>
-          {groups.map((g, i) => (
-            <Pill key={g.label} label={g.label} selected={g === group} onPress={() => setTab(i)} />
+          {groups.map((g) => (
+            <Pill key={g.label} label={g.label} selected={g === group} onPress={() => setTabLabel(g.label)} />
           ))}
         </PillRow>
       ) : null}
@@ -209,6 +215,11 @@ export default function Watchlist() {
                     closes.length > 1 ? (
                       <View style={{ marginHorizontal: space.s10 }}>
                         <Sparkline data={closes} />
+                      </View>
+                    ) : sparks.loading && !sparks.data ? (
+                      // The day's glyph is on its way: its space held, not left blank as though there were none.
+                      <View style={{ marginHorizontal: space.s10 }}>
+                        <Placeholder height={chart.spark.height} width={chart.spark.width} />
                       </View>
                     ) : undefined
                   }

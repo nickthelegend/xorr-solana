@@ -164,3 +164,29 @@ describe('warming at boot (E106)', () => {
     for (const call of calls) expect(call[4]).toEqual({ attempts: 1 });
   });
 });
+
+describe('an xStock', () => {
+  const jupiter = (url: string) => url.includes('lite-api.jup.ag/tokens');
+
+  it("takes the issuer's icon from Jupiter, matched by mint", async () => {
+    getJson.mockImplementation(async (url: string) =>
+      jupiter(url)
+        ? [
+            { id: 'NotTheRealMintxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', icon: 'https://evil.example/nvda.png' },
+            { id: 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh', icon: 'https://xstocks-metadata.backed.fi/logos/tokens/NVDAx.png' },
+          ]
+        : [],
+    );
+    expect(await logoFor('NVDAx')).toEqual({
+      url: 'https://xstocks-metadata.backed.fi/logos/tokens/NVDAx.png',
+      source: 'jupiter',
+    });
+  });
+
+  it('is not cached as logo-less when Jupiter cannot be reached', async () => {
+    getJson.mockRejectedValue(new Error('timeout'));
+    expect(await logoFor('TSLAx')).toBeUndefined();
+    getJson.mockResolvedValue([{ id: 'XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB', icon: 'https://x/TSLAx.png' }]);
+    expect((await logoFor('TSLAx'))?.url).toBe('https://x/TSLAx.png');
+  });
+});

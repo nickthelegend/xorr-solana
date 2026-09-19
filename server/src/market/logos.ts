@@ -32,6 +32,7 @@ import { getJson } from '../http/get.js';
 import { COINGECKO_IDS, COINGECKO_IMAGE_URL, type CoingeckoMarket } from './ids.js';
 import { TOKENS } from '../venues/oneinch.js';
 import { ONEINCH_CHAIN_ID } from '../evm/chains.js';
+import { XSTOCKS, xStockKey } from '../venues/xstocks.js';
 
 const ONEINCH_TOKEN_API = 'https://api.1inch.dev/token/v1.2';
 
@@ -59,7 +60,7 @@ export type Logo = {
   /** Absolute URL to a PNG or SVG, or null where neither source knows this symbol. */
   url: string | null;
   /** Which upstream answered. Rendered nowhere; it is here so `/verify` can say. */
-  source: '1inch' | 'coingecko' | null;
+  source: '1inch' | 'coingecko' | 'jupiter' | null;
 };
 
 /**
@@ -77,6 +78,35 @@ const NONE: Logo = { url: null, source: null };
 
 /** Resolved and it has none, as distinct from `undefined`, which means we could not ask. */
 type Answer = Logo | undefined;
+
+/**
+ * The xStocks' own icons, from Jupiter's token registry (2026-09-20).
+ *
+ * Neither 1inch (Base) nor CoinGecko has a row for `NVDAx`, so every xStock came back `null` and the watchlist drew
+ * eleven grey dots. Jupiter indexes each xStock mint with the issuer's icon (`xstocks-metadata.backed.fi`). All eleven
+ * mints go in one request, and a mint is matched by address, not by ticker, so a copycat token named `NVDAx` cannot
+ * lend its picture.
+ */
+const JUPITER_TOKENS = 'https://lite-api.jup.ag/tokens/v2/search';
+
+async function fromJupiter(symbol: string): Promise<Answer> {
+  const key = xStockKey(symbol);
+  if (!key) return NONE;
+  const mints = Object.values(XSTOCKS).map((t) => t.address);
+  try {
+    const rows = await getJson<{ id: string; icon?: string | null }[]>(
+      `${JUPITER_TOKENS}?query=${mints.join(',')}`,
+      TTL_MS,
+      TIMEOUT_MS,
+      {},
+      NO_RETRY,
+    );
+    const icon = rows.find((r) => r.id === XSTOCKS[key]!.address)?.icon;
+    return icon ? { url: icon, source: 'jupiter' } : NONE;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The token registry the aggregator routes against — and the only source that knows the equities. */
 async function fromOneInch(symbol: string): Promise<Answer> {
@@ -154,6 +184,11 @@ export async function logoFor(symbol: string): Promise<Answer> {
 
   const run = (async (): Promise<Answer> => {
     try {
+      if (xStockKey(symbol)) {
+        const viaJupiter = await fromJupiter(symbol);
+        if (viaJupiter) cache.set(symbol, viaJupiter);
+        return viaJupiter;
+      }
       const viaOneInch = await fromOneInch(symbol);
       if (viaOneInch?.url) {
         cache.set(symbol, viaOneInch);
