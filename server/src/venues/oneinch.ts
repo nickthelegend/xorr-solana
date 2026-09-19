@@ -10,6 +10,7 @@
  */
 import 'dotenv/config';
 import { getJson } from '../http/get.js';
+import { isSolanaCluster } from '../solana/clusters.js';
 import { STOCKS } from './stocks.js';
 import { CHAIN_KEY, ONEINCH_CHAIN_ID, QUOTE_ADDRESSES } from '../evm/chains.js';
 import { priceOf } from '../market/prices.js';
@@ -18,7 +19,12 @@ import type { Address, Hex } from 'viem';
 const BASE = 'https://api.1inch.dev/swap/v6.0';
 
 const API_KEY = process.env.ONEINCH_API_KEY;
-if (!API_KEY) {
+/*
+ * Required where 1inch routes the swaps — Base. A Solana executor routes through Jupiter and never calls 1inch, yet
+ * this module is imported by shared code, so requiring the key there refused to boot a Solana deployment that has no
+ * reason to hold one (2026-09-19). Any 1inch call made without it still fails, in `oneinchGet` below.
+ */
+if (!API_KEY && !isSolanaCluster(process.env.XORR_CHAIN ?? '')) {
   throw new Error('ONEINCH_API_KEY is required — swap routing has no offline fallback by design.');
 }
 
