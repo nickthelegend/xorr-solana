@@ -199,6 +199,11 @@ accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim
 | HS12 | PASS | Recovery → Export private key opens Privy's own export window for the right wallet (the key was not revealed). |
 | HS14 | PASS | Cancel: see D4. |
 | HS15 | PASS | Close preview at the venue's quote: "Realises −$0.01 and frees $24.99 at the venue's live quote" for half of 0.2251 NVDAx; the executor's prepared sale for the same units priced $24.988 (the old mark-based preview would have said +$0.16). The live signature was not sent (Browser pane hidden); the earlier hosted close (#33) is the signed proof. |
+| HS16 | PASS | xStock logos: `/market/logos` answers each xStock from Jupiter's registry (`source: jupiter`, issuer icon); hosted Watchlist, xStocks list, Home Stocks, ticket header, Portfolio cards and position screen all render `NVDAx.png`…`QQQx.png`. |
+| HS17 | PASS | Watchlist: Stocks tab first on Solana; its own tab choice (no longer Home's index); 11 prices, 23 sparkline paths, sparkline skeleton while loading; no response ≥ 400. |
+| HS18 | PASS | xStock charts: `/market/ohlc?symbol=NVDAx&days=1` → 27 half-hour rows from recorded Jupiter prices; Portfolio cards draw a chart ("No price history yet" gone). |
+| HS19 | PASS | 24h change: absent on hosted (record < 1 day, correctly), present locally (NVDAx, COINx…) where the record spans a day. |
+| HS20 | PASS | Home Gainers on Solana: hosted says "Gainers show once a full day of xStock prices is recorded."; ranking unit-tested; local data ranks COINx 6.97%, MSTRx 2.77%… The ranked list was not viewed live (local session signed out, pane hidden). |
 | HS13 | PASS | Screen audit (Home, xStocks, ticket, Portfolio, Activity, Safety, agent, Deposit, Explore, Send, Watchlist): no API response ≥ 400 after load. |
 
 Hosted fixes made during the run:
