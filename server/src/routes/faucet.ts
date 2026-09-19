@@ -13,6 +13,7 @@
  * A deployment with nothing to give says so in a sentence, `{ status: 'blocked', reason, detail }`, rather than offering a
  * button that fails.
  */
+import { dripSolIfNeeded } from '../solana/feeDrip.js';
 import { connection as solanaConnection } from '../solana/connection.js';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
@@ -444,6 +445,13 @@ async function claimSolanaFaucet(w: WalletRow, now: () => number): Promise<Fauce
       return { status: 502, body: { status: 'failed', error: humanFailure(raw) } };
     }
     const after = await readSolanaBalances(w.address).then((b) => b.usdc.raw, () => null);
+    /*
+     * And SOL for fees when the wallet is out (2026-09-19). The fee drip ran once, when the wallet first connected; after
+     * the hosted fork reset, a wallet had its USDC back from here and no SOL to sign the permission with.
+     */
+    await dripSolIfNeeded(w.address).catch((e: unknown) =>
+      log.warn(`[faucet] no fee SOL for ${w.address}: ${e instanceof Error ? e.message : String(e)}`),
+    );
     const claimedAt = now();
     const amount = usdc(offer.usdcRaw).toLocaleString('en-US', { maximumFractionDigits: USDC_DECIMALS });
     const recorded = await tx(async (client) => {
