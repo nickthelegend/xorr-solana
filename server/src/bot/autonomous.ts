@@ -234,20 +234,39 @@ export type AutonomousTradeResult =
 async function observedRange(
   symbol: string,
   minObservations: number,
-): Promise<{ high: number; low: number } | null> {
-  const rows = await query<{ usd: string }>(
-    `SELECT usd FROM price_observations
-      WHERE symbol = $1 AND at > now() - ($2 || ' hours')::interval`,
+): Promise<{ high: number; low: number; since: Date } | null> {
+  const rows = await query<{ usd: string; at: Date | string }>(
+    `SELECT usd, at FROM price_observations
+      WHERE symbol = $1 AND at > now() - ($2 || ' hours')::interval
+      ORDER BY at ASC`,
     [symbol, String(RANGE_HOURS)],
   ).catch(() => []);
 
-  const prices = rows.map((r) => Number(r.usd)).filter((n) => Number.isFinite(n) && n > 0);
-  if (prices.length < minObservations) return null;
+  const seen = rows
+    .map((r) => ({ usd: Number(r.usd), at: new Date(r.at) }))
+    .filter((r) => Number.isFinite(r.usd) && r.usd > 0 && !Number.isNaN(r.at.getTime()));
+  if (seen.length < minObservations) return null;
 
+  /*
+   * A band is a day of history at least, and wide enough to mean something (2026-09-19). On a fresh deployment the
+   * hosted agent bought MSFTx "at the 99th percentile of the $499.29-$499.44 band this app has recorded over the past
+   * month" — minutes of readings fifteen cents apart, called a month. That is noise, and a breakout from it is a coin
+   * toss with a stop attached.
+   */
+  const since = seen[0]!.at;
+  if (Date.now() - since.getTime() < MIN_SPAN_HOURS * 3_600_000) return null;
+  const prices = seen.map((r) => r.usd);
   const high = Math.max(...prices);
   const low = Math.min(...prices);
-  return high > low ? { high, low } : null;
+  if (!(high > low) || (high - low) / low < MIN_BAND_FRACTION) return null;
+  return { high, low, since };
 }
+
+/** The least history a band needs, and the least width, before either strategy reads it. */
+export const MIN_SPAN_HOURS = 24;
+export const MIN_BAND_FRACTION = 0.01;
+
+const day = (d: Date) => d.toISOString().slice(0, 10);
 
 /**
  * Where the live price sits in that band, 0 at the low and 1 at the high.
@@ -401,7 +420,7 @@ export async function evaluateBestSetup(
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} is trading at the ${(position * 100).toFixed(0)}th percentile of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded over the past month.`,
+        reason: `${stock.symbol} is trading at the ${(position * 100).toFixed(0)}th percentile of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded since ${day(range.since)}.`,
         marketCondition: `Upper band, ${(position * 100).toFixed(0)}th percentile of observed range`,
         corporateAction,
         offHoursGuard,
@@ -421,7 +440,7 @@ export async function evaluateBestSetup(
         currentPrice: price,
         stopPrice: price * 0.92,
         targetPrice: price * 1.1,
-        reason: `${stock.symbol} is in the lower part of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded over the past month. Accumulating.`,
+        reason: `${stock.symbol} is in the lower part of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded since ${day(range.since)}. Accumulating.`,
         marketCondition: `Lower band, ${(position * 100).toFixed(0)}th percentile of observed range`,
         corporateAction,
         offHoursGuard,

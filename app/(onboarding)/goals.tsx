@@ -5,8 +5,8 @@
  * Wrapping chip row (gap 9, chips 40 tall, radius 22). A drawdown question with a 3-up
  * segmented (42pt thumbs). Summary line above Continue.
  *
- * The answers are persisted on the device and read nowhere else yet, so the screen claims nothing
- * about what they do. See the note where the drawdown caption used to be.
+ * The drawdown answer becomes the agents' risk profile once the permission is granted (`delegate.tsx`, 2026-09-19);
+ * the goals themselves are kept on the device and read nowhere else yet, so the screen claims nothing about them.
  */
 import React from 'react';
 import { useRouter } from 'expo-router';
