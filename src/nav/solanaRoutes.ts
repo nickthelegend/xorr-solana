@@ -56,6 +56,8 @@ export const HIDDEN_ON_SOLANA: readonly string[] = [
   // The Assets tab draws a Base target mix; Portfolio is the Solana holdings view. More is an empty tab.
   '/holdings',
   '/more',
+  // Compares Base crypto (WETH, cbBTC) over CoinGecko history; nothing on it trades here.
+  '/compare',
 ];
 
 /**

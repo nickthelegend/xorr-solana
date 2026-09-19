@@ -204,7 +204,26 @@ export const walletSignsOnly = money === 'copy';
  * fork build the same code opens a phone wallet on real Base, where a transfer is real money sent to an address whose
  * balance this build never reads. Any copy of a chain carries the id of the chain it copies, so none has a code.
  */
-export const depositQrWorks = !isSolana && money !== 'copy';
+export const depositQrWorks = money !== 'copy';
+
+/** The mainnet USDC mint, which devnet builds do not use (`server/src/solana/clusters.ts` names devnet's). */
+const SOLANA_USDC: Record<string, string> = {
+  'solana-mainnet': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+  'solana-devnet': '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+};
+
+/**
+ * What a deposit code encodes (2026-09-19). On Solana it is a Solana Pay transfer request for USDC to this address
+ * (`solana:<address>?spl-token=<mint>`), which phone wallets open as "send USDC"; on Base, EIP-681. A copy of a chain has
+ * no code on either — see above: the phone would pay on the real network.
+ */
+export function depositUri(address: string): string {
+  if (isSolana) {
+    const mint = SOLANA_USDC[CHAIN_KEY];
+    return mint ? `solana:${address}?spl-token=${mint}` : `solana:${address}`;
+  }
+  return `ethereum:${address}@${activeChain.id}`;
+}
 
 /** Said where the code would be. A fork build has no code, and its money is test funds. */
 export const depositQrNote = isSolana

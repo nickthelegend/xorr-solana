@@ -15,6 +15,8 @@ import { query } from '../db/index.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
 import { totalValueUsd } from '../evm/balances.js';
 import { log } from '../http/request-id.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { solanaHoldings } from '../solana/holdings.js';
 
 export type SnapshotReason = 'interval' | 'fill' | 'close' | 'withdrawal';
 export type HistoryPoint = { at: number; totalUsd: number; reason: SnapshotReason };
@@ -37,6 +39,25 @@ export async function snapshotWallet(
   wallet: { id: string; address: string },
   reason: SnapshotReason,
 ): Promise<boolean> {
+  // Solana (2026-09-19): the chain's own holdings — USDC and every xStock at its live price — not the Base reader,
+  // which rejected a base58 address, so no snapshot was ever kept and Portfolio history stayed empty.
+  if (ON_SOLANA) {
+    let h: Awaited<ReturnType<typeof solanaHoldings>>;
+    try {
+      h = await solanaHoldings(wallet.address);
+    } catch (e) {
+      log.warn(`[snapshot] nothing kept for wallet ${wallet.id}: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    // An xStock nothing could price leaves the total incomplete; a partial total is not kept as history.
+    if (h.partial) return false;
+    await query(
+      `INSERT INTO portfolio_snapshots (wallet_id, total_usd, cash_usd, holdings_usd, supplied_usd, reason)
+       VALUES ($1, $2, $3, $4, 0, $5)`,
+      [wallet.id, h.totalUsd, h.usdc, h.totalUsd - h.usdc, reason],
+    );
+    return true;
+  }
   let value: Awaited<ReturnType<typeof totalValueUsd>>;
   try {
     value = await totalValueUsd(wallet.address as Address, { strict: true });

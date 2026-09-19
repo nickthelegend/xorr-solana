@@ -14,7 +14,7 @@ import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
-import { activeChain, chainLabel, depositQrNote, depositQrWorks } from '@/chain';
+import { activeChain, chainLabel, depositQrNote, depositQrWorks, depositUri } from '@/chain';
 import { NetworkChip } from '@/networks/NetworkChip';
 import { AddressQR } from '@/ui/AddressQR';
 import { useGoBack } from '@/nav/useGoBack';
@@ -172,7 +172,7 @@ export default function Fund() {
               */}
               {address && depositQrWorks ? (
                 <View style={{ alignItems: 'center', paddingVertical: space.s12 }}>
-                  <AddressQR value={`ethereum:${address}@${activeChain.id}`} size={QR_SIZE} />
+                  <AddressQR value={depositUri(address)} size={QR_SIZE} />
                 </View>
               ) : null}
               {/* In full and selectable rather than shortened: it is going to be pasted somewhere. */}

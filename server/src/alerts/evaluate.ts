@@ -24,6 +24,8 @@ import { append } from '../audit/log.js';
 import { send } from '../notifications/push.js';
 import { priceOf } from '../market/prices.js';
 import { readPolicy } from '../evm/delegation.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { readSolanaPolicy } from '../solana/grant.js';
 
 type AlertRow = {
   id: string;
@@ -80,7 +82,8 @@ async function priceVerdict(a: AlertRow): Promise<Verdict> {
  */
 async function riskVerdict(a: AlertRow, owner: Address | undefined): Promise<Verdict> {
   if (!owner) throw new Error('no wallet address on file');
-  const policy = await readPolicy(owner);
+  // Solana (2026-09-19): the SPL delegation and its grant record; the Base contract is not on this chain.
+  const policy = ON_SOLANA ? await readSolanaPolicy({ id: a.wallet_id, address: owner }) : await readPolicy(owner);
   if (!policy) throw new Error('no permission granted on-chain');
 
   const floor = Number(a.config.capRemainingUsd ?? NaN);

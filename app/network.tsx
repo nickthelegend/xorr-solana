@@ -53,6 +53,10 @@ const CHAIN_NOTE: Record<string, string> = {
   'base-sepolia': 'A test network. Transactions settle; swaps cannot fill.',
   'base-fork': 'A fork of Base. Fills are real here and nowhere else.',
   localnet: 'A local chain. Nothing leaves this machine.',
+  'solana-fork': 'A fork of Solana mainnet. Real USDC and xStocks programs, test money; fills are real here and nowhere else.',
+  'solana-devnet': 'Solana devnet. Test money; xStocks do not trade here.',
+  'solana-mainnet': 'Solana mainnet. Real money, real fills.',
+  'solana-localnet': 'A local Solana validator. Nothing leaves this machine.',
 };
 
 export default function Network() {

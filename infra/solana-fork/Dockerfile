@@ -8,7 +8,7 @@
 # One public port: `rpc-proxy.mjs` serves JSON-RPC and upgrades websockets onto the validator's second port, because a
 # Railway service exposes one port and the app's confirmations subscribe over a websocket.
 
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends curl bzip2 ca-certificates \

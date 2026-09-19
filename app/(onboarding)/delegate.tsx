@@ -161,6 +161,12 @@ export default function GrantDelegation() {
                 label="It can sell the xStocks you hold"
                 detail="So a stop-loss or take-profit can fire while you are away. xorr only moves them into a sale that pays you USDC. Nothing else in your wallet is reachable."
               />
+              {/* The one disclosure a new holder must see before granting (2026-09-19); the rest is in Risk disclosure. */}
+              <ConsequenceCard
+                tone="warn"
+                label="xStocks are not for US persons"
+                detail="They are issued by Backed, which does not offer them to US persons. The issuer can pause or freeze the token. Settings → Risk disclosure has the rest."
+              />
             </>
           ) : (
             <ConsequenceCard
