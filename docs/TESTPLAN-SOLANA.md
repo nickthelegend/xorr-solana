@@ -132,7 +132,7 @@ Privy test account (Solana wallet `GiKwSk…sHJM`). Every on-chain step is a rea
 | D1 | PASS | ApproveChecked `UuhSDqyn…` signed by the user's Privy wallet: delegate `CZqa…`, 600 USDC. |
 | D2 | PASS | `/delegation` and `/limits` read the delegate and allowance from the chain. |
 | D3 | PASS | Safety LIVE with cap used and days left; Home chip ARMED. |
-| D4 | UNTESTED | Cancelling Privy's signing sheet needs the sheet on screen (Browser pane hidden this run). |
+| D4 | PASS | Hosted: closing Privy's sheet under Stop all trading leaves all six delegations on chain and Safety LIVE; after the fix the app says "You cancelled the signature, so nothing changed." (it showed Privy's "Failed to connect to wallet"). |
 | D5 | PASS | The grant screen's stepper is bounded; the server refuses 0, negative, non-numeric, past end date, and a signature not on chain. |
 | E1 | PASS | 11 xStocks with live Jupiter prices. |
 | E2 | PASS | `/xstock/NVDAx`: real quote (pay, expected, impact, slippage, route Whirlpool, minimum). |
@@ -197,6 +197,7 @@ accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim
 | HS10 | PASS | Sign out, then a fresh account (`6dCg…1vo6`): chose Aggressive; the fund screen shows no card button; faucet; grant (six delegations on chain); `/agents/risk-profile` active = aggressive. |
 | HS11 | PASS | Allowlist add → Pending, "usable from … in 24 h"; Send refuses ("No address is unlocked yet"); server `/withdrawal-addresses/check` → 409 `cooling_off`. |
 | HS12 | PASS | Recovery → Export private key opens Privy's own export window for the right wallet (the key was not revealed). |
+| HS14 | PASS | Cancel: see D4. |
 | HS13 | PASS | Screen audit (Home, xStocks, ticket, Portfolio, Activity, Safety, agent, Deposit, Explore, Send, Watchlist): no API response ≥ 400 after load. |
 
 Hosted fixes made during the run:
@@ -210,5 +211,4 @@ Hosted fixes made during the run:
 
 ### Still open
 
-- D4 (cancelling Privy's signing sheet) is UNTESTED.
 - C2 (a live MoonPay purchase) is BLOCKED: no MoonPay keys exist.
