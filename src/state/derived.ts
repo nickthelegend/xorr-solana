@@ -180,6 +180,27 @@ export const POSITION_UNREALISED = 318.4;
 export const POSITION_MARGIN = 3800;
 export const CLOSE_STEPS = [25, 50, 75, 100] as const;
 
+/**
+ * What closing `pct` of a spot xStock position would realise and pay out, from the venue's sell quote (2026-09-19).
+ *
+ * The sale settles at Jupiter's live quote for exactly those units, not at the mark; priced at the mark, the preview
+ * read "Realises +$0.31" over a close that realised −$0.03 once impact and the pool's own price were in it. Proceeds are
+ * the quote's expected USDC; the gain is those proceeds less what the units cost at the position's average entry.
+ */
+/** The dollar size to ask the venue to quote for closing `pct`: those units at the mark, to the micro-dollar. */
+export function closeSellUsd(p: { units: number; mark: number }, pct: number): number {
+  return Math.round(((p.units * pct) / 100) * p.mark * 1e6) / 1e6;
+}
+
+export function quotedClose(
+  p: { units: number; entry: number },
+  pct: number,
+  quotedUsdc: number,
+): { unitsSold: number; realise: number; free: number } {
+  const unitsSold = (p.units * pct) / 100;
+  return { unitsSold, realise: quotedUsdc - p.entry * unitsSold, free: quotedUsdc };
+}
+
 export function closeRealise(pct: number, unrealised = POSITION_UNREALISED): number {
   return (unrealised * pct) / 100;
 }
