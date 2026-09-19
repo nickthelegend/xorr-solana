@@ -127,7 +127,7 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 22 | Activity / audit trail with explorer links | ✅ | F5 |
 | 23 | No computable keys off localnet/fork | ✅ | `solana/keys.ts` refuses seeds off a loopback fork; `keys.test.ts` |
 | 24 | Hosted demo (fork + executor + web) | ❌ | nothing Solana hosted |
-| 25 | Fork fills Jupiter-routed (pool re-clone, sell routes) | ❌ | pool drift → vault fills; sells not cloned |
+| 25 | Fork fills Jupiter-routed (pool re-clone, sell routes) | ✅ | live route resolution at boot; `jupiter-route` buy and sell |
 | 26 | Demo video | ❌ | only Base videos exist |
 | 27 | README Solana-first | ❌ | README top says Base |
 | 28 | Submission | ❌ | not submitted |
@@ -137,8 +137,8 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 ### P1 — important
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 31 | Recurring buy (DCA) on xStocks via Solana path | ❌ | `runStrategy` EVM; validation uses Base `TOKENS` |
-| 32 | Custom agents with xStock templates | ❌ | templates WETH/CBBTC |
+| 31 | Recurring buy (DCA) on xStocks via Solana path | ⚠️ | created from the screen; run went through `runOnSolana` → `daily_cap` refusal; a fill awaits cap headroom |
+| 32 | Custom agents with xStock templates | ⚠️ | templates from `/market/tradable`; UI create not yet re-walked |
 | 33 | Close a position (Solana) | ✅ | position Close → `useXStockSell` (same verified path as #11) |
 | 34 | Withdraw everything (Solana) | ✅ | sold 0.018 NVDAx (`4dXwVMfj…`), sent 495.66 USDC (`48n4enDu…`) |
 | 35 | Holdings: no fixture target mix on Solana | ✅ | `/holdings` hidden on Solana; Portfolio is the holdings view |
@@ -277,14 +277,17 @@ Exit: on the fork — user sell moves the user's shares and credits USDC; a forc
 revoke drops all approvals; resume works.
 
 ### Phase 4 — Strategies and custom agents on Solana
-- [NOT STARTED] **4.1** Strategy validation accepts xStocks on Solana (cluster tradable list), refuses Base tokens.
-- [NOT STARTED] **4.2** Solana runner branch for `dca` (and `exit-rules` from 3.4) → `guardAndSpend`.
-- [NOT STARTED] **4.3** Recurring-buy screen on Solana picks an xStock; custom-agent templates are xStocks.
+- [DONE] **4.1** Strategy validation accepts xStocks on Solana (cluster tradable list), refuses Base tokens.
+- [DONE] **4.2** Solana runner branch for `dca` (and `exit-rules` from 3.4) → `guardAndSpend`.
+- [DONE] **4.3** Recurring-buy screen on Solana picks an xStock; custom-agent templates are xStocks.
 Exit: a DCA of $10 NVDAx runs on schedule on the fork and appears in runs, holdings, activity.
 
 ### Phase 5 — Fork fidelity
-- [NOT STARTED] **5.1** Clone sell-direction route accounts; re-clone pool state at bootstrap.
-- [NOT STARTED] **5.2** Scheduled pool refresh (restart-free where possible, else documented reset script).
+- [DONE] **5.1** Routes resolved live from Jupiter at boot (both directions, NVDAx/TSLAx/AAPLx/MSFTx/SPYx: 74 accounts,
+  4 programs); proof: `jupiter-route` buy `5DXhMq9p…`; exit sell routed through Jupiter `2DztwgJ8…`.
+- [DONE, limited] **5.2** A running `solana-test-validator` cannot re-clone accounts, so pool state freezes at boot and
+  drifts over hours; the remedy is `npm run setup:solana-fork` (re-resolves routes) before a demo or recording.
+  Drift shows as a labelled `venue-vault` fill, never a mislabelled one.
 Exit: buy and sell on the fork report `jupiter-route`.
 
 ### Phase 6 — Hosting (owner approval for paid resources)

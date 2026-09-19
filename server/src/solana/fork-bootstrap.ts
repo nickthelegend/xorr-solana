@@ -23,6 +23,7 @@ import {
   venueVaultKeypair,
 } from './keys.js';
 import { portArgs, portOf, type ValidatorPorts } from './validator-ports.js';
+import { resolveRouteClones } from './routeAccounts.js';
 
 const RPC = process.env.FORK_RPC ?? 'http://127.0.0.1:8899';
 const UPSTREAM_RPC = process.env.MAINNET_RPC ?? 'https://api.mainnet-beta.solana.com';
@@ -69,6 +70,18 @@ export const ROUTE_ACCOUNTS = [
   'D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf', // Jupiter event authority
   '2Se6p8VJTcsPWZ2RyaSVCkE5L5ocdFqA5Vj2CEGDZ1rW', // address lookup table the route uses
 ] as const;
+
+/**
+ * The xStocks the fork trades: NVDAx (its mint is overridden so the fork can fund the venue vault) and the most traded
+ * others, cloned as they are on mainnet with the routes Jupiter uses for them.
+ */
+export const FORK_XSTOCKS: { mint: string; decimals: number }[] = [
+  { mint: NVDAX_MINT.toBase58(), decimals: 8 },
+  { mint: 'XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB', decimals: 8 }, // TSLAx
+  { mint: AAPLX_MINT.toBase58(), decimals: 8 },
+  { mint: MSFTX_MINT.toBase58(), decimals: 8 },
+  { mint: 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W', decimals: 8 }, // SPYx
+];
 
 // Real mainnet USDC mint base64 (82 bytes)
 const USDC_MINT_BASE64 =
@@ -231,6 +244,26 @@ export async function startValidator(
   console.log(`Preparing genesis accounts in ${fixturesDir}...`);
   const { usdcPath, nvdaxPath } = await prepareGenesisMints(fixturesDir, payer);
 
+  /*
+   * Today's routes, resolved from Jupiter (2026-09-19) — both directions, for each xStock the fork trades. The fixed
+   * ROUTE_ACCOUNTS list went stale as the price moved (the tick arrays a route walks shift with it), so fills fell back
+   * to the venue vault; it is kept only as what to clone when Jupiter cannot be asked, and that is logged.
+   */
+  let clones: { accounts: string[]; programs: string[] };
+  try {
+    clones = await resolveRouteClones({
+      upstream: new Connection(UPSTREAM_RPC, 'confirmed'),
+      usdcMint: USDC_MINT.toBase58(),
+      xstocks: FORK_XSTOCKS,
+      user: payer.publicKey.toBase58(),
+      exclude: [USDC_MINT.toBase58(), NVDAX_MINT.toBase58(), JUPITER_PROGRAM, WHIRLPOOL_PROGRAM],
+    });
+    console.log(`Cloning ${clones.accounts.length} route accounts and ${clones.programs.length} extra programs resolved from Jupiter.`);
+  } catch (e) {
+    console.warn(`[fork] Jupiter routes could not be resolved (${e instanceof Error ? e.message : e}); cloning the last-known NVDAx route, which may be stale.`);
+    clones = { accounts: [...ROUTE_ACCOUNTS], programs: [] };
+  }
+
   const ledgerDir = opts.ledgerDir ?? path.join(fixturesDir, 'test-ledger');
   const logPath = path.join(fixturesDir, 'validator.log');
   const logFd = fs.openSync(logPath, 'w');
@@ -253,7 +286,8 @@ export async function startValidator(
       JUPITER_PROGRAM,
       '--clone-upgradeable-program',
       WHIRLPOOL_PROGRAM,
-      ...ROUTE_ACCOUNTS.flatMap((a) => ['--clone', a]),
+      ...clones.programs.flatMap((p) => ['--clone-upgradeable-program', p]),
+      ...clones.accounts.flatMap((a) => ['--clone', a]),
       '--url',
       UPSTREAM_RPC,
       '--reset',
@@ -450,8 +484,13 @@ export async function bootstrapFork(customDevOwner?: string) {
     '',
   ].join('\n');
 
-  fs.writeFileSync('.env.fork', envContent);
-  console.log('\nWrote .env.fork successfully.');
+  /*
+   * The repository root's `.env.fork`, wherever this was run from (2026-09-19). It wrote `.env.fork` in the working
+   * directory, and run from `server/` that replaced `server/.env.fork` — the Base fork's generated contract addresses.
+   */
+  const envPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env.fork');
+  fs.writeFileSync(envPath, envContent);
+  console.log(`\nWrote ${envPath} successfully.`);
   console.log('Fork bootstrap complete! Run tests with:');
   console.log(`  FORK_RPC=${RPC} CHAIN=1 npx vitest run src/solana/fork.chain.test.ts`);
 }
