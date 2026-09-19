@@ -22,7 +22,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   AssetMark,
@@ -76,6 +76,7 @@ const FORMAT = { money, quantity, price: fmtPrice };
 
 export default function XStockTicket() {
   const { symbol = '' } = useLocalSearchParams<{ symbol: string }>();
+  const router = useRouter();
   const logo = useLogo(symbol || undefined);
   const goBack = useGoBack();
 
@@ -318,9 +319,20 @@ export default function XStockTicket() {
               </Text>
             </View>
           ) : result?.status === 'blocked' ? (
-            <Text variant="footnote" color={colors.down} align="center">
-              {result.message}
-            </Text>
+            <View style={{ gap: space.s8 }}>
+              <Text variant="footnote" color={colors.down} align="center">
+                {result.message}
+              </Text>
+              {/* A refusal the person can act on gets the door to act on it, rather than a sentence and a dead end. */}
+              {result.reason === 'no_permission' || result.reason === 'delegation_revoked' ? (
+                <Pill
+                  label="Give permission"
+                  light
+                  onPress={() => router.push('/delegate')}
+                  testID="xstock-grant-cta"
+                />
+              ) : null}
+            </View>
           ) : buyError ? (
             <Text variant="footnote" color={colors.down} align="center">
               {buyError}

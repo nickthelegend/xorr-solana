@@ -113,11 +113,20 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
   const onChainState = await readDelegation(intent.ownerPubkey, DEFAULT_MINTS.USDC);
   if (side === 'buy') {
     if (onChainState.isRevoked) {
+      /*
+       * Never granted and revoked look identical on chain — no delegate on the USDC account — and both answered "has
+       * been revoked" (2026-09-20). To someone who has not granted yet that is a false statement about something they
+       * never did, and it names no way forward. The grant record tells the two apart: there is none until a grant is
+       * confirmed.
+       */
+      const granted = await readSolanaPolicy({ id: intent.walletId, address: intent.ownerPubkey });
       return {
         placed: false,
         status: 'blocked',
-        reason: 'delegation_revoked',
-        detail: 'The trading permission has been revoked on-chain, so nothing will be placed.',
+        reason: granted ? 'delegation_revoked' : 'no_permission',
+        detail: granted
+          ? 'The trading permission has been revoked on-chain, so nothing will be placed.'
+          : 'You have not given xorr permission to spend yet. Grant one in Safety, then this will go through.',
       };
     }
 
