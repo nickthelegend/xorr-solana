@@ -10,11 +10,11 @@
  * These three imports must come FIRST and must stay first. `react-native-get-random-values`
  * installs `crypto.getRandomValues`, `fast-text-encoding` installs `TextEncoder`/`TextDecoder`,
  * and the ethers shims fill in the rest of what the signing path expects. Anything imported above
- * them may capture a global that does not exist yet.
+ * them may capture a global that does not exist yet. The ethers shims are native-only (`shims-native.js`).
  */
 import 'react-native-get-random-values';
 import 'fast-text-encoding';
-import '@ethersproject/shims';
+import './shims-native';
 // Before the app: the Solana libraries read `Buffer` at import time. See buffer-global.js.
 import './buffer-global';
 
