@@ -39,4 +39,4 @@ server.on('upgrade', (req, socket, head) => {
   socket.on('error', () => up.destroy());
 });
 
-server.listen(PORT, '0.0.0.0', () => console.log(`fork proxy on :${PORT} → rpc :${RPC_PORT}, ws :${WS_PORT}`));
+server.listen(PORT, '::', () => console.log(`fork proxy on :${PORT} → rpc :${RPC_PORT}, ws :${WS_PORT}`));
