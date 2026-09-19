@@ -49,7 +49,6 @@ import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { sharePriced, useSpotPrices } from '@/markets/useSpotPrices';
-import { useStore } from '@/state/store';
 import { Icon } from '@/design/Icon';
 import { applyOrder, canMove, move, orderChanged, orderToSave } from '@/markets/watchOrder';
 import { errorText } from '@/data/apiError';
@@ -70,8 +69,11 @@ function groupsOf(symbols: readonly string[]): { label: string; symbols: string[
 export default function Watchlist() {
   const router = useRouter();
   const goBack = useGoBack();
-  const tab = useStore((s) => s.tab);
-  const setTab = useStore((s) => s.setTab);
+  /*
+   * Its own choice, by label (2026-09-20). It read the store's `tab`, which is Home's Agents/Gainers/Stocks index: picking
+   * Stocks on Home opened the watchlist on whatever sat third here, and reordering the tabs changed what an old index meant.
+   */
+  const [tabLabel, setTabLabel] = useState<string>();
 
   const watchable = useAsync(() => system.watchable(), []);
   /*
@@ -92,7 +94,7 @@ export default function Watchlist() {
     const all = (watchable.data ?? []).map((t) => t.symbol);
     return groupsOf(applyOrder(all, saved));
   }, [watchable.data, saved]);
-  const group = groups[tab] ?? groups[0];
+  const group = groups.find((g) => g.label === tabLabel) ?? groups[0];
   const symbols = group?.symbols ?? NONE;
   const key = symbols.join(',');
 
@@ -143,8 +145,8 @@ export default function Watchlist() {
 
       {groups.length > 1 ? (
         <PillRow style={{ marginTop: space.s16, flexGrow: 0 }}>
-          {groups.map((g, i) => (
-            <Pill key={g.label} label={g.label} selected={g === group} onPress={() => setTab(i)} />
+          {groups.map((g) => (
+            <Pill key={g.label} label={g.label} selected={g === group} onPress={() => setTabLabel(g.label)} />
           ))}
         </PillRow>
       ) : null}
