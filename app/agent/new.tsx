@@ -207,7 +207,7 @@ export default function NewAgent() {
             label="What it does"
             value={role}
             onChange={setRole}
-            placeholder="Buys ETH on red days"
+            placeholder={isSolana ? "Buys NVDAx every week" : "Buys ETH on red days"}
             maxLength={ROLE_MAX}
             capitalize="sentences"
             editable={!made}
