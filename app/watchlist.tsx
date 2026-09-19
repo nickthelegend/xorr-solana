@@ -43,11 +43,10 @@ import {
   space,
 } from '@/ui';
 import { repos } from '@/data';
-import { isStockSymbol } from '@/data/marketData';
 import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { logoProps, useLogos } from '@/data/useLogos';
-import { useSpotPrices } from '@/markets/useSpotPrices';
+import { sharePriced, useSpotPrices } from '@/markets/useSpotPrices';
 import { useStore } from '@/state/store';
 import { Icon } from '@/design/Icon';
 import { applyOrder, canMove, move, orderChanged, orderToSave } from '@/markets/watchOrder';
@@ -59,8 +58,8 @@ const NONE: readonly string[] = [];
 /** The watchable tokens as tabs — crypto, then shares — keeping only the tabs with something in them. */
 function groupsOf(symbols: readonly string[]): { label: string; symbols: string[] }[] {
   return [
-    { label: 'Crypto', symbols: symbols.filter((s) => !isStockSymbol(s)) },
-    { label: 'Stocks', symbols: symbols.filter((s) => isStockSymbol(s)) },
+    { label: 'Crypto', symbols: symbols.filter((s) => !sharePriced(s)) },
+    { label: 'Stocks', symbols: symbols.filter((s) => sharePriced(s)) },
   ].filter((g) => g.symbols.length > 0);
 }
 
