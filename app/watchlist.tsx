@@ -16,6 +16,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { isSolana } from '@/chain';
 import { useGoBack } from '@/nav/useGoBack';
 import { assetGradient } from '@/design/gradients';
 import {
@@ -35,6 +36,7 @@ import {
   Screen,
   Sparkline,
   Text,
+  chart,
   colors,
   percent,
   pnlTone,
@@ -55,12 +57,14 @@ import { errorText } from '@/data/apiError';
 const ROW_H = 64;
 const NONE: readonly string[] = [];
 
-/** The watchable tokens as tabs — crypto, then shares — keeping only the tabs with something in them. */
+/**
+ * The watchable tokens as tabs, keeping only the tabs with something in them. Crypto first on Base; on Solana the
+ * xStocks are what the bot trades and Crypto holds only USDC, so Stocks opens first there (2026-09-20).
+ */
 function groupsOf(symbols: readonly string[]): { label: string; symbols: string[] }[] {
-  return [
-    { label: 'Crypto', symbols: symbols.filter((s) => !sharePriced(s)) },
-    { label: 'Stocks', symbols: symbols.filter((s) => sharePriced(s)) },
-  ].filter((g) => g.symbols.length > 0);
+  const crypto = { label: 'Crypto', symbols: symbols.filter((s) => !sharePriced(s)) };
+  const stocks = { label: 'Stocks', symbols: symbols.filter((s) => sharePriced(s)) };
+  return (isSolana ? [stocks, crypto] : [crypto, stocks]).filter((g) => g.symbols.length > 0);
 }
 
 export default function Watchlist() {
@@ -209,6 +213,11 @@ export default function Watchlist() {
                     closes.length > 1 ? (
                       <View style={{ marginHorizontal: space.s10 }}>
                         <Sparkline data={closes} />
+                      </View>
+                    ) : sparks.loading && !sparks.data ? (
+                      // The day's glyph is on its way: its space held, not left blank as though there were none.
+                      <View style={{ marginHorizontal: space.s10 }}>
+                        <Placeholder height={chart.spark.height} width={chart.spark.width} />
                       </View>
                     ) : undefined
                   }

@@ -17,7 +17,7 @@ import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import { ON_SOLANA, DEFAULT_MINTS } from '../solana/clusters.js';
 import { connection as solanaConnection } from '../solana/connection.js';
-import { XSTOCKS, xStockPriceUsd } from '../venues/xstocks.js';
+import { XSTOCKS, xStockKey, xStockPriceUsd } from '../venues/xstocks.js';
 import { getJson, staleValue } from '../http/get.js';
 import { readChain } from '../http/chain-read.js';
 import { log } from '../http/request-id.js';
@@ -27,6 +27,7 @@ import { STOCKS, equitiesFunctional, isStock, observedHistory } from '../venues/
 import { classificationFor, earningsCalendar } from '../market/edgar.js';
 import { aavePoolIsDeployedHere, usdcSupplyYield, usdcReserve } from '../market/yield.js';
 import { logosFor, warmLogos } from '../market/logos.js';
+import { dayChangePct, hourlyCloses, observedDay } from '../market/observed.js';
 import { withdrawCalldata } from '../venues/aave.js';
 import { suppliedUsd } from '../evm/balances.js';
 import { publicClient } from '../evm/client.js';
@@ -264,14 +265,22 @@ market.get('/market/ohlc', async (c) => {
  * which is the honest rendering. A flat line would say the price did not move.
  */
 market.get('/market/sparklines', async (c) => {
-  const symbols = (c.req.query('symbols') ?? '')
-    .split(',')
-    .map((s) => s.trim().toUpperCase())
+  const asked = (c.req.query('symbols') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  // xStocks have no CoinGecko series; theirs is the executor's own recorded Jupiter prices (`market/observed.ts`).
+  const equities = ON_SOLANA ? asked.map((s) => xStockKey(s)).filter((k): k is string => !!k).slice(0, 24) : [];
+  const symbols = asked
+    .map((s) => s.toUpperCase())
     .filter((s) => COINGECKO_IDS[s])
     .slice(0, 24);
-  if (symbols.length === 0) return c.json({});
+  if (symbols.length === 0 && equities.length === 0) return c.json({});
 
   const out: Record<string, number[]> = {};
+  await Promise.all(
+    equities.map(async (sym) => {
+      const closes = hourlyCloses(await observedDay(sym).catch(() => []));
+      if (closes.length > 1) out[sym] = closes;
+    }),
+  );
   await Promise.all(
     symbols.map(async (sym) => {
       try {
@@ -614,7 +623,10 @@ market.get('/market/stocks', async (c) => {
     const rows = await Promise.all(
       Object.values(XSTOCKS).map(async (x) => {
         const price = await xStockPriceUsd(x.symbol).catch(() => null);
+        // A 24h change only once the recorded series reaches back a day; absent until then, never a short-window guess.
+        const change24h = dayChangePct(await observedDay(x.symbol).catch(() => []));
         return {
+          ...(change24h === undefined ? {} : { change24h }),
           symbol: x.symbol,
           name: x.name,
           address: x.address,

@@ -78,10 +78,18 @@ export function agentGradient(name: string): GradientPair {
  * asset's identity: an unknown mark should not claim to be something it is not.
  */
 export function assetGradient(symbol: string): GradientPair {
+  const own = catalogGradient(symbol);
+  if (own) return own;
+  // An xStock wears its share's colours: `NVDAx` is the catalogue's `NVDAc` on Solana (2026-09-20).
+  const share = /^[A-Z]{1,6}x$/.test(symbol) ? catalogGradient(`${symbol.slice(0, -1)}c`) : undefined;
+  return share ?? { c1: '#9AA3AD', c2: '#5C636B' };
+}
+
+function catalogGradient(symbol: string): GradientPair | undefined {
   for (const cls of assetClasses) {
     for (const i of cls.instruments) {
       if (i.sym === symbol) return { c1: i.c1, c2: i.c2 };
     }
   }
-  return { c1: '#9AA3AD', c2: '#5C636B' };
+  return undefined;
 }
