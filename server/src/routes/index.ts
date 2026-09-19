@@ -275,8 +275,13 @@ routes.post('/wallet/create', async (c) => {
  * still arrived with nothing to pay gas with.
  */
 /** How many fresh reads of Privy's record `/wallet/connect` makes before refusing, and the gap between them. */
-const CONNECT_READS = 4;
-const CONNECT_READ_GAP_MS = 1_000;
+/*
+ * Up to ~15 s, backing off (2026-09-19). On the hosted build a first sign-in's Solana wallet took longer than four reads a
+ * second apart to appear in Privy's record of the user, and a brand-new account was refused as "not a wallet on your
+ * account" — the one moment a new user is most likely to leave.
+ */
+const CONNECT_READS = 7;
+const CONNECT_READ_GAP_MS = 750;
 
 routes.post('/wallet/connect', async (c) => {
   const user = requireUser(c);
@@ -303,7 +308,7 @@ routes.post('/wallet/connect', async (c) => {
    * few times over a few seconds, before refusing; an address that is genuinely someone else's is still refused.
    */
   for (let attempt = 0; !linked && attempt < CONNECT_READS; attempt += 1) {
-    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, CONNECT_READ_GAP_MS));
+    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, CONNECT_READ_GAP_MS * attempt));
     wallets = await freshWallets(user.userId);
     linked = wallets && findLinkedWallet(wallets, body.address);
   }
