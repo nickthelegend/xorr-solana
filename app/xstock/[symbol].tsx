@@ -27,6 +27,7 @@ import { useGoBack } from '@/nav/useGoBack';
 import {
   AssetMark,
   Button,
+  Fill,
   CloseButton,
   SignInButton,
   FailureNote,
@@ -102,6 +103,8 @@ export default function XStockTicket() {
   const keys = useIntentKeys();
   // Tradable is a fact about this cluster: on a fork, the xStocks whose mint it cloned (`/market/tradable`).
   const tradable = useAsync(() => system.tradable(), []);
+  /** Every xStock this build lists, to tell "not listed at all" from "listed but not settleable on this cluster". */
+  const catalog = useAsync(() => system.xstocks(), []);
   const canSettle = !!tradable.data?.some((t) => t.symbol === symbol);
   const [buying, setBuying] = useState(false);
 
@@ -175,6 +178,31 @@ export default function XStockTicket() {
     () => (quote.data ? breakdownRows(quote.data, FORMAT) : []),
     [quote.data],
   );
+
+  /*
+   * A symbol this build does not list at all (2026-09-20). `/xstock/FAKEx` drew the whole ticket — backing unverified,
+   * eligibility unknown, a quote refusal with its error reference — for a token that does not exist. That is a
+   * not-found, and it says so once the catalogue has answered. A LISTED xStock whose mint this cluster lacks keeps its
+   * ticket and its own "cannot settle here" line; the two are different facts.
+   */
+  if (catalog.data && !catalog.data.rows.some((r) => r.symbol === symbol)) {
+    return (
+      <Screen light gutter="sheet">
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text variant="sheetTitle" color={colors.sheet.ink}>
+            Not listed
+          </Text>
+          <CloseButton onPress={() => goBack()} light />
+        </View>
+        <Fill style={{ justifyContent: 'center', gap: space.s12 }}>
+          <Text variant="body" color={colors.sheet.muted} align="center">
+            {`There is no xStock called ${symbol} here.`}
+          </Text>
+          <Button label="See the xStocks" onPress={() => router.replace('/xstocks')} testID="xstock-not-listed" />
+        </Fill>
+      </Screen>
+    );
+  }
 
   return (
     <Screen light gutter="sheet">
