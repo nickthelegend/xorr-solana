@@ -199,6 +199,24 @@ accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim
 | HS12 | PASS | Recovery → Export private key opens Privy's own export window for the right wallet (the key was not revealed). |
 | HS14 | PASS | Cancel: see D4. |
 | HS15 | PASS | Close preview at the venue's quote: "Realises −$0.01 and frees $24.99 at the venue's live quote" for half of 0.2251 NVDAx; the executor's prepared sale for the same units priced $24.988 (the old mark-based preview would have said +$0.16). The live signature was not sent (Browser pane hidden); the earlier hosted close (#33) is the signed proof. |
+| CH1 | PASS | Signed-out deep links (/portfolio, /safety, /send) show sign-in prompts, no crash, no fabricated data. |
+| CH2 | PASS | Goals: Continue disabled with 0 selected ("0 selected"); Steady choice reached `/agents/risk-profile` as conservative. |
+| CH3 | PASS | Sign-in: invalid email leaves the button disabled; a wrong code says "That code is not right. Check it and try again."; the real code signs in. |
+| CH4 | PASS | Faucet double-clicked: one claim, chain shows exactly 500 USDC + 0.5 SOL, lock stated. |
+| CH5 | PASS | "Not yet — look around first": Home reads NOT GRANTED; a buy is refused and (after the fix) says to grant, with a Give permission action to /delegate. Safety reads NOT GRANTED → Set limits. |
+| CH6 | PASS | Cap stepper floors at $200/day and the cards follow ($600 total); the grant put exactly 600 USDC on chain. |
+| CH7 | PASS | Over-cap buy: "That would take today past your $200 cap. $200.00 is left." Over-allowance: "more than your permission still allows in total: 600.00 USDC … is left." |
+| CH8 | PASS | $100 buy double-clicked: one fill (USDC 500 → 400, approval 600 → 500), routed by Jupiter. |
+| CH9 | PASS | Sell beyond the holding is quoted for the holding after the fix, and says "so this sells all of it". |
+| CH10 | PASS | Unknown symbol `/xstock/FAKEx` → "Not listed"; unknown route → not-found; unknown position id → "This position is no longer open." |
+| CH11 | PASS | Allowlist: an EVM address is refused ("Solana addresses are base58 public keys") and cannot be added; a valid one is added Pending; Send refuses with "No address is unlocked yet."; Withdraw everything names the position and gates on the allowlist. |
+| CH12 | PASS | Strategy: created, Run now filled $50 through Jupiter, a second Run now answered "Already ran this period" with USDC unchanged; pause and resume both take. |
+| CH13 | PASS | Activity records every step and survives a reload (server-backed). |
+| CH14 | PASS | Chat with no model key: the question posts and the agent answers "I cannot answer that here: this build has no language model." — no fabricated reply. |
+| CH15 | PASS | Session: cleared token → every screen falls back to "Sign in to see this"; signing in again restores the grant, cap (75% used), agent, strategy and allowlist. |
+| CH16 | PASS | Kill switch on a second account: STOPPED, all six delegations none on chain; Strategies now says so (after the fix); Resume restores all six and clears the banner. |
+| CH17 | PASS | Console and network sweep after the fixes: no console errors and no response ≥ 400 across Home, xStocks, ticket, Portfolio, Activity, Strategies, Safety, Explore, Alerts, Runs, Leaderboard, Voice, Risk, Catchup. |
+
 | HS16 | PASS | xStock logos: `/market/logos` answers each xStock from Jupiter's registry (`source: jupiter`, issuer icon); hosted Watchlist, xStocks list, Home Stocks, ticket header, Portfolio cards and position screen all render `NVDAx.png`…`QQQx.png`. |
 | HS17 | PASS | Watchlist: Stocks tab first on Solana; its own tab choice (no longer Home's index); 11 prices, 23 sparkline paths, sparkline skeleton while loading; no response ≥ 400. |
 | HS18 | PASS | xStock charts: `/market/ohlc?symbol=NVDAx&days=1` → 27 half-hour rows from recorded Jupiter prices; Portfolio cards draw a chart ("No price history yet" gone). |
