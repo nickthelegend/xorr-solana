@@ -1111,3 +1111,15 @@ describe('setup progress — FEATURES.md #14', () => {
     expect(fundWith({ data: { total: 0.42 }, error: undefined })).toBe('done');
   });
 });
+
+describe('quotedClose', () => {
+  it('prices a close at the quote, not the mark', async () => {
+    const { quotedClose } = await import('./derived');
+    // The hosted close: 0.4501 NVDAx bought at $222.15; half quoted at $49.97 (the mark said $50.31).
+    const q = quotedClose({ units: 0.4501, entry: 222.15 }, 50, 49.97);
+    expect(q.unitsSold).toBeCloseTo(0.22505, 6);
+    expect(q.free).toBe(49.97);
+    expect(q.realise).toBeCloseTo(49.97 - 222.15 * 0.22505, 6);
+    expect(q.realise).toBeLessThan(0);
+  });
+});

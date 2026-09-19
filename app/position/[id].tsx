@@ -56,7 +56,7 @@ import {
   useReducedMotion,
 } from '@/ui';
 import { signedMoney } from '@/format';
-import { CLOSE_STEPS, closeCta, driftSentence, holdingDrift } from '@/state/derived';
+import { CLOSE_STEPS, closeCta, driftSentence, holdingDrift, quotedClose } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { repos } from '@/data';
 import { fetchTimedHistory, fillsOf, type HistoryRange } from '@/data/marketData';
@@ -134,8 +134,29 @@ export default function PositionScreen() {
   );
   const onLine = useMemo(() => lineMarks(fills, line.times), [fills, line]);
 
-  const realise = p ? (p.unrealised * closePct) / 100 : 0;
-  const free = p ? (p.margin * closePct) / 100 : 0;
+  /*
+   * On Solana the close is a sale at the venue's live quote, so the preview is that quote for those units: priced at the
+   * mark it promised a gain the fill did not deliver. Base keeps its book figures.
+   */
+  const sellUsd = p ? Number(((p.units * closePct * p.mark) / 100).toFixed(6)) : 0;
+  const sellQuote = useAsync(
+    () =>
+      isSolana && p && sellUsd > 0
+        ? system.xstockQuote({ symbol: p.symbol, side: 'sell', usd: sellUsd })
+        : Promise.resolve(null),
+    [p?.symbol, sellUsd],
+  );
+  const quoted = isSolana && p && sellQuote.data ? quotedClose(p, closePct, sellQuote.data.receive) : null;
+  const realise = quoted ? quoted.realise : p ? (p.unrealised * closePct) / 100 : 0;
+  const free = quoted ? quoted.free : p ? (p.margin * closePct) / 100 : 0;
+  /** On Solana there is no honest preview without a quote: while it loads, or if nothing will price the sale, say so. */
+  const previewNote = !isSolana
+    ? null
+    : sellQuote.loading && !sellQuote.data
+      ? 'Asking the venue what this sale would pay…'
+      : sellQuote.error
+        ? 'No venue would quote this sale right now, so there is no figure to show.'
+        : null;
 
   const pct = useSharedValue(closePct / 100);
   useEffect(() => {
@@ -413,17 +434,23 @@ export default function PositionScreen() {
               </View>
 
               {/* One sentence to a screen reader, its two figures in their own ink: `figure` covers the spans in it. */}
-              <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }} figure="own">
-                Realises{' '}
-                <Text variant="secondarySm" color={colors.ink}>
-                  {signedMoney(realise)}
-                </Text>{' '}
-                and frees{' '}
-                <Text variant="secondarySm" color={colors.ink}>
-                  {money(free)}
+              {previewNote ? (
+                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }}>
+                  {previewNote}
                 </Text>
-                .
-              </Text>
+              ) : (
+                <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s14 }} figure="own">
+                  Realises{' '}
+                  <Text variant="secondarySm" color={colors.ink}>
+                    {signedMoney(realise)}
+                  </Text>{' '}
+                  and frees{' '}
+                  <Text variant="secondarySm" color={colors.ink}>
+                    {money(free)}
+                  </Text>
+                  {quoted ? ' at the venue’s live quote' : ''}.
+                </Text>
+              )}
 
               {closeError ? (
                 <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s10 }}>
