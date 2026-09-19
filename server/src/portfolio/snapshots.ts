@@ -89,7 +89,7 @@ export function clearSnapshotAttempts(): void {
 export async function snapshotSweep(now = Date.now(), limit = 20): Promise<{ recorded: number; failed: number }> {
   const due = await query<{ id: string; address: string }>(
     `SELECT w.id, w.address FROM wallets w
-      WHERE w.address ~ '^0x[0-9a-fA-F]{40}$'
+      WHERE w.address ~ ${ON_SOLANA ? "'^[1-9A-HJ-NP-Za-km-z]{32,44}$'" : "'^0x[0-9a-fA-F]{40}$'"}
         AND (EXISTS (SELECT 1 FROM strategies s
                       WHERE s.wallet_id = w.id AND s.chain = ${THIS_CHAIN} AND s.state IN ('live', 'watch', 'paused'))
           OR EXISTS (SELECT 1 FROM positions p
