@@ -6,6 +6,9 @@ import { EXPORT_NEEDS_WALLET, EXPORT_ON_WEB } from './keyExport';
 
 const exportWallet = vi.hoisted(() => vi.fn(async (_options?: { address: string }) => undefined));
 vi.mock('@privy-io/react-auth', () => ({ useExportWallet: () => ({ exportWallet }) }));
+// The Solana build exports with Privy's Solana hook; these tests are the Base build's.
+vi.mock('@privy-io/react-auth/solana', () => ({ useExportWallet: () => ({ exportWallet: vi.fn() }) }));
+vi.mock('@/chain', () => ({ isSolana: false }));
 
 const web = await import('./useKeyExport.web');
 const native = await import('./useKeyExport.native');

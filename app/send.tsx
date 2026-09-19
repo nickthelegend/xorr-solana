@@ -14,6 +14,11 @@
  * addresses its clock says are usable can be chosen here, a pending one says when it will be, and
  * `useWithdraw` asks the executor again immediately before a signature is requested.
  */
+import { PublicKey } from '@solana/web3.js';
+import { getAccountLenForMint, getMint } from '@solana/spl-token';
+import { parseUnits } from 'viem';
+import { buildSplTransfer, prepareForSigning, solanaConnection, tokenProgramOf } from '@/wallet/solanaTx';
+import { useSolanaSigner } from '@/wallet/solanaSigner';
 import React, { useMemo, useState } from 'react';
 import { TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -115,6 +120,7 @@ export default function Send() {
    * through the executor. Estimated for the transfer as built, once typing settles.
    */
   const { estimateFee } = useGrantDelegation();
+  const solanaSigner = useSolanaSigner();
   const settledAmount = useDebounced(amount);
   const feeFor =
     token && entry && Number(settledAmount) > 0
@@ -123,7 +129,36 @@ export default function Send() {
   const fee = useAsync(async () => {
     if (!feeFor || !token || !entry) return undefined;
     if (isSolana || isSolanaAddress(entry.address)) {
-      return { gas: 5000n, gasPrice: 1n, isSolana: true };
+      /*
+       * The fee the cluster quotes for THIS transfer (2026-09-19), and the rent to open the recipient's token account
+       * when the transfer has to create it. This was a flat 5,000 lamports shown as $0.001 — a number nobody measured,
+       * which left out the account-opening rent that is most of the cost of a first send.
+       */
+      if (!solanaSigner.address) return undefined;
+      const conn = solanaConnection();
+      const owner = new PublicKey(solanaSigner.address);
+      const mint = new PublicKey(token.address);
+      const program = await tokenProgramOf(conn, mint);
+      const mintInfo = await getMint(conn, mint, 'confirmed', program);
+      let tx;
+      try {
+        tx = await buildSplTransfer({
+          conn,
+          owner,
+          mint,
+          destination: new PublicKey(entry.address),
+          amountRaw: parseUnits(settledAmount, token.decimals),
+          decimals: token.decimals,
+        });
+      } catch {
+        return undefined;
+      }
+      await prepareForSigning(conn, tx, owner);
+      const feeLamports = (await conn.getFeeForMessage(tx.compileMessage(), 'confirmed')).value;
+      if (feeLamports === null) return undefined;
+      const opensAccount = tx.instructions.length > 1;
+      const rent = opensAccount ? await conn.getMinimumBalanceForRentExemption(getAccountLenForMint(mintInfo)) : 0;
+      return { solanaLamports: feeLamports + rent, opensAccount };
     }
     let call: ReturnType<typeof transferCall>;
     try {
@@ -134,9 +169,12 @@ export default function Send() {
     return estimateFee(call.to, call.data);
   }, [feeFor]);
   const { quote: ethPrice } = usePrice('WETH');
+  const { quote: solPrice } = usePrice('SOL');
   const feeUsd =
-    fee.data && (fee.data as any).isSolana
-      ? 0.001
+    fee.data && 'solanaLamports' in fee.data
+      ? solPrice?.price !== undefined
+        ? (fee.data.solanaLamports / 1e9) * solPrice.price
+        : undefined
       : fee.data && ethPrice?.price !== undefined
         ? Number(formatEther(fee.data.gas * fee.data.gasPrice)) * ethPrice.price
         : undefined;
@@ -334,7 +372,8 @@ export default function Send() {
         disabled={!ready || busy}
         onPress={() => {
           if (!token) return;
-          void withdraw({ token, entry, allowlist: usable, amount }).catch(() => undefined);
+          // The balance on screen is read again once the send lands, rather than left showing what was there before.
+          void withdraw({ token, entry, allowlist: usable, amount }).then(() => balance.reload(), () => undefined);
         }}
       />
       <Press

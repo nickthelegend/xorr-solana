@@ -207,7 +207,7 @@ export default function NewAgent() {
             label="What it does"
             value={role}
             onChange={setRole}
-            placeholder="Buys ETH on red days"
+            placeholder={isSolana ? "Buys NVDAx every week" : "Buys ETH on red days"}
             maxLength={ROLE_MAX}
             capitalize="sentences"
             editable={!made}
@@ -232,7 +232,9 @@ export default function NewAgent() {
             <Eyebrow small>{picked.length > 0 ? `Strategies · ${picked.length}` : 'Strategies'}</Eyebrow>
             {picked.length === 0 ? (
               <Text variant="secondarySm" color={colors.ink55}>
-                What it runs. Pick any of them, or all — each shows what it did over the last 90 days of real prices.
+                {isSolana
+                  ? 'What it runs. Recurring buys of the xStocks this network can settle; pick any of them, or all.'
+                  : 'What it runs. Pick any of them, or all — each shows what it did over the last 90 days of real prices.'}
               </Text>
             ) : (
               picked.map((t) => (

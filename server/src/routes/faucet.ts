@@ -13,6 +13,8 @@
  * A deployment with nothing to give says so in a sentence, `{ status: 'blocked', reason, detail }`, rather than offering a
  * button that fails.
  */
+import { dripSolIfNeeded } from '../solana/feeDrip.js';
+import { connection as solanaConnection } from '../solana/connection.js';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { formatEther, formatUnits, getAddress } from 'viem';
@@ -104,13 +106,27 @@ faucetRoutes.get('/wallet/funds', async (c) => {
 /* ─────────────────────────────────────────────────────────────── what the faucet can send */
 
 async function lastClaimAt(walletId: string): Promise<number | null> {
-  const row = await one<{ claimed_at: Date }>(
-    `SELECT claimed_at FROM faucet_claims WHERE wallet_id = $1 AND chain = ${THIS_CHAIN}
+  const row = await one<{ claimed_at: Date; usdc_tx: string }>(
+    `SELECT claimed_at, usdc_tx FROM faucet_claims WHERE wallet_id = $1 AND chain = ${THIS_CHAIN}
       ORDER BY claimed_at DESC LIMIT 1`,
     [walletId],
   );
-  return row ? new Date(row.claimed_at).getTime() : null;
+  if (!row) return null;
+  /*
+   * A claim on a fork that has since been reset is not a claim on this one (2026-09-19). The hosted fork re-bootstraps on
+   * every deploy, wiping every balance, while this table survives in Postgres — so a wallet that took its test USDC
+   * before the reset sat at zero, locked out until tomorrow. The lock holds only while its transaction is on the chain.
+   */
+  if (ON_SOLANA && isSolanaSignature(row.usdc_tx)) {
+    const status = await solanaConnection
+      .getSignatureStatus(row.usdc_tx, { searchTransactionHistory: true })
+      .catch(() => undefined);
+    if (status && status.value === null) return null;
+  }
+  return new Date(row.claimed_at).getTime();
 }
+
+const isSolanaSignature = (s: string) => /^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(s);
 
 function offerView(offer: FaucetOffer) {
   if (!offer.available) {
@@ -429,6 +445,13 @@ async function claimSolanaFaucet(w: WalletRow, now: () => number): Promise<Fauce
       return { status: 502, body: { status: 'failed', error: humanFailure(raw) } };
     }
     const after = await readSolanaBalances(w.address).then((b) => b.usdc.raw, () => null);
+    /*
+     * And SOL for fees when the wallet is out (2026-09-19). The fee drip ran once, when the wallet first connected; after
+     * the hosted fork reset, a wallet had its USDC back from here and no SOL to sign the permission with.
+     */
+    await dripSolIfNeeded(w.address).catch((e: unknown) =>
+      log.warn(`[faucet] no fee SOL for ${w.address}: ${e instanceof Error ? e.message : String(e)}`),
+    );
     const claimedAt = now();
     const amount = usdc(offer.usdcRaw).toLocaleString('en-US', { maximumFractionDigits: USDC_DECIMALS });
     const recorded = await tx(async (client) => {

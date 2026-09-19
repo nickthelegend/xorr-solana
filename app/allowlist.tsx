@@ -201,7 +201,7 @@ export default function Allowlist() {
             <Field
               value={address}
               onChangeText={setAddress}
-              placeholder="0x…"
+              placeholder={isSolana ? "A Solana address" : "0x…"}
               label="Address"
               mono
             />

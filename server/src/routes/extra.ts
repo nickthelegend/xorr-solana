@@ -1,4 +1,5 @@
 /** Backtest, leaderboard and proposal routes — PLAN.md 12.10 / 12.22 / 12.23. */
+import { ON_SOLANA } from '../solana/clusters.js';
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -213,6 +214,18 @@ extra.get('/proposals/current', async (c) => {
 extra.post('/proposals/generate', async (c) => {
   const id = await walletId(c);
   if (!id) return c.json({ error: 'no_wallet' }, 400);
+  /*
+   * Solana (2026-09-19): nothing is proposed for approval here. A hired agent trades on its own inside the permission
+   * (`bot/autonomous.ts`), and every trade and its reason is on the trail; the proposal builder prices Base tokens and
+   * reads the Base contract. Said plainly rather than failing in the thread.
+   */
+  if (ON_SOLANA) {
+    return c.json({
+      created: false,
+      reason: 'autonomous',
+      detail: 'On Solana I do not ask first: once hired, I trade xStocks inside the limits you signed, and say why each time in Activity.',
+    });
+  }
   const tone = ((await c.req.json().catch(() => ({}))) as { tone?: ToneId }).tone ?? 'dry';
   /*
    * Bounded, because this is the entire content of the Bot tab.

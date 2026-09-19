@@ -36,7 +36,7 @@ import { RollingNumber } from '@/ui/RollingNumber';
 import { successTap } from '@/ui/haptics';
 import { useAuth } from '@/auth/useAuth';
 import { shortAddress } from '@/format';
-import { activeChain, chainLabel, depositQrNote, depositQrWorks } from '@/chain';
+import { activeChain, chainLabel, depositQrNote, depositQrWorks, depositUri } from '@/chain';
 import { NetworkChip } from '@/networks/NetworkChip';
 import { useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
@@ -179,7 +179,7 @@ export default function Deposit() {
           <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
             {address && depositQrWorks ? (
               <View style={{ alignItems: 'center', paddingBottom: space.s12 }}>
-                <AddressQR value={`ethereum:${address}@${activeChain.id}`} size={QR_SIZE} />
+                <AddressQR value={depositUri(address)} size={QR_SIZE} />
               </View>
             ) : null}
             {/* In full and selectable rather than shortened: it is going to be pasted somewhere. */}

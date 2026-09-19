@@ -19,7 +19,6 @@ const JUPITER = 'https://lite-api.jup.ag/swap/v1';
 const BUILTIN = new Set([
   '11111111111111111111111111111111',
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
   'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
   'ComputeBudget111111111111111111111111111111',
   'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
@@ -34,16 +33,22 @@ export type RouteClones = { accounts: string[]; programs: string[] };
 
 type Pair = { inputMint: string; outputMint: string; amount: bigint };
 
-async function routeKeys(pair: Pair, user: string): Promise<string[]> {
+/**
+ * The route the executor will actually ask for on a fork: the pinned venue, direct, legacy (`venues/jupiter.ts`), and
+ * Jupiter's unconstrained route beside it, so both are cloned.
+ */
+const ROUTE_SHAPES = ['&dexes=Whirlpool&onlyDirectRoutes=true&asLegacyTransaction=true', ''];
+
+async function routeKeys(pair: Pair, user: string, shape: string): Promise<string[]> {
   const q = await fetch(
-    `${JUPITER}/quote?inputMint=${pair.inputMint}&outputMint=${pair.outputMint}&amount=${pair.amount}&slippageBps=200`,
+    `${JUPITER}/quote?inputMint=${pair.inputMint}&outputMint=${pair.outputMint}&amount=${pair.amount}&slippageBps=200${shape}`,
   );
   if (!q.ok) throw new Error(`quote ${q.status}`);
   const quoteResponse = await q.json();
   const r = await fetch(`${JUPITER}/swap-instructions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ quoteResponse, userPublicKey: user }),
+    body: JSON.stringify({ quoteResponse, userPublicKey: user, ...(shape.includes('asLegacy') ? { asLegacyTransaction: true } : {}) }),
   });
   if (!r.ok) throw new Error(`swap-instructions ${r.status}`);
   const body = (await r.json()) as {
@@ -70,13 +75,16 @@ export async function resolveRouteClones(params: {
 }): Promise<RouteClones> {
   const skip = new Set([...params.exclude, params.user]);
   const keys = new Set<string>();
+  // Mainnet's own Token-2022 program, cloned rather than the validator's bundled build: xStocks rely on its newest
+  // extensions (Scaled UI), and a validator a release behind would read them differently.
+  keys.add('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
   for (const x of params.xstocks) {
     for (const pair of [
       { inputMint: params.usdcMint, outputMint: x.mint, amount: 100_000_000n },
       { inputMint: x.mint, outputMint: params.usdcMint, amount: 10n ** BigInt(x.decimals) / 4n },
     ]) {
-      try {
-        for (const k of await routeKeys(pair, params.user)) keys.add(k);
+      for (const shape of ROUTE_SHAPES) try {
+        for (const k of await routeKeys(pair, params.user, shape)) keys.add(k);
       } catch (e) {
         console.warn(`[fork] no route resolved for ${pair.inputMint.slice(0, 4)}→${pair.outputMint.slice(0, 4)}: ${e instanceof Error ? e.message : e}`);
       }

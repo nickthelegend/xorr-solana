@@ -337,5 +337,5 @@ writeFileSync(
 );
 
 console.log(
-  `\n  ${bundle}\n  points at ${API}${CHAIN_RPC ? ` and ${CHAIN_RPC}` : ''}, pins ${PIN}${APP_COMMIT ? `, names ${APP_COMMIT.slice(0, 7)}` : ''}, installable — verified in the bundle, not assumed.\n`,
+  `\n  ${bundle}\n  points at ${API}${CHAIN_RPC ? ` and ${CHAIN_RPC}` : ''}${PIN ? `, pins ${PIN}` : ""}${APP_COMMIT ? `, names ${APP_COMMIT.slice(0, 7)}` : ''}, installable — verified in the bundle, not assumed.\n`,
 );

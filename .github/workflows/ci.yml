@@ -191,4 +191,4 @@ jobs:
           (cd server && npm ci --ignore-scripts)
 
       - name: Solana fork chain proofs
-        run: npx vitest run server/src/solana/fork.chain.test.ts
+        run: CHAIN=1 npx vitest run server/src/solana/fork.chain.test.ts

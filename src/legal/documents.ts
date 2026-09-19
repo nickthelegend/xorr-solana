@@ -12,12 +12,37 @@
  * policy said keys "never leave your device" of a wallet whose key the app never holds at all, left
  * out what the executor does store, and described crash reports the app does not send.
  */
+import { isSolana } from '@/chain';
+
 export type LegalDoc = {
   title: string;
   updated: string;
   sections: { heading: string; paragraphs: string[] }[];
   footer: string;
 };
+
+/** What holding an xStock means, said where a Solana build discloses its risks. */
+const XSTOCKS_RISK: LegalDoc['sections'] = [
+  {
+    heading: 'xStocks are issued by Backed, and are not for US persons',
+    paragraphs: [
+      'xStocks are tokens issued by Backed Finance, each backed by shares a custodian holds. Backed does not offer them to US persons or in some other jurisdictions, and it is your responsibility to know whether you may hold them where you live.',
+      'Backed publishes what backs each token; this app shows that attestation and its age, and says so when it could not be read.',
+    ],
+  },
+  {
+    heading: 'The issuer keeps powers over the token',
+    paragraphs: [
+      'xStocks are Token-2022 tokens. The issuer can pause transfers, freeze an account, and move tokens under its permanent delegate, and the token’s multiplier changes when the company pays a dividend or splits its shares. The app reads these controls from the chain and shows them on each stock.',
+    ],
+  },
+  {
+    heading: 'Tokens trade when the stock market is shut',
+    paragraphs: [
+      'xStocks trade around the clock; the shares behind them do not. Outside market hours a token’s price can move away from where the stock will open, and the agents widen their tolerance or hold rather than trade on a price they cannot check.',
+    ],
+  },
+];
 
 const REVIEW_NOTE =
   'This is xorr’s own draft. It has not yet been reviewed by counsel in every market where the app is available.';
@@ -109,6 +134,8 @@ export const LEGAL: Record<string, LegalDoc> = {
           'A tokenized stock is a token issued by a third party to track a company’s shares. Its price here is what a real buy of the token would cost, which can differ from the stock market’s price, and on some networks it cannot be traded at all.',
         ],
       },
+      // The Solana build trades xStocks (2026-09-19): who issues them, who may hold them, and what the issuer can do.
+      ...(isSolana ? XSTOCKS_RISK : []),
       {
         heading: 'The daily cap limits spending, not losses',
         paragraphs: [

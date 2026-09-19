@@ -130,7 +130,9 @@ export default function PickStrategies() {
       </View>
 
       <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
-        Pick any, or all. Each was replayed on the last 90 days of real prices, fees included. Nothing here is a promise.
+        {isSolana
+          ? 'Pick any, or all. Recurring buys of the xStocks this network can settle. Nothing here is a promise.'
+          : 'Pick any, or all. Each was replayed on the last 90 days of real prices, fees included. Nothing here is a promise.'}
       </Text>
 
       <ScrollView
