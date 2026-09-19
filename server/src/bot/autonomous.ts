@@ -33,7 +33,8 @@ import { speak } from './llm.js';
 import { TONE_INSTRUCTIONS, type ToneId } from './tone.js';
 import { earningsCalendar } from '../market/edgar.js';
 import { readMintScale } from '../solana/balances.js';
-import { readDelegation } from '../solana/delegation.js';
+import { readSolanaPolicy } from '../solana/grant.js';
+import { mintsOnCluster } from '../solana/settleable.js';
 import type { PersonaId } from './personas.js';
 import {
   DEFAULT_RISK_PROFILE,
@@ -309,10 +310,15 @@ async function corporateActionSignal(stock: XStockToken): Promise<CorporateActio
  */
 export async function evaluateBestSetup(
   settings: RiskSettings = settingsFor(DEFAULT_RISK_PROFILE),
+  /** Only setups these personas would take — the agents this wallet hired. Every persona when omitted. */
+  personas?: ReadonlySet<string>,
 ): Promise<CandidateSetup | null> {
   const candidates: CandidateSetup[] = [];
+  // Only what can settle here: a symbol with a price and no mint on this cluster is not a setup, it is a refund.
+  const here = await mintsOnCluster(Object.values(XSTOCKS).map((s) => s.address));
 
   for (const stock of Object.values(XSTOCKS)) {
+    if (!here.has(stock.address)) continue;
     const price = await xStockPriceUsd(stock.symbol).catch(() => null);
     if (!price || price <= 0) continue;
 
@@ -422,10 +428,11 @@ export async function evaluateBestSetup(
     }
   }
 
-  if (candidates.length === 0) return null;
+  const eligible = personas ? candidates.filter((c) => personas.has(c.persona)) : candidates;
+  if (eligible.length === 0) return null;
 
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0] ?? null;
+  eligible.sort((a, b) => b.score - a.score);
+  return eligible[0] ?? null;
 }
 
 /**
@@ -464,13 +471,43 @@ export async function runAutonomousCycle(
     };
   }
 
-  // 2. The on-chain SPL delegation, which is what actually authorises any of this.
-  const onChainDel = await readDelegation(new PublicKey(wallet.address)).catch(() => null);
-  if (onChainDel && onChainDel.isRevoked) {
+  /*
+   * 2. Who may trade: the agents this wallet hired (2026-09-19). The sweep traded as "Momentum Scout" for a wallet that
+   * had hired no one, while the app said "Not hired" and "No agent is trading" — the agent's name on a trade its owner
+   * never asked for. A persona trades only once hired, and only its own kind of setup.
+   */
+  const hiredRows = await query<{ persona_id: string }>(
+    `SELECT persona_id FROM agents WHERE wallet_id = $1 AND hired AND fired_at IS NULL`,
+    [walletId],
+  );
+  const hired = new Set(hiredRows.map((r) => r.persona_id));
+  if (hired.size === 0) {
+    return { executed: false, reason: 'no_agent_hired', detail: 'No agent is hired on this wallet.' };
+  }
+  if (options.setup && !hired.has(options.setup.persona)) {
+    return {
+      executed: false,
+      reason: 'agent_not_hired',
+      detail: `${options.setup.personaName} is not hired on this wallet.`,
+    };
+  }
+
+  /*
+   * 3. The permission, as the chain and the grant record agree on it — the same read `guardAndSpend` enforces. This
+   * called `readDelegation` with a signature it does not have and read fields it does not return, so the cap it sized
+   * against was NaN or a made-up $1,000 and the expiry a made-up thirty days.
+   */
+  let policy: Awaited<ReturnType<typeof readSolanaPolicy>>;
+  try {
+    policy = await readSolanaPolicy({ id: wallet.id, address: wallet.address });
+  } catch {
+    return { executed: false, reason: 'chain_unreadable', detail: 'The permission could not be read from the chain.' };
+  }
+  if (!policy || policy.revoked) {
     return {
       executed: false,
       reason: 'delegation_revoked',
-      detail: 'The on-chain SPL delegation has been revoked.',
+      detail: 'There is no live SPL delegation to this bot on the chain.',
     };
   }
 
@@ -487,8 +524,8 @@ export async function runAutonomousCycle(
     : DEFAULT_RISK_PROFILE;
   const settings = settingsFor(riskProfile);
 
-  // 3. The setup the caller brought, or the best one the current conditions support.
-  const bestSetup = options.setup ?? (await evaluateBestSetup(settings));
+  // 4. The setup the caller brought, or the best one a hired agent would take.
+  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired));
   if (!bestSetup) {
     return {
       executed: false,
@@ -497,14 +534,13 @@ export async function runAutonomousCycle(
     };
   }
 
-  // 4. Size it, inside the daily cap the delegation set.
-  const dailyCap = onChainDel ? Math.max(onChainDel.delegatedUsd, 100) : 1000;
+  // 5. Size it, inside the daily cap the owner chose and the end date they set.
   const verdict = await evaluate({
     walletId,
     usd: 1,
-    dailyCapUsd: dailyCap,
-    delegationExpiresAt: new Date(Date.now() + 30 * 86_400_000),
-    delegationRevoked: false,
+    dailyCapUsd: policy.dailyCapUsd,
+    delegationExpiresAt: new Date(policy.expiresAt),
+    delegationRevoked: policy.revoked,
     killed: Boolean(wallet.agents_stopped),
   });
   if (!verdict.allowed) {
@@ -523,7 +559,7 @@ export async function runAutonomousCycle(
     };
   }
 
-  // 5. The sentence the user reads, in the persona's voice where the model is reachable.
+  // 6. The sentence the user reads, in the persona's voice where the model is reachable.
   const tone = options.tone ?? 'dry';
   const llmRes = await speak({
     persona: bestSetup.persona,
@@ -535,7 +571,7 @@ export async function runAutonomousCycle(
       ? llmRes.text
       : `${bestSetup.personaName} took the setup: ${bestSetup.reason}`;
 
-  // 6. Through the chokepoint. Everything above this line is analysis; this is the spend.
+  // 7. Through the chokepoint. Everything above this line is analysis; this is the spend.
   const outcome = await guardAndSpend({
     walletId,
     ownerPubkey: wallet.address,
@@ -549,7 +585,7 @@ export async function runAutonomousCycle(
   }
   const receipt = outcome;
 
-  // 7. Arm the exits against the price it actually filled at.
+  // 8. Arm the exits against the price it actually filled at.
   let exitStrategyId: string | null = null;
   try {
     const exits = await armExits(wallet, {
@@ -659,8 +695,17 @@ export async function autonomousAgentSweep(_now: Date = new Date()): Promise<num
   const wallets = await query<{ id: string; risk_profile: string | null }>(
     `SELECT id, risk_profile FROM wallets
       WHERE address IS NOT NULL AND (agents_stopped IS NULL OR agents_stopped = false)
-      ORDER BY updated_at DESC LIMIT 10`,
-  ).catch(() => []);
+        AND EXISTS (SELECT 1 FROM agents a WHERE a.wallet_id = wallets.id AND a.hired AND a.fired_at IS NULL)
+      ORDER BY active_at DESC NULLS LAST, created_at DESC LIMIT 10`,
+  ).catch((e: unknown) => {
+    /*
+     * Said, not swallowed (2026-09-19). This ordered by \`updated_at\`, a column \`wallets\` does not have, and the
+     * \`catch\` turned the error into "no wallets" — so the autonomous agent never ran from the scheduler at all, on any
+     * tick, and nothing anywhere said so. A sweep that cannot read its wallets is logged as exactly that.
+     */
+    log.error('[autonomous] could not read the wallets to sweep:', e);
+    return [];
+  });
 
   let executedCount = 0;
   for (const w of wallets) {

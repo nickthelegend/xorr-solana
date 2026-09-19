@@ -53,6 +53,12 @@ import { bindWallet, findLinkedWallet } from '../auth/walletBinding.js';
 import { freshWallets } from '../auth/privy.js';
 import { currentWallet, requireWallet, walletsFor, type WalletRow } from './wallet-context.js';
 import { erc20Abi, formatUnits, getAddress } from 'viem';
+import { ON_SOLANA, activeClusterKey } from '../solana/clusters.js';
+import { dripSolIfNeeded } from '../solana/feeDrip.js';
+import { solanaHoldings } from '../solana/holdings.js';
+import { explorerTx as solanaExplorerTx } from '../solana/connection.js';
+import { GrantNotConfirmed, readSolanaPolicy, recordSolanaGrant, recordSolanaRevoke, solanaGrantParams } from '../solana/grant.js';
+import { BASE58_ADDRESS } from '../auth/walletBinding.js';
 import type { Address, Hex } from 'viem';
 import { priceOf } from '../market/prices.js';
 import { COINGECKO_IDS } from '../market/ids.js';
@@ -93,7 +99,7 @@ routes.get('/wallet', async (c) => {
    * Base balances. The stored value is history and stays; the live one is what a user is asking
    * about when they look at this line.
    */
-  return c.json({ ...w, chain: CHAIN_KEY });
+  return c.json({ ...w, chain: SETTLES_ON });
 });
 
 /**
@@ -113,6 +119,45 @@ routes.get('/wallet', async (c) => {
  * address really belongs to the caller. A second endpoint that set `active_at` directly would be a
  * second door into the same room, and the second door is the one nobody remembers to lock.
  */
+/** The chain this executor settles on, as a wallet row and the trail name it: a Solana cluster, or the EVM chain. */
+const SETTLES_ON = ON_SOLANA ? activeClusterKey() : CHAIN_KEY;
+/** An address in its one canonical spelling: base58 as given on Solana, EIP-55 checksummed on EVM. */
+const canonicalAddress = (a: string) => (ON_SOLANA ? a : getAddress(a));
+
+/**
+ * Test money for a wallet's first fees, on whichever chain this is (2026-09-19), written to the trail either way.
+ * Never throws: the wallet exists and is usable whatever the faucet had to give. Solana: an airdrop of test SOL, which
+ * `airdropSol` refuses where money is real. EVM: the gas drip, unchanged.
+ */
+async function firstFeeDrip(walletId: string, address: string): Promise<void> {
+  const fail = (e: unknown) => ({ sent: false as const, reason: e instanceof Error ? e.message : String(e) });
+  if (ON_SOLANA) {
+    const drip = await dripSolIfNeeded(address).catch(fail);
+    await append({
+      walletId,
+      agent: 'xorr',
+      action: drip.sent ? `Sent ${drip.amountSol} test SOL for fees` : 'No SOL sent',
+      detail: drip.sent
+        ? `${SETTLES_ON} test SOL, so you can sign the permission. It has no value and buys nothing.`
+        : `Not sent — ${drip.reason}.`,
+      kind: 'risk',
+      payload: drip.sent ? { signature: drip.signature } : { reason: drip.reason },
+    }).catch(() => undefined);
+    return;
+  }
+  const drip = await dripGasIfNeeded(address as Address).catch(fail);
+  await append({
+    walletId,
+    agent: 'xorr',
+    action: drip.sent ? `Sent ${drip.amountEth} test ETH for gas` : 'No gas sent',
+    detail: drip.sent
+      ? `${CHAIN_KEY} test ETH, so you can sign the permission. It has no value and buys nothing.`
+      : `Not sent — ${drip.reason}.`,
+    kind: 'risk',
+    payload: drip.sent ? { hash: drip.hash } : { reason: drip.reason },
+  }).catch(() => undefined);
+}
+
 routes.get('/wallets', async (c) => {
   const rows = await walletsFor(c);
   return c.json(
@@ -185,9 +230,9 @@ routes.post('/wallet/create', async (c) => {
   const bound = await bindWallet({
     id: randomUUID(),
     userId: user.userId,
-    address: getAddress(embedded.address),
+    address: canonicalAddress(embedded.address),
     kind: 'embedded',
-    cluster: CHAIN_KEY,
+    cluster: SETTLES_ON,
   });
   if (bound.status !== 'bound') return ownedElsewhere(c);
   const row = bound.row;
@@ -198,7 +243,7 @@ routes.post('/wallet/create', async (c) => {
     walletId: row.id,
     agent: 'xorr',
     action: 'Wallet connected',
-    detail: `Your keys, held by you. ${CHAIN_KEY}.`,
+    detail: `Your keys, held by you. ${SETTLES_ON}.`,
     kind: 'risk',
   });
 
@@ -215,20 +260,7 @@ routes.post('/wallet/create', async (c) => {
    * written to the trail because a transfer out of the delegate's key is exactly the sort of thing
    * that should never happen unrecorded.
    */
-  const drip = await dripGasIfNeeded(address as Address).catch((e) => ({
-    sent: false as const,
-    reason: e instanceof Error ? e.message : String(e),
-  }));
-  await append({
-    walletId: row.id,
-    agent: 'xorr',
-    action: drip.sent ? `Sent ${drip.amountEth} test ETH for gas` : 'No gas sent',
-    detail: drip.sent
-      ? `${CHAIN_KEY} test ETH, so you can sign the permission. It has no value and buys nothing.`
-      : `Not sent — ${drip.reason}.`,
-    kind: 'risk',
-    payload: drip.sent ? { hash: drip.hash } : { reason: drip.reason },
-  }).catch(() => undefined);
+  await firstFeeDrip(row.id, address);
 
   return c.json(row);
 });
@@ -242,9 +274,16 @@ routes.post('/wallet/create', async (c) => {
  * `/wallet/create`, which the app never calls, and a wallet signed in through the hosted build
  * still arrived with nothing to pay gas with.
  */
+/** How many fresh reads of Privy's record `/wallet/connect` makes before refusing, and the gap between them. */
+const CONNECT_READS = 4;
+const CONNECT_READ_GAP_MS = 1_000;
+
 routes.post('/wallet/connect', async (c) => {
   const user = requireUser(c);
-  const body = z.object({ address: z.string().regex(/^0x[a-fA-F0-9]{40}$/) }).parse(await c.req.json());
+  // A base58 key on a Solana executor, an EVM address otherwise (2026-09-19): each chain's own spelling.
+  const body = z
+    .object({ address: z.string().regex(ON_SOLANA ? BASE58_ADDRESS : /^0x[a-fA-F0-9]{40}$/) })
+    .parse(await c.req.json());
 
   /*
    * Only a wallet on the caller's own Privy account.
@@ -257,7 +296,14 @@ routes.post('/wallet/connect', async (c) => {
   // postdates it, so ask Privy again before refusing.
   let wallets = user.wallets;
   let linked = wallets && findLinkedWallet(wallets, body.address);
-  if (!linked) {
+  /*
+   * A wallet made a moment ago can be missing from Privy's own record for a moment more (2026-09-19): the app connects
+   * the instant Privy hands it the new address, and the first fresh read came back without it — so a brand-new user's
+   * first connect was refused as "not a wallet on your account", and only "Try again" got them through. Ask again, a
+   * few times over a few seconds, before refusing; an address that is genuinely someone else's is still refused.
+   */
+  for (let attempt = 0; !linked && attempt < CONNECT_READS; attempt += 1) {
+    if (attempt > 0) await new Promise<void>((r) => setTimeout(r, CONNECT_READ_GAP_MS));
     wallets = await freshWallets(user.userId);
     linked = wallets && findLinkedWallet(wallets, body.address);
   }
@@ -277,9 +323,9 @@ routes.post('/wallet/connect', async (c) => {
   const bound = await bindWallet({
     id: randomUUID(),
     userId: user.userId,
-    address: getAddress(linked.address),
+    address: canonicalAddress(linked.address),
     kind: linked.embedded ? 'embedded' : 'connected',
-    cluster: CHAIN_KEY,
+    cluster: SETTLES_ON,
   });
   if (bound.status !== 'bound') return ownedElsewhere(c);
   const row = bound.row;
@@ -291,7 +337,7 @@ routes.post('/wallet/connect', async (c) => {
       walletId: row.id,
       agent: 'xorr',
       action: 'Wallet connected',
-      detail: `Your keys, held by you. ${CHAIN_KEY}.`,
+      detail: `Your keys, held by you. ${SETTLES_ON}.`,
       kind: 'risk',
     }).catch(() => undefined);
 
@@ -308,20 +354,7 @@ routes.post('/wallet/connect', async (c) => {
      * must not be blocked by a faucet that had nothing to give. Recorded in the trail because a
      * transfer out of the delegate's key should never happen unlogged.
      */
-    const drip = await dripGasIfNeeded(row.address as Address).catch((e: unknown) => ({
-      sent: false as const,
-      reason: e instanceof Error ? e.message : String(e),
-    }));
-    await append({
-      walletId: row.id,
-      agent: 'xorr',
-      action: drip.sent ? `Sent ${drip.amountEth} test ETH for gas` : 'No gas sent',
-      detail: drip.sent
-        ? `${CHAIN_KEY} test ETH, so you can sign the permission. It has no value and buys nothing.`
-        : `Not sent — ${drip.reason}.`,
-      kind: 'risk',
-      payload: drip.sent ? { hash: drip.hash } : { reason: drip.reason },
-    }).catch(() => undefined);
+    await firstFeeDrip(row.id, row.address);
   }
 
   return c.json(row);
@@ -332,18 +365,27 @@ routes.get('/wallet/balance', async (c) => {
   if (!w) return c.json({ usd: 0 });
 
   if (isSolanaCluster(process.env.XORR_CHAIN ?? '') || !w.address.startsWith('0x')) {
-    const balances = await readSolanaBalances(w.address);
-    const delegation = await readDelegation(w.address);
+    /*
+     * Everything held, valued (2026-09-19): USDC and every xStock at its live price. This counted USDC alone, so a wallet
+     * that had just bought NVDAx showed less than it held — and it reported the whole on-chain allowance as the daily
+     * cap and as today's remainder. The cap and the remainder are the recorded permission's.
+     */
+    const [h, policy] = await Promise.all([
+      readChain('your balance', () => solanaHoldings(w.address)),
+      readChain('your permission', () => readSolanaPolicy(w)),
+    ]);
     return c.json({
-      usd: balances.usdc.amount,
-      cashUsd: balances.usdc.amount,
+      usd: h.totalUsd,
+      cashUsd: h.usdc,
       holdings: [
-        { symbol: 'USDC', units: balances.usdc.amount, usd: balances.usdc.amount },
-        { symbol: 'SOL', units: balances.sol.amount, usd: 0 },
+        { symbol: 'USDC', units: h.usdc, usd: h.usdc },
+        ...h.xstocks.map((x) => ({ symbol: x.symbol, units: x.units, usd: x.usd })),
+        { symbol: 'SOL', units: h.sol, usd: 0 },
       ],
       suppliedUsd: 0,
-      dailyCapUsd: delegation.delegatedUsd,
-      remainingTodayUsd: delegation.delegatedUsd,
+      ...(h.partial ? { partial: true } : {}),
+      dailyCapUsd: policy && !policy.revoked ? policy.dailyCapUsd : 0,
+      remainingTodayUsd: policy?.remainingTodayUsd ?? 0,
     });
   }
 
@@ -406,10 +448,10 @@ routes.get('/portfolio/history', async (c) => {
     return c.json({ error: 'invalid_range', message: 'range is one of 1D, 1W, 1M or ALL.' }, 400);
   }
   const w = await currentWallet(c);
-  if (!w) return c.json({ range, chain: CHAIN_KEY, points: [] });
+  if (!w) return c.json({ range, chain: SETTLES_ON, points: [] });
   return c.json({
     range,
-    chain: CHAIN_KEY,
+    chain: SETTLES_ON,
     everyMinutes: SNAPSHOT_EVERY_MS / 60_000,
     points: thinPoints(await listSnapshots(w.id, since)),
   });
@@ -446,6 +488,28 @@ routes.post('/portfolio/snapshot', async (c) => {
 routes.get('/delegation', async (c) => {
   const w = await currentWallet(c);
   if (!w) return c.json(null);
+  // Solana (2026-09-19): the SPL delegation on the owner's USDC account, beside the cap and end date the owner chose.
+  if (ON_SOLANA) {
+    const p = await readChain('your permission', () => readSolanaPolicy(w));
+    if (!p) return c.json(null);
+    return c.json({
+      delegatePubkey: p.delegate,
+      delegateName: null,
+      delegateIsCurrent: p.delegateIsCurrent,
+      ownerPubkey: w.address,
+      ownerName: null,
+      dailyCapUsd: p.dailyCapUsd,
+      expiresAt: p.expiresAt,
+      grantedAt: p.grantedAt,
+      venueAllowlist: ['jupiter'],
+      withdrawalAllowlist: [],
+      revoked: p.revoked,
+      onChainRemainingUsd: p.remainingTodayUsd,
+      spentTodayUsd: p.spentTodayUsd,
+      /** What the chain itself still lets the bot move, whatever the day. */
+      allowanceUsd: p.allowanceUsd,
+    });
+  }
   // `null` is the chain saying there is no permission; a read that failed is a 502, not that. The
   // venues it allows come back in the same read (PLAN.md 2.5).
   const { policy, venues: allowed } = await readChain('your permission', () =>
@@ -631,6 +695,8 @@ routes.get('/approvals', async (c) => {
 
 routes.get('/delegation/params', async (c) => {
   requireUser(c);
+  // Solana: whom the owner delegates to, and the token and decimals (2026-09-19). No contract to name.
+  if (ON_SOLANA) return c.json(solanaGrantParams());
   return c.json({
     contract: DELEGATION_ADDRESS,
     delegate: delegatePublicKey,
@@ -650,7 +716,7 @@ routes.get('/delegation/params', async (c) => {
      * approvable in the same change rather than two releases later.
      */
     tokens: await approvableTokens(),
-    chain: CHAIN_KEY,
+    chain: SETTLES_ON,
   });
 });
 
@@ -673,6 +739,33 @@ const TxHash = z
 
 routes.post('/delegation/record', async (c) => {
   /*
+   * Solana (2026-09-19): the chain holds the delegate and the ceiling, and nowhere to write a daily cap or an end date,
+   * so those two are the owner's own choices, taken from their authenticated request — and recorded only once the chain
+   * shows their signature on a confirmed transaction and a delegation to this executor covering at least that cap.
+   */
+  if (ON_SOLANA) {
+    const body = z
+      .object({ signature: z.string().min(64).max(100), dailyCapUsd: z.number().positive(), expiresAt: z.number().int() })
+      .parse(await c.req.json());
+    const w = await requireWallet(c);
+    try {
+      const p = await recordSolanaGrant(w, body);
+      await append({
+        walletId: w.id,
+        agent: 'xorr',
+        action: `Permission granted: ${p.dailyCapUsd.toFixed(2)} USDC a day`,
+        detail: `Until ${new Date(p.expiresAt).toISOString().slice(0, 10)}, through Jupiter only. Revocable in one tap.`,
+        kind: 'risk',
+        signature: body.signature,
+        payload: { signature: body.signature },
+      }).catch(() => undefined);
+      return c.json(p);
+    } catch (e) {
+      if (e instanceof GrantNotConfirmed) return c.json({ error: 'grant_not_confirmed', message: e.message }, 400);
+      throw e;
+    }
+  }
+  /*
    * The hash, and nothing the client says about it (PLAN.md 4.8).
    *
    * The app still sends `dailyCapUsd` and `expiresAt` beside the hash, and they are not read: they
@@ -689,6 +782,27 @@ routes.post('/delegation/record', async (c) => {
 
 /** Record a revoke the user already signed. */
 routes.post('/delegation/revoke', async (c) => {
+  // Solana: recorded once the chain shows the owner's Revoke took the delegate off the account (2026-09-19).
+  if (ON_SOLANA) {
+    const body = z.object({ signature: z.string().min(64).max(100) }).parse(await c.req.json());
+    const w = await requireWallet(c);
+    try {
+      await recordSolanaRevoke(w, body.signature);
+      await append({
+        walletId: w.id,
+        agent: 'xorr',
+        action: 'Permission revoked',
+        detail: 'Signed by you. The bot can no longer move anything from your wallet.',
+        kind: 'risk',
+        signature: body.signature,
+        payload: { signature: body.signature },
+      }).catch(() => undefined);
+      return c.json({ revoked: true });
+    } catch (e) {
+      if (e instanceof GrantNotConfirmed) return c.json({ error: 'revoke_not_confirmed', message: e.message }, 400);
+      throw e;
+    }
+  }
   const body = z.object({ txHash: TxHash.optional() }).parse(await c.req.json().catch(() => ({})));
   const w = await requireWallet(c);
   const out = await recordRevoke(w, body.txHash as Hex | undefined);
@@ -987,7 +1101,8 @@ routes.get('/activity', async (c) => {
        * seen the transaction is worse than no link, because it looks like the transaction is not
        * real.
        */
-      explorer: r.signature ? explorerTx(r.signature) : undefined,
+      // Solana signatures open on Solana Explorer — pointed at this fork's RPC off mainnet (2026-09-19).
+      explorer: r.signature ? (ON_SOLANA ? solanaExplorerTx(r.signature) : explorerTx(r.signature)) : undefined,
     })),
   );
 });
@@ -1121,7 +1236,7 @@ routes.get('/audit/anchor', async (c) => {
     configured: anchoringConfigured(),
     contract: ANCHOR_ADDRESS,
     anchoredBy: delegateAccount.address,
-    chain: CHAIN_KEY,
+    chain: SETTLES_ON,
     state: state.state,
     entryCount: state.entryCount,
     latest: state.state === 'none' ? null : state.anchor,
@@ -1172,6 +1287,32 @@ routes.post('/audit/anchor', async (c) => {
  */
 routes.get('/limits', async (c) => {
   const w = await requireWallet(c);
+  // Solana (2026-09-19): the same answer, from the SPL delegation and the recorded cap.
+  if (ON_SOLANA) {
+    const p = await readChain('your permission', () => readSolanaPolicy(w));
+    const spent = await spentToday(w.id);
+    if (!p) {
+      return c.json({
+        dailyCapUsd: 0,
+        spentTodayUsd: spent,
+        chainSpentTodayUsd: null,
+        executorSpentTodayUsd: spent,
+        remainingUsd: 0,
+        revoked: false,
+        granted: false,
+      });
+    }
+    return c.json({
+      dailyCapUsd: p.revoked ? 0 : p.dailyCapUsd,
+      spentTodayUsd: spent,
+      chainSpentTodayUsd: null,
+      executorSpentTodayUsd: spent,
+      remainingUsd: p.remainingTodayUsd,
+      revoked: p.revoked,
+      granted: true,
+      expiresAt: p.expiresAt,
+    });
+  }
   const policy = await readChain('your permission', () => readPolicy(w.address as Address));
   const ourSpend = await spentToday(w.id);
 

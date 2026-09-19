@@ -27,6 +27,8 @@ import { holdingsOnBase, type BaseHoldings, type HeldToken } from '../venues/bal
 import { logosFor } from '../market/logos.js';
 import { priceOf } from '../market/prices.js';
 import { requireWallet } from './wallet-context.js';
+import { ON_SOLANA, activeClusterKey, DEFAULT_MINTS } from '../solana/clusters.js';
+import { solanaHoldings } from '../solana/holdings.js';
 
 export const tokenRoutes = new Hono();
 
@@ -44,6 +46,24 @@ export const PRICE_DEADLINE_MS = 4_000;
 
 tokenRoutes.get('/wallet/tokens', async (c) => {
   const w = await requireWallet(c);
+  /*
+   * Solana (2026-09-19): read the wallet's own token accounts. This fell through to `getAddress`, which rejects a base58
+   * key, so the Tokens list answered 500 for every Solana wallet.
+   */
+  if (ON_SOLANA) {
+    const h = await readChain('your tokens', () => solanaHoldings(w.address));
+    const logos = await logosFor(['USDC', 'SOL', ...h.xstocks.map((x) => x.symbol)]);
+    const tokens = [
+      ...(h.usdc > 0
+        ? [{ symbol: 'USDC', name: 'USD Coin', address: DEFAULT_MINTS.USDC, decimals: 6, units: h.usdc, logo: logos.USDC?.url ?? null, usd: h.usdc }]
+        : []),
+      ...h.xstocks.map((x) => ({ ...x, logo: logos[x.symbol]?.url ?? null })),
+      ...(h.sol > 0
+        ? [{ symbol: 'SOL', name: 'Solana', address: 'native', decimals: 9, units: h.sol, logo: logos.SOL?.url ?? null, native: true as const, usd: null }]
+        : []),
+    ].sort((a, b) => (b.usd ?? -1) - (a.usd ?? -1));
+    return c.json({ owner: w.address, chain: activeClusterKey(), source: 'chain', tokens, undescribed: [] });
+  }
   const owner = getAddress(w.address);
 
   if (CHAIN_KEY === 'base') {

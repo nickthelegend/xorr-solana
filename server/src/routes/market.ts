@@ -14,6 +14,10 @@
  * session would mean an unauthenticated visitor sees a market list of dashes.
  */
 import { Hono } from 'hono';
+import { PublicKey } from '@solana/web3.js';
+import { ON_SOLANA, DEFAULT_MINTS } from '../solana/clusters.js';
+import { connection as solanaConnection } from '../solana/connection.js';
+import { XSTOCKS, xStockPriceUsd } from '../venues/xstocks.js';
 import { getJson, staleValue } from '../http/get.js';
 import { readChain } from '../http/chain-read.js';
 import { log } from '../http/request-id.js';
@@ -444,7 +448,26 @@ market.get('/market/logos', async (c) => {
  * would have created a strategy no signed transaction could ever fill. Anything not in this list
  * is a chart you can look at, not an order you can place.
  */
+/**
+ * The Solana lists (2026-09-19). The routes below served the EVM token registry on every chain, so a Solana build listed
+ * ETH and WETH as what a strategy could follow, nothing as tradable, and told Home "watch-only here" on a fork where
+ * fills really settle. Here: USDC and the xStocks, by their mints.
+ */
+const SOLANA_USDC = { symbol: 'USDC', address: DEFAULT_MINTS.USDC, decimals: 6 };
+const xStockRows = () => Object.values(XSTOCKS).map((x) => ({ symbol: x.symbol, address: x.address, decimals: x.decimals }));
+
+/**
+ * Tradable: the xStocks whose mint exists on this cluster — on a fork, the ones its bootstrap cloned — because an order
+ * for a mint the node does not hold can only fail at settlement. Asked of the chain in one read, never assumed.
+ */
+async function solanaTradable(): Promise<{ symbol: string; address: string; decimals: number }[]> {
+  const rows = xStockRows();
+  const infos = await solanaConnection.getMultipleAccountsInfo(rows.map((r) => new PublicKey(r.address)), 'confirmed');
+  return [SOLANA_USDC, ...rows.filter((_, i) => infos[i] !== null)];
+}
+
 market.get('/market/tradable', async (c) => {
+  if (ON_SOLANA) return c.json(await solanaTradable());
   /*
    * "Real address" and "tradable here" are different questions, and answering the first while being
    * asked the second is how the app came to offer a Buy button it could not honour.
@@ -476,7 +499,7 @@ market.get('/market/tradable', async (c) => {
  * "nothing to rebalance" and a new user could not finish. The portfolio is created watched instead — it reports
  * what it would trade and moves nothing — over these.
  */
-market.get('/market/watchable', async (c) => c.json(await functioningHere()));
+market.get('/market/watchable', async (c) => c.json(ON_SOLANA ? [SOLANA_USDC, ...xStockRows()] : await functioningHere()));
 
 /**
  * The registry less the equities where they do not function, each at the address a fill would move.
@@ -584,6 +607,23 @@ const STOCK_TTL_MS = 30_000;
 const STOCK_STALE_MS = 5 * 60_000;
 
 market.get('/market/stocks', async (c) => {
+  // Solana: the xStocks, priced by Jupiter — the tokenized equities this build actually trades (2026-09-19).
+  if (ON_SOLANA) {
+    const rows = await Promise.all(
+      Object.values(XSTOCKS).map(async (x) => {
+        const price = await xStockPriceUsd(x.symbol).catch(() => null);
+        return {
+          symbol: x.symbol,
+          name: x.name,
+          address: x.address,
+          price,
+          venues: price === null ? [] : ['jupiter'],
+          feed: price === null ? ('unavailable' as const) : ('live' as const),
+        };
+      }),
+    );
+    return c.json(rows);
+  }
   const age = stockCache ? Date.now() - stockCache.at : Infinity;
   if (stockCache && age < STOCK_TTL_MS) return c.json(stockCache.rows);
   if (stockCache && age < STOCK_STALE_MS) {

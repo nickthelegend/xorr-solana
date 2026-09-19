@@ -6,6 +6,10 @@
  * timed out.
  */
 import { describe, expect, it, afterEach, vi } from 'vitest';
+// The session and its token are the app's; what is under test is how each status reads.
+vi.mock('./sessionFetch', () => ({
+  sessionFetch: (path: string, init?: RequestInit) => fetch(`http://executor.test${path}`, init),
+}));
 import { fetchEligibility, mayBuy } from './eligibility';
 
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });

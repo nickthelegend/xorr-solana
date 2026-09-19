@@ -40,6 +40,10 @@ import { CAP_MAX, CAP_MIN, RUN_FOR, capLabel, runForMs } from '@/state/derived';
 import { useStore } from '@/state/store';
 import { readDelegationIntoStore } from '@/wallet/readDelegation';
 import { errorText } from '@/data/apiError';
+import { isSolana } from '@/chain';
+
+/** A dollar figure, whole or with cents as it comes. */
+const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 
 
 export default function GrantDelegation() {
@@ -49,11 +53,13 @@ export default function GrantDelegation() {
   const cap = useStore((s) => s.cap);
   const bumpCap = useStore((s) => s.bumpCap);
   const runFor = useStore((s) => s.runFor);
+  /** Days the grant runs — on Solana the chain approves the daily cap for each of them (`src/wallet/solanaGrant.ts`). */
+  const grantDays = Math.max(1, Math.ceil(runForMs(runFor) / 86_400_000));
   const cycleRunFor = useStore((s) => s.cycleRunFor);
   const [localError, setLocalError] = useState<string>();
   // The grant is signed by the USER's own wallet. The executor cannot grant itself
   // permission — that is the whole point of the delegation being on-chain.
-  const { grant: signGrant, busy, error: grantError } = useGrantDelegation();
+  const { grant: signGrant, busy, error: grantError, ready: canSign } = useGrantDelegation();
   /*
    * How many signatures this is actually going to ask for.
    *
@@ -91,7 +97,9 @@ export default function GrantDelegation() {
       // Read it back from the chain rather than trusting what we just sent, and file it against
       // the address it was read for (`wallet/readDelegation.ts`).
       await readDelegationIntoStore();
-      router.replace('/proposal');
+      // The draft portfolio is the Base build's sleeves of WETH, cbBTC and Ondo equities (2026-09-19). On Solana the
+      // agent trades xStocks and its basket is set from the agent screens, so the grant lands on Home.
+      router.replace(isSolana ? '/(tabs)' : '/proposal');
     } catch (e) {
       setLocalError(errorText(e));
     }
@@ -125,20 +133,38 @@ export default function GrantDelegation() {
       <Fill style={{ marginTop: space.s22 }}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: space.s16 }}>
         <View style={{ gap: space.s10 }}>
+          {/*
+            On Solana the permission is an SPL token approval (2026-09-19), and these three promises are said as the chain
+            keeps them. An approval does not choose where the tokens go and has no end date, so "it cannot move your money
+            out" and "it expires on its own" — true of the Base contract — would be false here: what the chain enforces is
+            the total approved, on the USDC account alone; the daily cap, the venue and the end date are xorr's own rules.
+          */}
           <ConsequenceCard
             tone="up"
             label="It can place trades"
-            detail={`Up to ${capLabel(cap)}.`}
+            detail={isSolana ? `Up to ${capLabel(cap)}, which xorr holds it to each day.` : `Up to ${capLabel(cap)}.`}
           />
-          <ConsequenceCard
-            tone="down"
-            label="It cannot move your money out"
-            detail="No transfers or withdrawals, ever."
-          />
+          {isSolana ? (
+            <ConsequenceCard
+              tone="down"
+              label="It can move only the USDC you approve"
+              detail={`At most ${usd(cap * grantDays)} in all, and xorr only spends it on buys through Jupiter. Nothing else in your wallet is reachable.`}
+            />
+          ) : (
+            <ConsequenceCard
+              tone="down"
+              label="It cannot move your money out"
+              detail="No transfers or withdrawals, ever."
+            />
+          )}
           <ConsequenceCard
             tone="up"
-            label="It expires on its own"
-            detail={`After ${RUN_FOR[runFor]!.toLowerCase()}.`}
+            label={isSolana ? 'xorr stops using it on its own' : 'It expires on its own'}
+            detail={
+              isSolana
+                ? `After ${RUN_FOR[runFor]!.toLowerCase()}. The approval itself stays on your USDC until you take it back.`
+                : `After ${RUN_FOR[runFor]!.toLowerCase()}.`
+            }
           />
           <ConsequenceCard
             tone="up"
@@ -214,7 +240,8 @@ export default function GrantDelegation() {
       ) : (
         <Button
           label="Sign this permission"
-          loading={busy}
+          // Loading until the wallet can sign — a tap before then has nothing to sign with.
+          loading={busy || !canSign}
           onPress={grant}
         />
       )}

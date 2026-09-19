@@ -9,7 +9,12 @@ import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { api } from '@/data/api';
 
-export type MoonPayConfig = {
+export type MoonPayConfig =
+  | { configured: false; detail: string }
+  | MoonPayReady;
+
+export type MoonPayReady = {
+  configured: true;
   environment: 'sandbox' | 'production';
   currencyCode: string;
   baseCurrencyCode: string;
@@ -69,9 +74,9 @@ export async function openMoonPayBuy(params: {
       const { loadMoonPay } = await import('@moonpay/moonpay-js');
       const moonPaySdk = await loadMoonPay('v1');
       if (moonPaySdk && typeof window !== 'undefined') {
-        const config = await fetchMoonPayConfig().catch(() => ({
-          apiKey: 'pk_test_xorr_dev_sandbox',
-        }));
+        // The executor's key, or no widget: a made-up key opened MoonPay's page only for it to fail there.
+        const config = await fetchMoonPayConfig();
+        if (!config.configured) throw new Error(config.detail);
         const widget = moonPaySdk({
           flow: 'buy',
           environment: 'sandbox',

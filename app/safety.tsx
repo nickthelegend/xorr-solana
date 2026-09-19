@@ -55,8 +55,9 @@ import { useStore } from '@/state/store';
 import { delegationOrUnknown, delegationScope } from '@/accounts/delegationScope';
 import { readDelegationIntoStore } from '@/wallet/readDelegation';
 import { useNow } from '@/state/useNow';
-import { pinnedDelegation } from '@/chain';
-import { useAllowlist } from '@/wallet/allowlist';
+import { isSolana, pinnedDelegation } from '@/chain';
+import { isSolanaAddress, useAllowlist } from '@/wallet/allowlist';
+import { solanaChainOnlyStanding } from '@/wallet/solanaStanding';
 import { useApprovals, type ApprovalsView } from '@/wallet/useApprovals';
 import { planResume, type GrantOptions } from '@/wallet/grantPlan';
 import { chainAccess } from '@/wallet/chainAccess';
@@ -193,13 +194,22 @@ export default function Safety() {
    * it, so a later failure is never answered by an earlier read.
    */
   const { address } = useAuth();
-  const owner = address && isAddress(address, { strict: false }) ? address : undefined;
-  const [chainRead, setChainRead] = useState<{ after: unknown; owner: string; standing: ChainStanding }>();
+  // On Solana the owner is a base58 key and the permission is the delegate on their USDC account, read by
+  // `solanaChainOnlyStanding`; the EVM check here used to leave a Solana owner undefined, so the fallback never ran.
+  const owner = address && (isSolana ? isSolanaAddress(address) : isAddress(address, { strict: false })) ? address : undefined;
+  const [chainRead, setChainRead] = useState<{
+    after: unknown;
+    owner: string;
+    standing: ChainStanding | { kind: 'live' | 'revoked' | 'unreadable' };
+  }>();
   useEffect(() => {
     if (delegationError === undefined || !owner) return;
     let alive = true;
     const after = delegationError;
-    void standingOnChain(chainAccess, owner, pinnedDelegation, Date.now()).then((standing) => {
+    const read = isSolana
+      ? solanaChainOnlyStanding(owner)
+      : standingOnChain(chainAccess, owner as `0x${string}`, pinnedDelegation, Date.now());
+    void read.then((standing) => {
       if (alive) setChainRead({ after, owner, standing });
     });
     return () => {
@@ -225,7 +235,7 @@ export default function Safety() {
     !record && delegationError !== undefined && !signedOut ? permissionOnChain(standing, sent === 'stop') : undefined;
   /** The policy behind it, for the parties and the expiry. */
   const chainPolicy =
-    fromChain && standing && (standing.kind === 'live' || standing.kind === 'revoked') ? standing.policy : undefined;
+    fromChain && standing && 'policy' in standing ? standing.policy : undefined;
 
   /*
    * Stopped, according to the chain — not according to a flag we kept.
@@ -287,7 +297,7 @@ export default function Safety() {
   const live = !asking && !signedOut && !unreadable && granted && !killed && !unusable && !expired;
 
   // Signed by the user, on-chain: a stop reaches every device without any server needing to be reachable.
-  const { grant: signGrant, revoke: signRevoke, busy, error: txError } = useGrantDelegation();
+  const { grant: signGrant, revoke: signRevoke, busy, error: txError, ready: canSign } = useGrantDelegation();
   const error = localError ?? txError;
 
   /** The grant, called as a resume calls it: with the approvals the plan found missing (PLAN.md 4.7). */
@@ -520,7 +530,8 @@ export default function Safety() {
               />
               <Row
                 title="Agent key"
-                secondary="Can’t withdraw"
+                // On Solana the key holds an SPL approval: it can move the approved USDC, and only that (2026-09-19).
+                secondary={isSolana ? 'Only your approved USDC' : 'Can’t withdraw'}
                 value={
                   <Text variant="rowPrimary" color={colors.ink55} selectable>
                     {delegateShown ? shortAddress(delegateShown) : '—'}
@@ -650,7 +661,8 @@ export default function Safety() {
               label={killCta(killed, unusable, granted, expired)}
               variant="primary"
               height={size.buttonLg}
-              loading={busy}
+              // Held until the wallet can sign: on Solana it loads after the screen does.
+              loading={busy || !canSign}
               onPress={toggle}
             />
           ) : (
@@ -658,7 +670,7 @@ export default function Safety() {
               label={killCta(killed, unusable, granted, expired)}
               accessibilityHint="Hold to stop"
               height={size.buttonLg}
-              loading={busy}
+              loading={busy || !canSign}
               onCommit={toggle}
             />
           )}

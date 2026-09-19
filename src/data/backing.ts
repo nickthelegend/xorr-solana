@@ -9,7 +9,7 @@
  * from the attestor says so, because the alternative is a tokenized-equity app drawing a
  * confident "1:1" nobody measured.
  */
-import { API_BASE } from './apiBase';
+import { sessionFetch } from './sessionFetch';
 
 export type Custodian = { provider: string; quantity: number; symbol: string };
 
@@ -30,7 +30,7 @@ export type Backing =
 
 export async function fetchBacking(symbol: string, signal?: AbortSignal): Promise<Backing> {
   try {
-    const res = await fetch(`${API_BASE}/xstocks/${encodeURIComponent(symbol)}/backing`, { signal });
+    const res = await sessionFetch(`/xstocks/${encodeURIComponent(symbol)}/backing`, { signal });
     if (!res.ok) {
       return { verified: false, symbol, reason: `The executor answered ${res.status}.` };
     }

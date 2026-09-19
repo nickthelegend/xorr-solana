@@ -10,6 +10,8 @@ import { assetClasses } from '@/data/fixtures/markets';
 import { fetchQuotes, fetchStockQuotes, type StockQuote } from '@/data/marketData';
 import { FEED_SYMBOLS, priceClasses, sourceOf, type PricedClass } from './prices';
 import { useLiveRead } from './useLiveRead';
+import { withXStocks } from './xstockClass';
+import { isSolana } from '@/chain';
 
 export type MarketClass = PricedClass & { reload: () => void };
 
@@ -25,7 +27,8 @@ export function useMarketPrices(options: { stocks?: boolean } = {}): MarketClass
   const { data: stockData, error: stockError, reload: reloadStocks } = stocks;
 
   return useMemo(() => {
-    const classes = assetClasses.filter((c) => withStocks || sourceOf(c) === 'feed');
+    const catalogue = isSolana ? withXStocks(assetClasses, stockData) : assetClasses;
+    const classes = catalogue.filter((c) => withStocks || sourceOf(c) === 'feed');
     return priceClasses(
       classes,
       { data: feedData, error: feedError },

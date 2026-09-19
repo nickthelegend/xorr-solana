@@ -4,7 +4,9 @@ import { Keypair } from '@solana/web3.js';
 const oneMock = vi.fn<(sql: string, params?: unknown[]) => Promise<unknown>>();
 const queryMock = vi.fn<(sql: string, params?: unknown[]) => Promise<unknown[]>>();
 const evaluateMock = vi.fn();
-const readDelegationMock = vi.fn();
+const readPolicyMock = vi.fn();
+/** The personas this wallet hired; every one by default, so a test is about its own subject. */
+let hiredPersonas: string[] = ['momentum-scout', 'earnings-desk', 'yield-keeper', 'drawdown-guard'];
 const guardAndSpendMock = vi.fn();
 const armExitsMock = vi.fn();
 const notifyEntryMock = vi.fn();
@@ -38,16 +40,24 @@ const applyFillMock = vi.fn();
 
 vi.mock('../db/index.js', () => ({
   one: (sql: string, params?: unknown[]) => oneMock(sql, params),
-  query: (sql: string, params?: unknown[]) => queryMock(sql, params),
+  query: (sql: string, params?: unknown[]) =>
+    sql.includes('FROM agents WHERE wallet_id')
+      ? Promise.resolve(hiredPersonas.map((persona_id) => ({ persona_id })))
+      : queryMock(sql, params),
   // The cycle books its fill inside a transaction; the client is never touched by these tests.
   tx: (fn: (c: unknown) => unknown) => fn({}),
 }));
 vi.mock('../positions/index.js', () => ({ applyFill: (...a: unknown[]) => applyFillMock(...a) }));
 
 vi.mock('../rules/engine.js', () => ({ evaluate: (...a: unknown[]) => evaluateMock(...a) }));
-vi.mock('../solana/delegation.js', () => ({
-  readDelegation: (...a: unknown[]) => readDelegationMock(...a),
+vi.mock('../solana/grant.js', () => ({
+  readSolanaPolicy: (...a: unknown[]) => readPolicyMock(...a),
 }));
+
+/** The permission as `readSolanaPolicy` answers it: a daily cap, an end date a month out, live unless revoked. */
+function policy(dailyCapUsd: number, revoked = false) {
+  return { dailyCapUsd, expiresAt: Date.now() + 30 * 86_400_000, revoked, allowanceUsd: dailyCapUsd * 30 };
+}
 vi.mock('../solana/balances.js', () => ({
   readMintScale: (...a: unknown[]) => readMintScaleMock(...a),
 }));
@@ -61,6 +71,8 @@ vi.mock('../notifications/alerts.js', () => ({
 vi.mock('../market/edgar.js', () => ({
   earningsCalendar: (...a: unknown[]) => earningsCalendarMock(...a),
 }));
+// Every mint these tests name is on the cluster; which are is `settleable.ts`'s question, read from the chain.
+vi.mock('../solana/settleable.js', () => ({ mintsOnCluster: async (a: string[]) => new Set(a) }));
 vi.mock('../audit/log.js', () => ({ append: (...a: unknown[]) => appendMock(...a) }));
 vi.mock('./llm.js', () => ({ speak: vi.fn(async () => ({ ok: true, text: 'Optimal entry setup.' })) }));
 
@@ -102,6 +114,7 @@ describe('autonomous xStocks trading agent', () => {
 
     queryMock.mockResolvedValue([]);
     oneMock.mockResolvedValue(null);
+    hiredPersonas = ['momentum-scout', 'earnings-desk', 'yield-keeper', 'drawdown-guard'];
     earningsCalendarMock.mockResolvedValue(null);
     /*
      * 238 against the `readings(200, 240, ...)` band the range tests use, so the default symbol
@@ -353,9 +366,48 @@ describe('autonomous xStocks trading agent', () => {
       expect(guardAndSpendMock).not.toHaveBeenCalled();
     });
 
+    it('trades for no one when the wallet has hired no agent', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
+      hiredPersonas = [];
+
+      const result = await runAutonomousCycle('wallet-1');
+      expect(result.executed).toBe(false);
+      if (!result.executed) expect(result.reason).toBe('no_agent_hired');
+      expect(guardAndSpendMock).not.toHaveBeenCalled();
+    });
+
+    it('takes only the setups a hired persona would take', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+      // The band reads as momentum, and only the Earnings Desk is hired: nothing it would take is on offer.
+      hiredPersonas = ['earnings-desk'];
+
+      const result = await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
+      expect(result.executed).toBe(false);
+      if (!result.executed) expect(result.reason).toBe('no_setup');
+      expect(guardAndSpendMock).not.toHaveBeenCalled();
+    });
+
+    it('sizes against the cap the owner chose, not the allowance left on the chain', async () => {
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readPolicyMock.mockResolvedValue(policy(300));
+      evaluateMock.mockResolvedValue({ allowed: false, reason: 'cap', detail: 'over' });
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+
+      await runAutonomousCycle('wallet-1');
+      expect(evaluateMock.mock.calls[0]![0]).toMatchObject({ dailyCapUsd: 300, delegationRevoked: false });
+    });
+
     it('refuses when the on-chain SPL delegation is revoked', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 500, isRevoked: true });
+      readPolicyMock.mockResolvedValue(policy(500, true));
 
       const result = await runAutonomousCycle('wallet-1');
       expect(result.executed).toBe(false);
@@ -365,7 +417,7 @@ describe('autonomous xStocks trading agent', () => {
 
     it('executes through guardAndSpend, arms exits, writes a proposal and notifies', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       queryMock.mockImplementation(async (sql: string) =>
         sql.includes('price_observations') ? readings(200, 240, 238) : [],
@@ -415,7 +467,7 @@ describe('autonomous xStocks trading agent', () => {
      */
     it('places the setup the caller brought instead of scanning for a new one', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       guardAndSpendMock.mockResolvedValue(FILL);
       armExitsMock.mockResolvedValue({ strategyId: 'exit-1', sentence: 'Exit set' });
@@ -462,7 +514,7 @@ describe('autonomous xStocks trading agent', () => {
      */
     it('puts the fill on the audit trail, carrying the signature', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       queryMock.mockImplementation(async (sql: string) =>
         sql.includes('price_observations') ? readings(200, 240, 238) : [],
@@ -499,7 +551,7 @@ describe('autonomous xStocks trading agent', () => {
      */
     it('stores the decision under a word the proposals constraint accepts', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       queryMock.mockImplementation(async (sql: string) =>
         sql.includes('price_observations') ? readings(200, 240, 238) : [],
@@ -522,7 +574,7 @@ describe('autonomous xStocks trading agent', () => {
      */
     it('books the fill into the position ledger, attributed to the agent', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       queryMock.mockImplementation(async (sql: string) =>
         sql.includes('price_observations') ? readings(200, 240, 238) : [],
@@ -548,7 +600,7 @@ describe('autonomous xStocks trading agent', () => {
     /* A sale is negative units, or the book would count a close as another buy. */
     it('books a sale as negative units', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       queryMock.mockImplementation(async (sql: string) =>
         sql.includes('price_observations') ? readings(200, 240, 238) : [],
@@ -569,7 +621,7 @@ describe('autonomous xStocks trading agent', () => {
      */
     it('reports the chokepoint refusal without arming exits or notifying', async () => {
       oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       queryMock.mockImplementation(async (sql: string) =>
         sql.includes('price_observations') ? readings(200, 240, 238) : [],
@@ -671,7 +723,7 @@ describe('autonomous xStocks trading agent', () => {
         agents_stopped: false,
         ...(profile === undefined ? {} : { risk_profile: profile }),
       });
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
       // Twelve readings, so even conservative's ten-observation floor has a band to work with.
       queryMock.mockImplementation(async (sql: string) =>
@@ -758,7 +810,7 @@ describe('autonomous xStocks trading agent', () => {
         return null;
       });
 
-      readDelegationMock.mockResolvedValue({ delegatedUsd: 1000, isRevoked: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
       evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 500 });
       guardAndSpendMock.mockResolvedValue({ ...FILL, signature: '5K3ySweepSig' });
       armExitsMock.mockResolvedValue({ strategyId: 'exit-1', sentence: 'Exit set' });

@@ -19,7 +19,9 @@ import { useCallback, useState } from 'react';
 import { useEmbeddedEthereumWallet } from '@privy-io/expo';
 import { encodeFunctionData, parseUnits, type Address, type Hex } from 'viem';
 import { api } from '@/data/api';
-import { activeChain, pinnedDelegation, walletSignsOnly } from '@/chain';
+import { useSolanaSigner } from '@/wallet/solanaSigner';
+import { grantOnSolana, revokeOnSolana } from '@/wallet/solanaGrant';
+import { isSolana, activeChain, pinnedDelegation, walletSignsOnly } from '@/chain';
 import { humanWalletError } from '@/wallet/walletError';
 import { SETTLEMENT_APPROVAL_DAYS, type GrantOptions } from '@/wallet/grantPlan';
 import { chainAccess } from '@/wallet/chainAccess';
@@ -69,6 +71,8 @@ const USDC_DECIMALS = 6;
 const MAX_UINT256 = (1n << 256n) - 1n;
 
 export function useGrantDelegation() {
+  // On a Solana build the owner's Privy Solana wallet signs the grant and the stop (2026-09-19).
+  const solana = useSolanaSigner();
   const { wallets } = useEmbeddedEthereumWallet();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -111,6 +115,10 @@ export function useGrantDelegation() {
       setBusy(true);
       setError(undefined);
       try {
+        if (isSolana) {
+          if (!solana.address) throw new Error('No wallet yet. Finish sign-in first.');
+          return await grantOnSolana({ owner: solana.address, dailyCapUsd, durationMs, signAndSend: solana.signAndSend });
+        }
         const params = await api.get<DelegationParams>('/delegation/params');
         /*
          * Every approval below, and the grant, goes to an address the executor named. It has to be a contract on this
@@ -188,13 +196,17 @@ export function useGrantDelegation() {
         setBusy(false);
       }
     },
-    [send],
+    [send, solana],
   );
 
   const revoke = useCallback(async () => {
     setBusy(true);
     setError(undefined);
     try {
+      if (isSolana) {
+        if (!solana.address) throw new Error('No wallet yet. Finish sign-in first.');
+        return await revokeOnSolana({ owner: solana.address, signAndSend: solana.signAndSend });
+      }
       const s = await signer();
       if (!s) throw new Error('No wallet yet. Finish sign-in first.');
       /*
@@ -239,7 +251,7 @@ export function useGrantDelegation() {
     } finally {
       setBusy(false);
     }
-  }, [signer]);
+  }, [signer, solana]);
 
   /*
    * `send` is exported too.
@@ -250,5 +262,11 @@ export function useGrantDelegation() {
    * plumbing (which differs between web and native, and is the only part that does), the caller
    * gets the primitive.
    */
-  return { grant, revoke, sendTransaction: send, estimateFee, busy, error };
+  /*
+   * Whether a grant or a stop can be signed right now (2026-09-19). On Solana the wallet loads after the screen does —
+   * in a development build Privy took some fifteen seconds — and a tap before then was answered "No wallet yet. Finish
+   * sign-in first." to someone who had. A screen shows its button as loading until this is true.
+   */
+  const ready = isSolana ? solana.ready : true;
+  return { grant, revoke, sendTransaction: send, estimateFee, busy, error, ready };
 }

@@ -12,6 +12,7 @@
  *
  * Nothing on this screen carries a hardcoded colour, size or radius.
  */
+import { isSolana } from '@/chain';
 import React, { useMemo } from 'react';
 import { View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
@@ -137,7 +138,7 @@ export default function MarketsScreen() {
             renderItem={({ item }: { item: Instrument }) => (
               <Row
                 height={size.rowLg}
-                onPress={() => router.push(`/asset/${item.sym}`)}
+                onPress={() => router.push(isSolana && item.classId === 'stocks' ? `/xstock/${item.sym}` : `/asset/${item.sym}`)}
                 left={
                   <AssetMark
                     gradient={{ c1: item.c1, c2: item.c2 }}

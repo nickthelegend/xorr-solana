@@ -520,7 +520,7 @@ export function killCta(
  * rather than a claim about a permission nobody looked at.
  */
 export function permissionOnChain(
-  standing: ChainStanding | undefined,
+  standing: Pick<ChainStanding, 'kind'> | undefined,
   stoppedHere: boolean,
 ): 'live' | 'stopped' | undefined {
   if (standing?.kind === 'live') return 'live';

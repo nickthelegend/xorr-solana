@@ -15,5 +15,7 @@
 import 'react-native-get-random-values';
 import 'fast-text-encoding';
 import '@ethersproject/shims';
+// Before the app: the Solana libraries read `Buffer` at import time. See buffer-global.js.
+import './buffer-global';
 
 import 'expo-router/entry';

@@ -17,7 +17,8 @@ import { percent, price as fmtPrice } from '@/format';
 export type PriceSource = 'feed' | 'stocks';
 
 export function sourceOf(cls: AssetClass): PriceSource {
-  return cls.instruments.some((i) => isStockSymbol(i.sym)) ? 'stocks' : 'feed';
+  // By id as well: on Solana the class is empty until the xStocks arrive, and it is still the shares' class.
+  return cls.id === 'stocks' || cls.instruments.some((i) => isStockSymbol(i.sym)) ? 'stocks' : 'feed';
 }
 
 /**

@@ -140,6 +140,12 @@ export function getClusterKey(): SolanaClusterKey {
 export const CLUSTER_KEY = getClusterKey();
 
 /**
+ * Whether this executor settles on Solana at all (2026-09-19). `activeClusterKey` falls back to the fork when
+ * `XORR_CHAIN` names an EVM chain, so it cannot answer this; the chain the process was started for can.
+ */
+export const ON_SOLANA = isSolanaCluster(process.env.XORR_CHAIN ?? process.env.EXPO_PUBLIC_XORR_CHAIN ?? '');
+
+/**
  * Where a cluster's RPC actually lives, once the environment has had its say.
  * `getClusterConfig` and `rpcUrl` share this so the two cannot drift apart.
  */

@@ -5,7 +5,7 @@
  * from two hundred look alike and claim very different things, and the screen has to be able to
  * say which it is holding rather than letting the shape imply it.
  */
-import { API_BASE } from './apiBase';
+import { sessionFetch } from './sessionFetch';
 
 export type ReservePoint = {
   ratio: number;
@@ -27,8 +27,7 @@ export async function fetchReservesHistory(
   signal?: AbortSignal,
 ): Promise<ReservesHistory | null> {
   try {
-    const res = await fetch(
-      `${API_BASE}/xstocks/${encodeURIComponent(symbol)}/reserves/history`,
+    const res = await sessionFetch(`/xstocks/${encodeURIComponent(symbol)}/reserves/history`,
       { signal },
     );
     if (!res.ok) return null;

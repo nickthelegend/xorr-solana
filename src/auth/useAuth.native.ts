@@ -5,7 +5,14 @@
  * screen goes through a repository rather than calling fetch.
  */
 import { useCallback, useMemo, useState } from 'react';
-import { usePrivy, useEmbeddedEthereumWallet, useLoginWithEmail, useLoginWithOAuth } from '@privy-io/expo';
+import {
+  usePrivy,
+  useEmbeddedEthereumWallet,
+  useEmbeddedSolanaWallet,
+  useLoginWithEmail,
+  useLoginWithOAuth,
+} from '@privy-io/expo';
+import { isSolana } from '@/chain';
 import { alreadyHasWallet } from './alreadyHasWallet';
 import type { SocialProvider } from './socialLogins';
 
@@ -24,8 +31,10 @@ export function useAuth(): AuthState & {
 } {
   const { user, isReady, logout } = usePrivy();
   const { wallets, create } = useEmbeddedEthereumWallet();
+  // A Solana build's wallet is the embedded Solana one (2026-09-19). See useAuth.web.ts.
+  const solana = useEmbeddedSolanaWallet();
 
-  const address = wallets?.[0]?.address;
+  const address = isSolana ? solana.wallets?.[0]?.address : wallets?.[0]?.address;
   const email = user?.linked_accounts?.find((a) => a.type === 'email') as
     | { address?: string }
     | undefined;
@@ -35,14 +44,15 @@ export function useAuth(): AuthState & {
     try {
       // create() resolves to a provider, not a wallet record — the address lands in `wallets` on
       // the next render, so the caller reads it from there.
-      await create();
+      if (isSolana) await solana.create?.();
+      else await create();
     } catch (e) {
       // A returning user already has one and `wallets` has not caught up yet. See
       // alreadyHasWallet — that is the postcondition, not a failure. Everything else rethrows.
       if (!alreadyHasWallet(e)) throw e;
     }
     return undefined;
-  }, [address, create]);
+  }, [address, create, solana]);
 
   return useMemo(
     () => ({

@@ -4,6 +4,8 @@
  */
 import { useCallback, useMemo, useState } from 'react';
 import { usePrivy, useLogin, useLoginWithEmail, useLoginWithOAuth, useWallets, useCreateWallet } from '@privy-io/react-auth';
+import { useCreateWallet as useCreateSolanaWallet } from '@privy-io/react-auth/solana';
+import { isSolana } from '@/chain';
 import type { SocialProvider } from './socialLogins';
 import { pickEmbedded } from './embeddedWallet';
 import { alreadyHasWallet } from './alreadyHasWallet';
@@ -23,6 +25,7 @@ export function useAuth(): AuthState & {
   const { ready, authenticated, user, logout } = usePrivy();
   const { wallets } = useWallets();
   const { createWallet: create } = useCreateWallet();
+  const { createWallet: createSolana } = useCreateSolanaWallet();
 
   /*
    * The EMBEDDED wallet, not merely the first one Privy lists.
@@ -31,11 +34,24 @@ export function useAuth(): AuthState & {
    * as "the `owner` in the on-chain delegation policy". `useWallets()` includes injected browser
    * extensions, so on a browser with one installed this was somebody else's address.
    */
-  const address = pickEmbedded(wallets)?.address;
+  const evmAddress = pickEmbedded(wallets)?.address;
+  /*
+   * On a Solana build the wallet is Privy's embedded SOLANA wallet (2026-09-19): the owner of the USDC the bot may
+   * spend, and the signer of the grant, the kill switch and every withdrawal. Read off the account itself, so an
+   * extension wallet the browser happens to have is never taken for it.
+   */
+  const solanaAddress = user?.linkedAccounts.find(
+    (a): a is typeof a & { address: string } =>
+      a.type === 'wallet' &&
+      (a as { chainType?: string }).chainType === 'solana' &&
+      (a as { walletClientType?: string }).walletClientType === 'privy',
+  )?.address;
+  const address = isSolana ? solanaAddress : evmAddress;
 
   const createWallet = useCallback(async () => {
     if (address) return address;
     try {
+      if (isSolana) return (await createSolana()).wallet.address;
       const w = await create();
       return w?.address;
     } catch (e) {
@@ -44,7 +60,7 @@ export function useAuth(): AuthState & {
       if (!alreadyHasWallet(e)) throw e;
       return undefined;
     }
-  }, [address, create]);
+  }, [address, create, createSolana]);
 
   return useMemo(
     () => ({

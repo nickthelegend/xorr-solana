@@ -5,6 +5,7 @@
  * Priced by the class's own read (`src/markets/prices.ts`). Through `listClasses` a failed read came
  * back as a list of dashes, so the error state below could never show.
  */
+import { isSolana } from '@/chain';
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
@@ -119,7 +120,7 @@ export default function ClassList() {
                 }
                 delta={item.chg}
                 deltaTone={item.up ? 'up' : 'down'}
-                onPress={() => router.push(`/asset/${item.sym}`)}
+                onPress={() => router.push(isSolana && item.classId === 'stocks' ? `/xstock/${item.sym}` : `/asset/${item.sym}`)}
               />
             )}
             ListFooterComponent={

@@ -12,14 +12,29 @@
  * 5. spendAsDelegate() (SPL Transfer signed by delegate) -> venue ATA, followed by Jupiter swap fill.
  */
 import { PublicKey } from '@solana/web3.js';
-import { readDelegation, spendAsDelegate, usdToBaseUnits, baseUnitsToUsd } from '../solana/delegation.js';
+import { readDelegation, spendAsDelegate, returnToOwner, usdToBaseUnits, baseUnitsToUsd } from '../solana/delegation.js';
+import { markBroadcast } from '../http/request-id.js';
 import { delegateKeypair, venueVaultKeypair } from '../solana/keys.js';
 import { ataFor, tokenProgramForMint, readMintScale, toUiAmount, fromUiAmount } from '../solana/balances.js';
 import { DEFAULT_MINTS } from '../solana/clusters.js';
-import { evaluate, type RuleContext } from '../rules/engine.js';
+import { evaluate, recordSpend, type RuleContext } from '../rules/engine.js';
+import { tx } from '../db/index.js';
+
+/**
+ * Count a buy against today's cap (2026-09-19). The Solana path never did, so the daily cap the rules engine enforces
+ * only ever saw one order at a time: two $150 buys under a $200 cap both passed. Recorded once money has left the
+ * owner; a failure to record is logged loudly rather than turning a filled order into an error.
+ */
+async function countSpend(walletId: string, usd: number): Promise<void> {
+  await tx((client) => recordSpend(walletId, usd, client)).catch((e: unknown) =>
+    console.error(`[place] ${walletId} spent ${usd.toFixed(2)} and it was NOT counted against today's cap:`, e),
+  );
+}
 import { xStockPriceUsd, XSTOCKS, xStockKey } from '../venues/xstocks.js';
 import { quote, swap, resolveMint, type FillVenue } from '../venues/jupiter.js';
 import { checkEligibility } from '../solana/eligibility.js';
+import { readSolanaPolicy } from '../solana/grant.js';
+import { mintsOnCluster } from '../solana/settleable.js';
 
 export type SpendIntent = {
   walletId: string;
@@ -80,6 +95,16 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     };
   }
 
+  // A priced xStock whose mint this cluster does not hold cannot settle here; say so before anything is read or moved.
+  if (stock && !(await mintsOnCluster([stock.address])).has(stock.address)) {
+    return {
+      placed: false,
+      status: 'blocked',
+      reason: 'not_on_cluster',
+      detail: `${intent.symbol} has no mint on this network, so it can be priced here but not bought.`,
+    };
+  }
+
   // 1 & 3. On-chain check: readDelegation (SPL Token program is authoritative)
   const onChainState = await readDelegation(intent.ownerPubkey, DEFAULT_MINTS.USDC);
   if (side === 'buy') {
@@ -108,23 +133,47 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     return {
       placed: false,
       status: 'blocked',
-      reason: 'daily_cap',
-      detail: `That would take today past your delegated cap. ${onChainState.remainingUsd.toFixed(2)} USDC is left.`,
+      // The chain's ceiling for the whole grant, not today's cap — which the rules engine below answers in its own words.
+      reason: 'allowance',
+      detail: `That is more than your permission still allows in total: ${onChainState.remainingUsd.toFixed(2)} USDC of the amount you approved is left. Grant more to buy this much.`,
     };
   }
 
   // 2. Rules engine check (optional if skipRulesEngine = true for tests)
   if (!intent.skipRulesEngine) {
+    /*
+     * The cap and end date the OWNER chose, from the grant record the chain confirmed (2026-09-19). This passed the
+     * on-chain allowance as the daily cap — the whole ceiling, not a day's share — and an expiry of "now + 30 days"
+     * that nobody chose, so no real daily cap or end date was ever enforced. No record behind the delegation is no
+     * permission.
+     */
+    const policy = await readSolanaPolicy({ id: intent.walletId, address: intent.ownerPubkey });
+    if (!policy && side === 'buy') {
+      return {
+        placed: false,
+        status: 'blocked',
+        reason: 'no_permission',
+        detail: 'There is no recorded permission for this wallet, so nothing will be placed. Grant one first.',
+      };
+    }
     const ruleCtx: RuleContext = {
       walletId: intent.walletId,
       usd: intent.usd,
-      dailyCapUsd: onChainState.remainingUsd,
-      delegationExpiresAt: new Date(Date.now() + 86400_000 * 30),
-      delegationRevoked: onChainState.isRevoked,
+      dailyCapUsd: policy?.dailyCapUsd ?? 0,
+      delegationExpiresAt: new Date(policy?.expiresAt ?? 0),
+      delegationRevoked: policy?.revoked ?? onChainState.isRevoked,
       maxSpreadPct: intent.maxSpreadPct,
       reducesRiskOnly: side === 'sell',
     };
-    const verdict = await evaluate(ruleCtx).catch(() => ({ allowed: true as const, spentTodayUsd: 0, remainingUsd: intent.usd }));
+    /*
+     * Fails CLOSED (2026-09-19). A rules engine that threw was read as "allowed", so the one check that holds the
+     * daily cap, the kill switch and the spread could be skipped by any error inside it.
+     */
+    const verdict = await evaluate(ruleCtx).catch((e: unknown) => ({
+      allowed: false as const,
+      reason: 'rules_unavailable',
+      detail: `The spending rules could not be checked (${e instanceof Error ? e.message : String(e)}), so nothing was placed.`,
+    }));
     if (!verdict.allowed) {
       return {
         placed: false,
@@ -182,6 +231,33 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
   const vaultUsdcAta = ataFor(vault.publicKey, DEFAULT_MINTS.USDC);
 
   if (side === 'buy') {
+    /*
+     * The quote FIRST, then the money (2026-09-19). This moved the owner's USDC into the venue vault and only then asked
+     * for a quote, so a quote that failed — no route, a rate limit, the venue down — left the USDC in the vault with
+     * nothing delivered for it. A quote that fails now fails before anything has moved.
+     */
+    const outMint = stock ? stock.address : resolveMint(symbolKey);
+    let quoteRes: Awaited<ReturnType<typeof quote>>;
+    try {
+      quoteRes = await quote({
+        inSymbolOrMint: 'USDC',
+        outSymbolOrMint: outMint,
+        amountUnits: wantedUnits,
+        slippageBps: intent.slippageBps ?? 50,
+      });
+    } catch (e) {
+      // A refusal the owner can read, not a 500: nothing has moved, and saying so is the point.
+      return {
+        placed: false,
+        status: 'blocked',
+        reason: 'no_quote',
+        detail: `No venue would quote ${intent.symbol} right now (${e instanceof Error ? e.message : String(e)}), so nothing was spent.`,
+      };
+    }
+
+    // Recorded on the request's idempotency key before the first transaction leaves, so a retry never buys twice.
+    await markBroadcast();
+
     // Step 5a: spendAsDelegate (SPL transfer user USDC -> venue vault)
     const spendRes = await spendAsDelegate({
       owner: intent.ownerPubkey,
@@ -189,20 +265,36 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
       amountUnits: wantedUnits,
     });
 
-    // Step 5b: Jupiter swap fill
-    const outMint = stock ? stock.address : resolveMint(symbolKey);
-    const quoteRes = await quote({
-      inSymbolOrMint: 'USDC',
-      outSymbolOrMint: outMint,
-      amountUnits: wantedUnits,
-      slippageBps: intent.slippageBps ?? 50,
-    });
-
-    const swapRes = await swap({
-      quoteResponse: quoteRes,
-      userPublicKey: intent.ownerPubkey,
-      vaultKeypair: vault,
-    });
+    // Step 5b: Jupiter swap fill. If it does not fill, the USDC goes straight back to its owner.
+    let swapRes: Awaited<ReturnType<typeof swap>>;
+    try {
+      swapRes = await swap({
+        quoteResponse: quoteRes,
+        userPublicKey: intent.ownerPubkey,
+        vaultKeypair: vault,
+      });
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      const refund = await returnToOwner({
+        owner: intent.ownerPubkey,
+        mint: DEFAULT_MINTS.USDC,
+        amountUnits: wantedUnits,
+        fromKeypair: vault,
+      }).then(
+        (r) => r.signature,
+        () => null,
+      );
+      // Refunded: nothing left the owner. Not refunded: it did, and it counts.
+      if (!refund) await countSpend(intent.walletId, intent.usd);
+      return {
+        placed: false,
+        status: 'blocked',
+        reason: refund ? 'fill_failed_refunded' : 'fill_failed_refund_failed',
+        detail: refund
+          ? `The swap did not fill (${why}). Your ${intent.usd.toFixed(2)} USDC was returned to you (${refund}).`
+          : `The swap did not fill (${why}), and returning your ${intent.usd.toFixed(2)} USDC failed too: it is held in the venue vault after ${spendRes.signature}.`,
+      };
+    }
 
     /*
      * What the holder actually received, not what the raw amount looks like.
@@ -215,6 +307,7 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     const outScale = await readMintScale(outMint);
     const filledUnits = toUiAmount(swapRes.outAmount, outScale);
     const fillPrice = intent.usd / (filledUnits > 0 ? filledUnits : 1);
+    await countSpend(intent.walletId, intent.usd);
 
     return {
       placed: true,

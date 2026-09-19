@@ -21,6 +21,7 @@ describe('MoonPay client deposit helper', () => {
 
   it('fetchMoonPayConfig calls /deposit/moonpay/config', async () => {
     vi.mocked(api.get).mockResolvedValueOnce({
+      configured: true,
       environment: 'sandbox',
       currencyCode: 'usdc_sol',
       baseCurrencyCode: 'usd',
@@ -30,8 +31,7 @@ describe('MoonPay client deposit helper', () => {
 
     const config = await fetchMoonPayConfig();
     expect(api.get).toHaveBeenCalledWith('/deposit/moonpay/config');
-    expect(config.currencyCode).toBe('usdc_sol');
-    expect(config.environment).toBe('sandbox');
+    expect(config).toMatchObject({ configured: true, currencyCode: 'usdc_sol', environment: 'sandbox' });
   });
 
   it('fetchMoonPayDepositUrl posts to /deposit/moonpay/url', async () => {
