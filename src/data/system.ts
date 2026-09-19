@@ -551,6 +551,8 @@ export type StockRow = {
   price: number | null;
   venues: string[];
   feed: 'live' | 'unavailable';
+  /** Solana: percent over 24h from the executor's recorded prices, absent until that record reaches back a day. */
+  change24h?: number;
 };
 
 /**
