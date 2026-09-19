@@ -25,14 +25,33 @@ function detailLine(message: string): string | undefined {
   return match?.[1]?.trim() || undefined;
 }
 
+/**
+ * Every message down an error's `cause` chain. Privy wraps a Solana signing failure as "Failed to connect to wallet" and
+ * puts the reason in `cause`: closing its sheet read "Failed to connect to wallet" under Stop all trading (2026-09-19).
+ */
+function messages(e: unknown): string[] {
+  const out: string[] = [];
+  let at: unknown = e;
+  for (let depth = 0; at != null && depth < 5; depth++) {
+    out.push(at instanceof Error ? at.message : String(at));
+    at = at instanceof Error ? (at as Error & { cause?: unknown }).cause : undefined;
+  }
+  return out;
+}
+
+/** The person closed the wallet's sheet: EVM wallets say "rejected", Privy's Solana sheet says "exited the modal". */
+export function isUserCancel(e: unknown): boolean {
+  return messages(e).some((m) => /user rejected|denied transaction|request rejected|exited the modal/i.test(m));
+}
+
+export const CANCELLED = 'You cancelled the signature, so nothing changed.';
+
 export function humanWalletError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
   const detail = detailLine(raw) ?? raw;
 
   // The user closed the sheet. Not a fault, and it must not read as one.
-  if (/user rejected|denied transaction|request rejected/i.test(raw)) {
-    return 'You cancelled the signature, so nothing changed.';
-  }
+  if (isUserCancel(e)) return CANCELLED;
   /*
    * The wallet has no ETH for the network fee on the chain the transaction goes to. On a fork build
    * that used to be real Base whatever the screen showed — Privy sent there — and "have 0" was the

@@ -44,7 +44,7 @@ import { useIntentKeys } from '@/data/useIntentKeys';
 import { errorText } from '@/data/apiError';
 import { faucetStatus, requestFaucet, type FaucetOutcome } from '@/data/deposit';
 
-import { openMoonPayBuy } from '@/deposit/moonpay';
+import { fetchMoonPayConfig, openMoonPayBuy } from '@/deposit/moonpay';
 
 const QR_SIZE = 168;
 
@@ -70,6 +70,9 @@ export default function Fund() {
   // Registered on the step before this one; a session that skipped it still has Privy's own address.
   const address = useStore((s) => s.wallet)?.address ?? auth.address;
   const faucet = useAsync(() => faucetStatus(), []);
+  // Card deposits only where the executor has MoonPay keys (2026-09-19): with none it answers `configured: false`, and a
+  // button here would open a checkout that cannot work. The faucet and the address below still fund the wallet.
+  const moonPay = useAsync(() => fetchMoonPayConfig(), []);
   const now = useNow();
   const [copied, setCopied] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -181,12 +184,14 @@ export default function Fund() {
               </Text>
               {address ? (
                 <View style={{ marginTop: space.s12, gap: space.s10 }}>
-                  <Button
-                    label="Buy with Card · MoonPay Sandbox"
-                    variant="secondary"
-                    loading={openingMoonPay}
-                    onPress={buyWithMoonPay}
-                  />
+                  {moonPay.data?.configured ? (
+                    <Button
+                      label="Buy with Card · MoonPay Sandbox"
+                      variant="secondary"
+                      loading={openingMoonPay}
+                      onPress={buyWithMoonPay}
+                    />
+                  ) : null}
                   {moonPayError ? (
                     <Text variant="footnote" color={colors.down} align="center">
                       {moonPayError}

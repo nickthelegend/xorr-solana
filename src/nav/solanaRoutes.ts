@@ -58,7 +58,16 @@ export const HIDDEN_ON_SOLANA: readonly string[] = [
   '/more',
   // Compares Base crypto (WETH, cbBTC) over CoinGecko history; nothing on it trades here.
   '/compare',
+  // The day's movers are Hyperliquid perps and spot crypto, each tagged "Perp"; none of them trades here.
+  '/movers',
 ];
+
+/**
+ * Base screens whose Solana counterpart is the xStocks market: the class-by-class Markets list (crypto, commodities,
+ * pre-IPO, with gold the only price) and Search, which ranked Hyperliquid perps first. On Solana what can be found and
+ * traded is an xStock, and `/xstocks` lists, filters and prices every one.
+ */
+const XSTOCKS_INSTEAD: readonly string[] = ['/markets', '/search'];
 
 /**
  * Where a Base route that has a Solana counterpart goes instead. The Swap tab becomes the xStocks market; a stock's
@@ -67,6 +76,7 @@ export const HIDDEN_ON_SOLANA: readonly string[] = [
 export function solanaRedirect(path: string): string | null {
   if (!isSolana) return null;
   if (path === '/swap' || path.startsWith('/swap?')) return '/xstocks';
+  if (XSTOCKS_INSTEAD.includes(path.split('?')[0] ?? path)) return '/xstocks';
   const oracle = path.match(/^\/oracle\/([^/?]+)/);
   if (oracle) return `/xstock/${oracle[1]}`;
   // An xStock's asset page is its ticket; other assets (SOL, BTC) keep their chart.
@@ -85,5 +95,6 @@ export function hiddenOn(path: string, solana: boolean = isSolana): boolean {
 
 /** Whether a link to `path` should be drawn on this build. */
 export function shownHere(path: string): boolean {
-  return !hiddenOn(path) && !(isSolana && (path === '/swap' || path.startsWith('/oracle')));
+  // A link to a redirected route would be a second way to the same screen, so it is not drawn either.
+  return !hiddenOn(path) && !(isSolana && (path === '/swap' || path.startsWith('/oracle') || XSTOCKS_INSTEAD.includes(path)));
 }

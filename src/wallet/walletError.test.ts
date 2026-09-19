@@ -57,3 +57,15 @@ describe('a wallet failure reads as a sentence, not a request log', () => {
     expect(humanWalletError(new Error('x'.repeat(500))).length).toBeLessThanOrEqual(200);
   });
 });
+
+describe('a closed Privy Solana sheet', () => {
+  it('reads as a cancel, not a connection failure', async () => {
+    const { humanWalletError, isUserCancel, CANCELLED } = await import('./walletError');
+    const privy = new Error('Failed to connect to wallet', {
+      cause: new Error('User exited the modal before submitting the transaction'),
+    });
+    expect(isUserCancel(privy)).toBe(true);
+    expect(humanWalletError(privy)).toBe(CANCELLED);
+    expect(isUserCancel(new Error('Failed to connect to wallet'))).toBe(false);
+  });
+});

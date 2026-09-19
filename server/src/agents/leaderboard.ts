@@ -6,6 +6,7 @@
  *
  * An agent with no trades gets zeros and says so, rather than borrowing a flattering number.
  */
+import { XSTOCKS, xStockKey, xStockPriceUsd } from '../venues/xstocks.js';
 import { query } from '../db/index.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
 import { priceOf } from '../market/prices.js';
@@ -62,6 +63,23 @@ export async function agentRecords(walletId: string): Promise<Map<string, AgentR
     [walletId],
   );
 
+  /*
+   * The autonomous agent's own entries (2026-09-19). They are not strategy runs — each is a position sleeve credited to
+   * the persona that took it (`bot/autonomous.ts`) — so a Momentum Scout that had bought MSFTx on the hosted build showed
+   * "0 trades" on its own profile. Its open entries, at cost, are its record beside the runs above.
+   */
+  const entries = await query<{ source_label: string; symbol: string; units: string; cost_usd: string }>(
+    `SELECT source_label, symbol, units, cost_usd FROM position_sleeves
+      WHERE wallet_id = $1 AND chain = ${THIS_CHAIN} AND source = 'agent' AND cost_usd > 0
+        AND opened_at > now() - interval '30 days'`,
+    [walletId],
+  ).catch(() => []);
+  const personaByName = new Map(AGENTS.map((a) => [a.name, a.id]));
+  for (const e of entries) {
+    const persona = personaByName.get(e.source_label);
+    if (persona) runs.push({ kind: 'agent', persona_id: persona, symbol: e.symbol, usd: e.cost_usd, units: e.units, price: '0' });
+  }
+
   // One price lookup per symbol, not per run — and all of them at once, not one after another.
   const symbols = [...new Set(runs.map((r) => r.symbol))];
   const marks = new Map<string, number>();
@@ -69,7 +87,10 @@ export async function agentRecords(walletId: string): Promise<Map<string, AgentR
     symbols.map(async (s) => {
       try {
         // A screen, so a short deadline: an unpriced symbol is excluded, not waited for.
-        marks.set(s, await priceOf(s, 3_000));
+        // An xStock is priced where it trades, Jupiter; the feed table has none of them.
+        const x = XSTOCKS[xStockKey(s) ?? s];
+        const mark = x ? await xStockPriceUsd(x.symbol) : await priceOf(s, 3_000);
+        if (mark !== null && mark > 0) marks.set(s, mark);
       } catch {
         // No feed for this symbol — its runs are excluded rather than valued at a guess.
       }

@@ -125,14 +125,14 @@ Privy test account (Solana wallet `GiKwSk…sHJM`). Every on-chain step is a rea
 | B2 | PASS | Privy Solana embedded wallet `GiKwSk…`; no key material in `localStorage` (the raw-keypair wallet was deleted). |
 | B3 | PASS | `/wallet/connect` 200 for the linked base58 wallet (row in `wallets`); 403 `wallet_not_linked` for an unlinked address. |
 | B4 | PASS | Home total equals chain USDC + NVDAx at the live price ($501.3x = 400 USDC + 0.45 NVDAx). |
-| B5 | UNTESTED | Needs a second sign-in through Privy's modal in a visible browser. |
+| B5 | PASS | Hosted: Settings → Sign out (two taps) cleared the session and landed on Welcome; a fresh sign-in went through the email code (HS10). |
 | C1 | PASS | 500 USDC minted by the fork's mint authority (tx `bi7GDJh1…`); once-a-day lock shown. |
-| C2 | UNTESTED | No MoonPay key exists in the repo or env. With none, the app now says card deposits are not set up (it used to open MoonPay with a made-up key). |
+| C2 | BLOCKED | No MoonPay key exists in the repo or env. With none, the app now says card deposits are not set up (it used to open MoonPay with a made-up key). |
 | C3 | PASS (unit) | Unsigned or badly-signed webhooks 401, stale ones refused, off with no key; covered by `moonpay.test.ts`. No live MoonPay event without a key. |
 | D1 | PASS | ApproveChecked `UuhSDqyn…` signed by the user's Privy wallet: delegate `CZqa…`, 600 USDC. |
 | D2 | PASS | `/delegation` and `/limits` read the delegate and allowance from the chain. |
 | D3 | PASS | Safety LIVE with cap used and days left; Home chip ARMED. |
-| D4 | UNTESTED | Cancelling Privy's signing sheet needs the sheet on screen (Browser pane hidden this run). |
+| D4 | PASS | Hosted: closing Privy's sheet under Stop all trading leaves all six delegations on chain and Safety LIVE; after the fix the app says "You cancelled the signature, so nothing changed." (it showed Privy's "Failed to connect to wallet"). |
 | D5 | PASS | The grant screen's stepper is bounded; the server refuses 0, negative, non-numeric, past end date, and a signature not on chain. |
 | E1 | PASS | 11 xStocks with live Jupiter prices. |
 | E2 | PASS | `/xstock/NVDAx`: real quote (pay, expected, impact, slippage, route Whirlpool, minimum). |
@@ -140,15 +140,15 @@ Privy test account (Solana wallet `GiKwSk…sHJM`). Every on-chain step is a rea
 | E4 | PASS | "nvda" finds NVDAx; after the fix, Base's NVDAc no longer appears on Solana. |
 | F1 | PASS | Buys routed by Jupiter on the fork (`49oyfkjC…`, `2wyDC4mh…`). Re-run after the `place.ts` changes: a $10 buy filled (`5jKTeg8t…`). It went through the venue vault, and the receipt says so: the fork's Whirlpool snapshot has drifted from live mainnet, so Jupiter's route fails simulation with `InvalidTickArraySequence`. **Re-bootstrap the fork right before the demo** to get Jupiter-routed fills again. |
 | F2 | PASS | $180 over a $175 remainder refused; balance unchanged. Re-run: $150 → `daily_cap` "$90.00 is left"; $5,000 → `allowance` "440.00 USDC … is left". |
-| F3 | UNTESTED | Needs a revoke first (H1). The refusal (`no_permission` / `delegation_revoked`) is covered by unit tests. |
+| F3 | PASS | Hosted HS8: a buy after the stop → 409 `delegation_revoked`, nothing moved. |
 | F4 | PASS | Holdings show NVDAx units and average cost from the fills. |
 | F5 | PASS | Activity rows with Solana Explorer links. Push notifications need a device. |
 | G1 | PASS | Reference is the issuer's mark; off-hours widens slippage; no reference means hold. |
 | G2 | PASS | After the fixes: no trade while nothing was hired; once Momentum Scout was hired it bought NVDAx (`5BTLmiHK…`), booked and counted. |
 | G3 | PASS | `/agents/stop` at 01:48: nothing placed after the cooldown ended (0 trades by 01:59). `/agents/resume` at 02:00:10: Momentum Scout bought NVDAx at 02:00:35 (`4ssTkgNV…`). The app has no separate pause control; Safety's stop is the on-chain revoke (H1). |
-| H1 | UNTESTED | Revoke signing stalls while the Browser pane is hidden (Privy's iframe does not run). Chain still shows delegate `CZqa…`. |
-| H2 | UNTESTED | Follows H1. |
-| I1–I3 | UNTESTED | Withdrawal signing needs the Privy sheet on screen, as H1. |
+| H1 | PASS | Local second run and hosted HS7: Stop all trading → one signed Revoke; every USDC and xStock account reads delegate none; Safety STOPPED. |
+| H2 | PASS | Hosted HS8 (refused after stop) and HS9 (Resume re-approves all six accounts; Safety LIVE). |
+| I1–I3 | PASS | Local second run: allowlist add, 24h lock, withdrawal to an unlocked address, withdraw-everything. Hosted HS11: a pending address is refused in the app and by the server (409 `cooling_off`). |
 | J1 | PASS | Executor stopped: Home shows dashes and "Couldn't load", Markets says it can't reach xorr, Safety keeps the stop. Restarted: recovered unaided. |
 | J2 | PASS (unit) | `place.test.ts`: a throwing rules engine → `rules_unavailable`, no quote, no transfer. |
 | J3 | PASS (unit) | `place.test.ts`: a failed quote → `no_quote`, no broadcast mark, no transfer; order is quote → mark → spend. |
@@ -178,6 +178,37 @@ Privy test account (Solana wallet `GiKwSk…sHJM`). Every on-chain step is a rea
 21. **Over-allowance refusal was labelled `daily_cap` and quoted the whole grant's remaining allowance as today's:** it is now `allowance`, with its own sentence.
 22. **Chain proofs 3 and 4 used vitest's 5s default:** they make real network calls, so each now has an explicit 120s timeout.
 
+### Hosted run (HS) — 2026-09-19
+
+Against the hosted build: web https://xorr-solana.vercel.app, executor and mainnet fork on Railway. Fresh Privy test
+accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim was read back from the fork's RPC.
+
+| # | Status | Evidence |
+|---|---|---|
+| HS1 | PASS | Get started → goals → email code → Solana wallet `4Egw…jCDA` created and connected, no 403. |
+| HS2 | PASS | Faucet: chain shows 500 USDC and 0.5 SOL. |
+| HS3 | PASS | Grant: USDC delegate `ACikuh…` for 4,800, and a sell approval on each of the 5 xStocks; Home ARMED. |
+| HS4 | PASS | $25 NVDAx buy "Routed by Jupiter" (`63C9yaMJ…`): programs JUP6 + Whirlpool, err null; Activity row persisted. |
+| HS5 | PASS | User-signed sell of 0.0447 NVDAx for $9.91 (`3kkqYxhf…`): USDC 475 → 484.91, NVDAx 0.1126 → 0.0679. |
+| HS6 | PASS | Hired Momentum Scout, which bought MSFTx on its own through Jupiter (`5DzmPJhy…`). The agent record shows 1 trade (after the fix). |
+| HS7 | PASS | Stop: all six accounts read delegate none; Safety STOPPED. |
+| HS8 | PASS | A buy after the stop → 409 `delegation_revoked`. |
+| HS9 | PASS | Resume: all six accounts name `ACikuh…` again; Safety LIVE. |
+| HS10 | PASS | Sign out, then a fresh account (`6dCg…1vo6`): chose Aggressive; the fund screen shows no card button; faucet; grant (six delegations on chain); `/agents/risk-profile` active = aggressive. |
+| HS11 | PASS | Allowlist add → Pending, "usable from … in 24 h"; Send refuses ("No address is unlocked yet"); server `/withdrawal-addresses/check` → 409 `cooling_off`. |
+| HS12 | PASS | Recovery → Export private key opens Privy's own export window for the right wallet (the key was not revealed). |
+| HS14 | PASS | Cancel: see D4. |
+| HS13 | PASS | Screen audit (Home, xStocks, ticket, Portfolio, Activity, Safety, agent, Deposit, Explore, Send, Watchlist): no API response ≥ 400 after load. |
+
+Hosted fixes made during the run:
+- The fund screen offered a MoonPay card button with no MoonPay configured.
+- The Goals risk choice never reached the agent.
+- The agent traded on a 15-cent band from minutes of data and called it "the past month". It now needs 24h of observations and a band at least 1% wide.
+- The agent record counted none of its own entries.
+- The watchlist drew a dash for every xStock (it asked the crypto feed).
+- Markets and Search showed Base classes and Hyperliquid perps; they now open the xStocks market.
+- Movers (perps) is hidden.
+
 ### Still open
 
-B5, D4, F3, H1, H2 and I1–I3 each need Privy's signing sheet or sign-in modal on screen. The Browser pane was hidden for this whole run and Claude in Chrome was not connected, so Privy's iframe never ran. They are UNTESTED, not PASS.
+- C2 (a live MoonPay purchase) is BLOCKED: no MoonPay keys exist.

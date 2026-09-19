@@ -9,6 +9,7 @@ import { useCallback } from 'react';
 import { PublicKey, type Transaction } from '@solana/web3.js';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import { useAuth } from '@/auth/useAuth';
+import { CANCELLED, isUserCancel } from './walletError';
 import { broadcastSigned, prepareForSigning, solanaConnection, unsignedBytes, type Prepared } from './solanaTx';
 
 export type SolanaSigner = {
@@ -35,7 +36,11 @@ export function useSolanaSigner(): SolanaSigner {
       if (!address || !wallet) throw new Error('Your wallet is not ready yet. Give it a moment.');
       const conn = solanaConnection();
       const prepared = already ?? (await prepareForSigning(conn, tx, new PublicKey(address)));
-      const { signedTransaction } = await signTransaction({ transaction: unsignedBytes(tx), wallet });
+      const signed = await signTransaction({ transaction: unsignedBytes(tx), wallet }).catch((e: unknown) => {
+        // Privy reports a closed sheet as "Failed to connect to wallet"; every caller shows this message as it is.
+        throw isUserCancel(e) ? new Error(CANCELLED, { cause: e }) : e;
+      });
+      const { signedTransaction } = signed;
       return broadcastSigned(conn, signedTransaction, prepared);
     },
     [address, wallet, signTransaction],

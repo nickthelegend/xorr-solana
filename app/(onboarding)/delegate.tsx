@@ -46,11 +46,15 @@ import { isSolana } from '@/chain';
 const usd = (n: number) => `$${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
 
 
+/** Goals' drawdown answers (Steady / Balanced / Aggressive) as the executor's risk profiles, by position. */
+const RISK_PROFILE_FOR = ['conservative', 'balanced', 'aggressive'] as const;
+
 export default function GrantDelegation() {
   const router = useRouter();
   const goBack = useGoBack();
   const signedOut = useSignedOut();
   const cap = useStore((s) => s.cap);
+  const riskQ = useStore((s) => s.riskQ);
   const bumpCap = useStore((s) => s.bumpCap);
   const runFor = useStore((s) => s.runFor);
   /** Days the grant runs — on Solana the chain approves the daily cap for each of them (`src/wallet/solanaGrant.ts`). */
@@ -97,6 +101,13 @@ export default function GrantDelegation() {
       // Read it back from the chain rather than trusting what we just sent, and file it against
       // the address it was read for (`wallet/readDelegation.ts`).
       await readDelegationIntoStore();
+      /*
+       * The drawdown answer from Goals, now that there is a wallet to file it against (2026-09-19): it becomes the agents'
+       * risk profile — how early they enter, how much, how long they wait. It was kept on the phone and read by nothing,
+       * so every new user's agent traded as "balanced" whatever they chose. Failing to save it does not undo the grant;
+       * the profile can be set again from the agent screen.
+       */
+      await api.post('/agents/risk-profile', { profile: RISK_PROFILE_FOR[riskQ] ?? 'balanced' }).catch(() => undefined);
       // The draft portfolio is the Base build's sleeves of WETH, cbBTC and Ondo equities (2026-09-19). On Solana the
       // agent trades xStocks and its basket is set from the agent screens, so the grant lands on Home.
       router.replace(isSolana ? '/(tabs)' : '/proposal');

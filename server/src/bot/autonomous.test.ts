@@ -103,8 +103,34 @@ const FILL = {
 /** `n` readings spanning `low`..`high`, ending on `last` — the shape `price_observations` returns. */
 function readings(low: number, high: number, last: number, n = 8) {
   const span = Array.from({ length: n - 1 }, (_, i) => low + ((high - low) * i) / (n - 2));
-  return [...span, last].map((usd) => ({ usd: String(usd) }));
+  // Spread over three days, oldest first: a band needs a day of history (`MIN_SPAN_HOURS`).
+  const all = [...span, last];
+  return all.map((usd, i) => ({ usd: String(usd), at: new Date(Date.now() - (all.length - i) * 9 * 3_600_000) }));
 }
+
+describe('a band the agent reads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    queryMock.mockResolvedValue([]);
+    xStockPriceMock.mockResolvedValue(238);
+    referencePriceMock.mockResolvedValue(238);
+    readMintScaleMock.mockResolvedValue({ decimals: 8, multiplier: 1, pending: null });
+    earningsCalendarMock.mockResolvedValue(null);
+  });
+
+  it('is no band when the readings span less than a day', async () => {
+    const fresh = Array.from({ length: 8 }, (_, i) => ({ usd: String(200 + i * 5), at: new Date(Date.now() - (8 - i) * 60_000) }));
+    queryMock.mockImplementation(async (sql: string) => (sql.includes('price_observations') ? fresh : []));
+    expect(await evaluateBestSetup()).toBeNull();
+  });
+
+  it('is no band when it is narrower than one percent', async () => {
+    const flat = Array.from({ length: 8 }, (_, i) => ({ usd: String(499.3 + i * 0.02), at: new Date(Date.now() - (8 - i) * 9 * 3_600_000) }));
+    queryMock.mockImplementation(async (sql: string) => (sql.includes('price_observations') ? flat : []));
+    xStockPriceMock.mockResolvedValue(499.44);
+    expect(await evaluateBestSetup()).toBeNull();
+  });
+});
 
 describe('autonomous xStocks trading agent', () => {
   beforeEach(() => {

@@ -13,14 +13,26 @@ import {
   type Quote,
   type StockQuote,
 } from '@/data/marketData';
+import { isSolana } from '@/chain';
 import type { SpotQuote } from './quote';
 import { useLiveRead } from './useLiveRead';
+
+/**
+ * Whether the share snapshot (`/market/stocks`) prices `symbol`, rather than the crypto feed.
+ *
+ * `isStockSymbol` knows the Base shares (`NVDAc`). On Solana the snapshot answers with xStocks (`NVDAx`), which the
+ * crypto feed has never priced, so the watchlist asked the feed for them and drew a dash on every one (2026-09-19). The
+ * suffix is not added to `isStockSymbol` itself: the Base catalogue files `SPYx` under indices, and that is kept.
+ */
+export function sharePriced(symbol: string, solana: boolean = isSolana): boolean {
+  return isStockSymbol(symbol) || (solana && /^[A-Z]{1,6}x$/.test(symbol));
+}
 
 export type SpotPrice = { loading: true } | { loading: false; quote: SpotQuote | null };
 
 export function useSpotPrices(symbols: readonly string[]) {
-  const feedKey = symbols.filter((s) => !isStockSymbol(s)).join(',');
-  const hasShares = symbols.some((s) => isStockSymbol(s));
+  const feedKey = symbols.filter((s) => !sharePriced(s)).join(',');
+  const hasShares = symbols.some((s) => sharePriced(s));
 
   const feed = useLiveRead(
     () => (feedKey ? fetchQuotes(feedKey.split(',')) : Promise.resolve({} as Record<string, Quote>)),
@@ -33,7 +45,7 @@ export function useSpotPrices(symbols: readonly string[]) {
 
   /** A read still out, or one answering an earlier list, is loading — never "no price". */
   function priceOf(symbol: string): SpotPrice {
-    if (isStockSymbol(symbol)) {
+    if (sharePriced(symbol)) {
       if (shares.loading || !shares.data) return { loading: true };
       const row = shares.data[symbol];
       return { loading: false, quote: row?.price != null ? { price: row.price } : null };
