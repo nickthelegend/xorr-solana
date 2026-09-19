@@ -560,6 +560,8 @@ const SETTLEMENT_ADDRESS: Record<string, string> = {
  * the code — an endpoint this public should never answer with nothing at all.
  */
 market.get('/yield/supply', async (c) => {
+  // Solana (2026-09-19): no savings venue in this build. Said as an answer, not a 503 for a question asked of Aave on Base.
+  if (ON_SOLANA) return c.json({ availableHere: false, reason: 'This build has no savings venue on Solana.' });
   try {
     return c.json(await usdcSupplyYield());
   } catch (e) {
