@@ -78,9 +78,28 @@ async function rpc(url, method, params = []) {
   return body.result;
 }
 
+/*
+ * A Solana build (2026-09-19): the executor reports a `solana-*` cluster. It names the cluster's PUBLIC RPC
+ * (`XORR_WEB_CHAIN_RPC`, required — a Solana bundle without one reads 127.0.0.1:8899 in every visitor's browser), which
+ * must answer as a Solana validator. There is no contract to pin: the permission is an SPL delegation.
+ */
+const SOLANA = String(health.chain).startsWith('solana-');
+if (SOLANA) {
+  const rpcUrl = process.env.XORR_WEB_CHAIN_RPC;
+  if (!rpcUrl) refuse(`${API} settles on ${health.chain}; set XORR_WEB_CHAIN_RPC to that cluster's public RPC.`);
+  if (local(rpcUrl)) refuse(`${rpcUrl} is not reachable from a visitor's browser.`);
+  const version = await rpc(rpcUrl, 'getVersion');
+  if (!version?.['solana-core']) refuse(`${rpcUrl} does not answer as a Solana validator.`);
+  console.log(`  Solana RPC ${rpcUrl} answers as solana-core ${version['solana-core']}`);
+}
+
 /* A fork build names the fork's RPC, and the RPC has to be the fork. */
-const FORK = health.chain === 'base-fork' || health.chain === 'localnet';
-const CHAIN_RPC = FORK ? process.env.XORR_WEB_CHAIN_RPC ?? envValue(FORK_ENV_FILE, 'EXPO_PUBLIC_CHAIN_RPC') : undefined;
+const FORK = !SOLANA && (health.chain === 'base-fork' || health.chain === 'localnet');
+const CHAIN_RPC = SOLANA
+  ? process.env.XORR_WEB_CHAIN_RPC
+  : FORK
+    ? process.env.XORR_WEB_CHAIN_RPC ?? envValue(FORK_ENV_FILE, 'EXPO_PUBLIC_CHAIN_RPC')
+    : undefined;
 if (FORK) {
   if (!CHAIN_RPC) refuse(`${API} settles on ${health.chain}, and neither XORR_WEB_CHAIN_RPC nor ${FORK_ENV_FILE} names its RPC.`);
   if (local(CHAIN_RPC)) refuse(`${CHAIN_RPC} is not reachable from a visitor's browser.`);
@@ -104,7 +123,8 @@ if (FORK) {
  * Sepolia's when this was written (2026-09-14), and a pin taken from it would have refused every grant.
  */
 const PUBLIC_RPC = { base: 'https://mainnet.base.org', 'base-sepolia': 'https://sepolia.base.org' };
-const PIN = String(health.delegation ?? '').toLowerCase();
+const PIN = SOLANA ? undefined : String(health.delegation ?? '').toLowerCase();
+if (!SOLANA) {
 if (!/^0x[0-9a-f]{40}$/.test(PIN)) refuse(`${API} does not report its delegation contract, so there is nothing to pin.`);
 const RECORD = (
   process.env.XORR_WEB_DELEGATION ?? (FORK ? envValue(FORK_ENV_FILE, 'EXPO_PUBLIC_DELEGATION_ADDRESS') : undefined)
@@ -117,6 +137,7 @@ if (!code || code === '0x') refuse(`there is no contract at ${PIN} on ${health.c
 console.log(
   `  delegation contract ${PIN} pinned: ${RECORD ? 'the executor and the deployment record agree' : 'as the executor reports it (no deployment record to compare)'}, and the chain holds its code`,
 );
+}
 
 if (!existsSync(ENV_FILE)) refuse(`there is no ${ENV_FILE} to build from. Copy .env.example and fill it in.`);
 
@@ -156,12 +177,13 @@ const original = readFileSync(ENV_FILE, 'utf8');
 try {
   const patched = original
     .split('\n')
-    .filter((l) => !/^EXPO_PUBLIC_(API_URL|XORR_CHAIN|CHAIN_RPC|PINNED_DELEGATION|APP_COMMIT|SERVER_MATCH)=/.test(l))
+    .filter((l) => !/^EXPO_PUBLIC_(API_URL|XORR_CHAIN|CHAIN_RPC|SOLANA_RPC|PINNED_DELEGATION|APP_COMMIT|SERVER_MATCH)=/.test(l))
     .concat([
       `EXPO_PUBLIC_API_URL=${API}`,
       `EXPO_PUBLIC_XORR_CHAIN=${health.chain}`,
       ...(CHAIN_RPC ? [`EXPO_PUBLIC_CHAIN_RPC=${CHAIN_RPC}`] : []),
-      `EXPO_PUBLIC_PINNED_DELEGATION=${PIN}`,
+      ...(SOLANA && CHAIN_RPC ? [`EXPO_PUBLIC_SOLANA_RPC=${CHAIN_RPC}`] : []),
+      ...(PIN ? [`EXPO_PUBLIC_PINNED_DELEGATION=${PIN}`] : []),
       ...(APP_COMMIT ? [`EXPO_PUBLIC_APP_COMMIT=${APP_COMMIT}`] : []),
       ...(SERVER_MATCH ? [`EXPO_PUBLIC_SERVER_MATCH=${SERVER_MATCH}`] : []),
       '',
@@ -205,7 +227,7 @@ const js = readFileSync(bundle, 'utf8');
 const problems = [];
 if (!js.includes(API)) problems.push(`the bundle does not contain ${API}`);
 if (CHAIN_RPC && !js.includes(CHAIN_RPC)) problems.push(`the bundle does not contain the fork RPC ${CHAIN_RPC}`);
-if (!js.includes(PIN)) problems.push(`the bundle does not contain the pinned delegation contract ${PIN}`);
+if (PIN && !js.includes(PIN)) problems.push(`the bundle does not contain the pinned delegation contract ${PIN}`);
 if (APP_COMMIT && !js.includes(APP_COMMIT)) problems.push(`the bundle does not name its commit ${APP_COMMIT}`);
 if (SERVER_MATCH && !js.includes(SERVER_MATCH)) problems.push(`the bundle does not carry the matching executor commit ${SERVER_MATCH}`);
 

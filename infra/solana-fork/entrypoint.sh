@@ -1,40 +1,29 @@
 #!/bin/bash
 #
-# The Solana mainnet fork behind the xorr-solana fork executor (PLAN.md §11).
+# Stand up the fork with the repository's bootstrap, then serve it on $PORT through the RPC/websocket proxy.
 #
-# Starts solana-test-validator cloning real Solana mainnet state:
-# - Circle USDC mint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
-# - Jupiter v6 program: JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
-# - Token-2022 program: TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
-# - xStocks mints (Backed Finance): NVDAx, TSLAx, AAPLx, MSFTx
+# The keys are required, not derived: on a fork anyone can reach, a delegate or mint authority computed from a public
+# seed would let a stranger move every user's delegated USDC (server/src/solana/keys.ts). The same four secrets are set
+# on the executor service, so the payer that mints test USDC here is the payer the executor's faucet signs with.
 
 set -euo pipefail
 
+for k in XORR_KEY_PAYER XORR_KEY_DELEGATE XORR_KEY_VENUE_VAULT XORR_KEY_DEV_OWNER; do
+  if [ -z "${!k:-}" ]; then
+    echo "Refusing to start: $k is not set. Generate a keypair and set it on this service and the executor." >&2
+    exit 1
+  fi
+done
+
+export XORR_CHAIN=solana-fork
+export FORK_RPC=http://127.0.0.1:8899
+export SOLANA_RPC_URL=$FORK_RPC
 DATA="${FORK_DATA_DIR:-/data}"
-LEDGER="$DATA/test-ledger"
-PORT="${PORT:-8899}"
-RPC_URL="${MAINNET_RPC:-https://api.mainnet-beta.solana.com}"
-
 mkdir -p "$DATA"
+cd "$DATA"
 
-echo "=========================================================="
-echo " Starting Solana Mainnet Fork Validator"
-echo " Upstream RPC: $RPC_URL"
-echo " Listening on: http://0.0.0.0:$PORT"
-echo " Ledger dir:   $LEDGER"
-echo "=========================================================="
+echo "Bootstrapping the fork (upstream ${MAINNET_RPC:-https://api.mainnet-beta.solana.com})..."
+npx --prefix /app/server tsx /app/server/src/solana/fork-bootstrap.ts
 
-exec solana-test-validator \
-  --url "$RPC_URL" \
-  --ledger "$LEDGER" \
-  --rpc-port "$PORT" \
-  --bind-address 0.0.0.0 \
-  --clone EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v \
-  --clone-upgradeable-program JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4 \
-  --clone-upgradeable-program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb \
-  --clone Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh \
-  --clone XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB \
-  --clone XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp \
-  --clone XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX \
-  --reset \
-  --quiet
+echo "Serving the fork on :${PORT:-8080}"
+exec node /app/rpc-proxy.mjs
