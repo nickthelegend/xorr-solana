@@ -37,7 +37,6 @@ import {
 } from '@/ui';
 import { quantity } from '@/format';
 import { repos } from '@/data';
-import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import {
@@ -89,7 +88,8 @@ export default function Strategies() {
    * strategy is live, and the chain permission it spends under is revoked, so nothing of it can run. Two screens, two
    * answers to "is anything trading?", and the one a person opens to check is this one.
    */
-  const stopped = useAsync(() => system.agentsStopped(), []);
+  const permission = useAsync(() => repos.wallet.delegation(), []);
+  const stopped = permission.data?.revoked === true;
 
   const all = data ?? [];
   const live = all.filter((s) => s.state === 'live' || s.state === 'watch');
@@ -136,7 +136,7 @@ export default function Strategies() {
         <ScrollView refreshControl={refresh.control} showsVerticalScrollIndicator={false}>
           {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
           {refresh.notice}
-          {stopped.data?.stopped ? (
+          {stopped ? (
             <NoteStrip kind="blocked" style={{ marginBottom: space.s10 }}>
               Trading is stopped: the permission is revoked on-chain, so nothing here runs until you resume it in
               Safety.
