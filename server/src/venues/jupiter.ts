@@ -93,9 +93,15 @@ export type JupiterSwapResult = {
   venue: FillVenue;
 };
 
+/*
+ * Jupiter's own endpoints only (2026-09-19). The fallback was `public.jupiterapi.com`, a third party's mirror that adds
+ * its own 20 bps platform fee to every quote and then refuses to build the swap without a fee account of ours — so any
+ * moment `api.jup.ag` was busy, a buy was priced 0.2% worse than shown and then fell back to the venue vault.
+ * `lite-api.jup.ag` is Jupiter's free tier: the same routes, no fee.
+ */
 const JUPITER_APIS = [
   'https://api.jup.ag/swap/v1',
-  'https://public.jupiterapi.com',
+  'https://lite-api.jup.ag/swap/v1',
 ];
 
 /**
@@ -358,6 +364,22 @@ export async function swap(params: {
   const routeSigner = userSigner ?? vaultKeypair;
   const userOutAtaForRoute = ataFor(userPk, outputMintPk, outputProg);
   try {
+    /*
+     * The account the route delivers into has to exist first (2026-09-19). Jupiter sends the output straight to the
+     * user's own token account and does not create it, so a user's FIRST buy of a token failed simulation and fell back
+     * to the vault — every new user's first xStock was a vault fill, and the proof only passed because its wallet was
+     * pre-funded with NVDAx. Created idempotently by the executor's fee payer, owned by the user.
+     */
+    if (!(await conn.getAccountInfo(userOutAtaForRoute, 'confirmed'))) {
+      await sendAndConfirmTransaction(
+        conn,
+        new Transaction().add(
+          createAssociatedTokenAccountIdempotentInstruction(feePayer.publicKey, userOutAtaForRoute, userPk, outputMintPk, outputProg),
+        ),
+        [feePayer],
+        { commitment: 'confirmed' },
+      );
+    }
     const routed = await routeThroughJupiter({
       quoteResponse,
       signer: routeSigner,
@@ -381,9 +403,12 @@ export async function swap(params: {
         }`,
       );
     }
+    // The program's own lines, so why a route failed is never cut down to "Simulation failed".
+    const logs = (err as { logs?: string[] }).logs ?? (err as { transactionLogs?: string[] }).transactionLogs ?? [];
     console.warn(
       `Jupiter route unavailable (${(err as Error).message}). Settling through the venue vault ` +
-        'at the quoted price — this fill is NOT a Jupiter swap.',
+        'at the quoted price — this fill is NOT a Jupiter swap.' +
+        (logs.length ? `\n  program logs:\n    ${logs.slice(-12).join('\n    ')}` : ''),
     );
   }
 

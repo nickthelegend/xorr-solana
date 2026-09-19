@@ -12,6 +12,7 @@ import { PrivyProvider as Provider } from '@privy-io/expo';
 // PrivyElements ships from the /ui subpath, not the package root.
 import { PrivyElements } from '@privy-io/expo/ui';
 import { colors } from '@/ui';
+import { isSolana } from '@/chain';
 
 const APP_ID = process.env.EXPO_PUBLIC_PRIVY_APP_ID;
 
@@ -24,7 +25,16 @@ if (!APP_ID) {
 
 export function AppPrivyProvider({ children }: { children: React.ReactNode }) {
   return (
-    <Provider appId={APP_ID!} config={{ embedded: { ethereum: { createOnLogin: 'users-without-wallets' } } }}>
+    <Provider
+      appId={APP_ID!}
+      config={{
+        // One wallet, on the chain this build settles on (2026-09-19): a Solana build makes the Solana one.
+        embedded: {
+          ethereum: { createOnLogin: isSolana ? 'off' : 'users-without-wallets' },
+          solana: { createOnLogin: isSolana ? 'users-without-wallets' : 'off' },
+        },
+      }}
+    >
       {children}
       {/* Privy's own login sheet, themed to match the app's true-black surface. */}
       <PrivyElements config={{ appearance: { colorScheme: 'dark', accentColor: colors.ink } }} />

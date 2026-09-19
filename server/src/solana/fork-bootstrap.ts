@@ -189,6 +189,14 @@ export interface StartValidatorOptions {
    * validator down even when its own setup times out mid-boot needs the handle this early.
    */
   onSpawn?: (child: ChildProcess) => void;
+  /**
+   * Leave the validator running after this process exits — the bootstrap CLI, which the README tells a judge to run and
+   * then use (2026-09-19). Without it the kill-on-exit backstop below took the fork down the moment the bootstrap
+   * printed "complete": every command after it found nothing on the port. Spawned detached and unreferenced, with no
+   * backstop; stop it with `pkill -f "solana-test-validator.*--rpc-port <port>"`. Callers that manage the lifecycle
+   * themselves (the chain suite) leave this off and keep the backstop.
+   */
+  persist?: boolean;
 }
 
 /**
@@ -253,7 +261,7 @@ export async function startValidator(
     ],
     {
       stdio: ['ignore', logFd, logFd],
-      detached: false,
+      detached: opts.persist === true,
     },
   );
   fs.closeSync(logFd);
@@ -264,9 +272,11 @@ export async function startValidator(
 
   // A backstop for a parent that exits without tearing the validator down. It cannot cover
   // SIGKILL of the parent, which is why callers still stop it themselves.
-  const killOnExit = () => child.kill('SIGKILL');
-  process.once('exit', killOnExit);
-  child.once('exit', () => process.removeListener('exit', killOnExit));
+  if (!opts.persist) {
+    const killOnExit = () => child.kill('SIGKILL');
+    process.once('exit', killOnExit);
+    child.once('exit', () => process.removeListener('exit', killOnExit));
+  }
   opts.onSpawn?.(child);
 
   // Poll for readiness
@@ -279,6 +289,8 @@ export async function startValidator(
     }
     if (await isValidatorRunning(rpcUrl)) {
       console.log('Validator is ready!');
+      // Ours no longer: this process may exit without waiting on it, and the validator outlives it.
+      if (opts.persist) child.unref();
       return child;
     }
   }
@@ -308,7 +320,8 @@ export async function bootstrapFork(customDevOwner?: string) {
   const vault = venueVaultKeypair();
 
   const fixturesDir = path.resolve(process.cwd(), 'scratch', 'fork-fixtures');
-  await startValidator(fixturesDir, payer);
+  // The fork has to outlive this script: everything the README does next talks to it.
+  await startValidator(fixturesDir, payer, { persist: true });
 
   const conn = new Connection(RPC, 'confirmed');
 

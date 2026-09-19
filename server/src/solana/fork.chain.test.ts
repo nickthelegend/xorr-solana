@@ -343,7 +343,8 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
       expect(exitOutcome.side).toBe('sell');
       expect(exitOutcome.signature).toBeTruthy();
     }
-  });
+    // Real Jupiter quotes and several confirmed transactions: seconds each, well past vitest's 5s default.
+  }, 120_000);
 
   it('Proof 4: Real USDC -> NVDAx BUY and SELL back on the fork', async () => {
     // Grant $1,000 delegation
@@ -408,5 +409,6 @@ d('Solana Mainnet Fork On-Chain Proofs', () => {
     console.log(`\n SELL PROOF SUCCESS:`);
     console.log(`  Sold:    ${sellOutcome.filledUnits.toFixed(6)} NVDAx for ~$${sellOutcome.usd.toFixed(2)} USDC`);
     console.log(`  Tx Sig:  ${sellOutcome.signature}\n`);
-  });
+    // Real Jupiter quotes and several confirmed transactions: seconds each, well past vitest's 5s default.
+  }, 120_000);
 });

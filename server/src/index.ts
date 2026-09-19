@@ -1,4 +1,7 @@
 import { serve } from '@hono/node-server';
+import { ON_SOLANA, activeClusterKey } from './solana/clusters.js';
+import { connection as solanaConnection } from './solana/connection.js';
+import { delegateKeypair } from './solana/keys.js';
 import { Hono } from 'hono';
 import 'dotenv/config';
 import { ZodError } from 'zod';
@@ -223,9 +226,15 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 console.log(`xorr executor on :${port}`);
 console.log(`  db      ${withoutPassword(DATABASE_URL)}`);
-console.log(`  chain    ${CHAIN_KEY} ${rpcUrl}`);
-console.log(`  contract ${DELEGATION_ADDRESS}`);
-console.log(`  delegate ${delegatePublicKey}`);
+if (ON_SOLANA) {
+  // The EVM lines described a chain this process is not on (2026-09-19): the cluster and the SPL delegate key.
+  console.log(`  chain    ${activeClusterKey()} ${solanaConnection.rpcEndpoint}`);
+  console.log(`  delegate ${delegateKeypair().publicKey.toBase58()} (SPL)`);
+} else {
+  console.log(`  chain    ${CHAIN_KEY} ${rpcUrl}`);
+  console.log(`  contract ${DELEGATION_ADDRESS}`);
+  console.log(`  delegate ${delegatePublicKey}`);
+}
 console.log('  auth     Privy (every route except /health)');
 
 /*

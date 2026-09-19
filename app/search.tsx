@@ -129,7 +129,9 @@ export default function Search() {
       href: `/xstock/${r.symbol}`,
     }));
 
-    const all = [...fromClasses, ...fromXStocks];
+    // On Solana the Stocks class IS the xStocks; listed once, as the rows that open their ticket.
+    const xSymbols = new Set(fromXStocks.map((h) => h.symbol));
+    const all = [...fromClasses.filter((h) => !xSymbols.has(h.symbol)), ...fromXStocks];
     if (q.trim()) return fuzzyRank(all, q);
 
     /*

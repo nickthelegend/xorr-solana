@@ -6,7 +6,7 @@
  * which a reader takes for "not applicable". "We don't know who can freeze this" and "nobody can
  * freeze this" are different facts about a security.
  */
-import { API_BASE } from './apiBase';
+import { sessionFetch } from './sessionFetch';
 import type { Custodian } from './backing';
 
 export type MultiplierPoint = { multiplier: number; effectiveAt: string; observedAt: string };
@@ -49,7 +49,7 @@ export async function fetchBackingDetail(
   signal?: AbortSignal,
 ): Promise<BackingDetail | null> {
   try {
-    const res = await fetch(`${API_BASE}/xstocks/${encodeURIComponent(symbol)}/backing/detail`, { signal });
+    const res = await sessionFetch(`/xstocks/${encodeURIComponent(symbol)}/backing/detail`, { signal });
     if (!res.ok) return null;
     const body = (await res.json()) as BackingDetail;
     return body?.symbol ? body : null;

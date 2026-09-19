@@ -10,6 +10,7 @@
  */
 import { PrivyClient, type User } from '@privy-io/server-auth';
 import 'dotenv/config';
+import { ON_SOLANA } from '../solana/clusters.js';
 
 const APP_ID = process.env.PRIVY_APP_ID;
 const APP_SECRET = process.env.PRIVY_APP_SECRET;
@@ -28,6 +29,8 @@ export type LinkedWallet = {
   address: string;
   /** Privy's own embedded wallet, as opposed to one the user brought and linked. */
   embedded: boolean;
+  /** Which chain family the wallet is on. */
+  chain: 'ethereum' | 'solana';
 };
 
 export type AuthedUser = {
@@ -84,8 +87,14 @@ function walletsOf(user: User | null): LinkedWallet[] | undefined {
   if (!user) return undefined;
   return (user.linkedAccounts ?? []).flatMap((a) => {
     const w = a as { type?: string; address?: unknown; chainType?: string; walletClientType?: string };
-    return w.type === 'wallet' && w.chainType === 'ethereum' && typeof w.address === 'string'
-      ? [{ address: w.address, embedded: w.walletClientType === 'privy' }]
+    /*
+     * The wallets on the chain this executor settles on (2026-09-19): a Solana executor lists the account's Solana
+     * wallets — Privy's embedded one first among them — and an EVM executor its Ethereum ones, as it always did. An
+     * account can hold both; the other family's addresses mean nothing to this executor and are never bound.
+     */
+    const family = ON_SOLANA ? 'solana' : 'ethereum';
+    return w.type === 'wallet' && w.chainType === family && typeof w.address === 'string'
+      ? [{ address: w.address, embedded: w.walletClientType === 'privy', chain: family }]
       : [];
   });
 }

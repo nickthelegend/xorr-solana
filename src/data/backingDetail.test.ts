@@ -3,6 +3,10 @@
  * appears without its age. These cover the wording helpers that carry both.
  */
 import { describe, expect, it, afterEach, vi } from 'vitest';
+// The session and its token are the app's; what is under test is how each status reads.
+vi.mock('./sessionFetch', () => ({
+  sessionFetch: (path: string, init?: RequestInit) => fetch(`http://executor.test${path}`, init),
+}));
 import { attestationAge, NO_RECORD, fetchBackingDetail } from './backingDetail';
 
 describe('attestation age', () => {

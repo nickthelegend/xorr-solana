@@ -19,6 +19,16 @@ import { requireUser } from '../auth/middleware.js';
 import { xStockCatalog, xStockSectors, type XStockCatalogRow } from '../venues/xstocks-catalog.js';
 import { xStockQuote, DEFAULT_SLIPPAGE_BPS } from '../venues/xstocks-quote.js';
 import { UnpricedError } from '../venues/jupiter.js';
+import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { requireWallet } from './wallet-context.js';
+import { guardAndSpend } from '../executor/place.js';
+import { applyFill } from '../positions/index.js';
+import { tx } from '../db/index.js';
+import { append } from '../audit/log.js';
+import { notifyEntry } from '../notifications/alerts.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { explorerTx } from '../solana/connection.js';
 
 export const xstockRoutes = new Hono();
 
@@ -101,4 +111,77 @@ xstockRoutes.get('/market/xstocks/quote', async (c) => {
     }
     throw e;
   }
+});
+
+
+/**
+ * Buy an xStock from the phone (2026-09-19).
+ *
+ * The one path that can spend is `guardAndSpend`: the owner's recorded permission (cap, end date, not revoked), the
+ * rules engine, the on-chain delegation, the issuer's transfer gates, a live quote — and only then the delegate moves
+ * the owner's USDC and Jupiter routes it. This route adds nothing that can spend; it is the door to that path the phone
+ * never had, so an xStock could be bought only by the agent. What it adds is what a fill needs afterwards, exactly as the
+ * agent's own fills get it: the position booked (attributed to the person), the trail, and the notification.
+ *
+ * Idempotent by the request's `Idempotency-Key`: `guardAndSpend` marks the key before its first broadcast, so a retry
+ * after a lost answer replays this one instead of buying again.
+ */
+const BuyInput = z.object({ symbol: z.string().min(1).max(20), usd: z.number().positive().max(100_000) }).strict();
+
+xstockRoutes.post('/xstocks/buy', async (c) => {
+  if (!ON_SOLANA) return c.json({ error: 'not_solana', message: 'xStocks are bought on a Solana executor.' }, 400);
+  const body = BuyInput.parse(await c.req.json());
+  const w = await requireWallet(c);
+  const outcome = await guardAndSpend({ walletId: w.id, ownerPubkey: w.address, symbol: body.symbol, usd: body.usd, side: 'buy' });
+  if (!outcome.placed) {
+    return c.json({ status: 'blocked', reason: outcome.reason, message: outcome.detail }, 409);
+  }
+
+  // Booked, so Holdings and P&L know about it. Not fatal: the money has moved, and a bookkeeping failure is logged.
+  const orderId = randomUUID();
+  await tx((client) =>
+    applyFill(client, {
+      walletId: w.id,
+      symbol: outcome.symbol,
+      units: outcome.filledUnits,
+      usd: outcome.usd,
+      attribution: { source: 'manual', id: orderId, label: 'You' },
+    }),
+  ).catch((e) => log.error('[xstocks/buy] failed to book the fill:', e));
+
+  const venue = outcome.venue === 'jupiter-route' ? 'Jupiter' : 'the venue vault';
+  await append({
+    walletId: w.id,
+    agent: 'You',
+    action: `Bought ${outcome.symbol}`,
+    detail: `${outcome.filledUnits.toFixed(6)} ${outcome.symbol} at $${outcome.fillPrice.toFixed(2)} through ${venue}.`,
+    amount: `$${outcome.usd.toFixed(2)}`,
+    kind: 'trade',
+    signature: outcome.signature,
+    payload: { orderId, venue: outcome.venue, slot: outcome.slot },
+  }).catch((e) => log.error('[xstocks/buy] failed to write the audit row:', e));
+
+  await notifyEntry({
+    walletId: w.id,
+    symbol: outcome.symbol,
+    strategyKind: 'manual',
+    notionalUsd: outcome.usd,
+    units: outcome.filledUnits,
+    price: outcome.fillPrice,
+    signature: outcome.signature,
+    agentName: 'You',
+  }).catch((e) => log.error('[xstocks/buy] failed to notify:', e));
+
+  return c.json({
+    status: 'filled',
+    orderId,
+    symbol: outcome.symbol,
+    usd: outcome.usd,
+    units: outcome.filledUnits,
+    price: outcome.fillPrice,
+    venue: outcome.venue,
+    signature: outcome.signature,
+    slot: outcome.slot,
+    explorer: explorerTx(outcome.signature),
+  });
 });

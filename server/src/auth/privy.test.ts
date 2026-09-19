@@ -73,7 +73,7 @@ describe('the account record', () => {
   it('is never kept when Privy could not be asked', async () => {
     h.getUser.mockRejectedValueOnce(new Error('Privy 503')).mockResolvedValue(account(embedded));
     expect((await verifyToken('Bearer owner')).wallets).toBeUndefined();
-    expect((await verifyToken('Bearer owner')).wallets).toEqual([{ address: embedded.address, embedded: true }]);
+    expect((await verifyToken('Bearer owner')).wallets).toEqual([{ address: embedded.address, embedded: true, chain: 'ethereum' }]);
     expect(h.getUser).toHaveBeenCalledTimes(2);
   });
 
@@ -91,8 +91,8 @@ describe('the account record', () => {
     h.getUser.mockResolvedValueOnce(account(embedded)).mockResolvedValue(account(embedded, linkedLater));
     expect((await verifyToken('Bearer owner')).wallets).toHaveLength(1);
     expect(await freshWallets('did:privy:owner')).toEqual([
-      { address: embedded.address, embedded: true },
-      { address: linkedLater.address, embedded: false },
+      { address: embedded.address, embedded: true, chain: 'ethereum' },
+      { address: linkedLater.address, embedded: false, chain: 'ethereum' },
     ]);
     expect((await verifyToken('Bearer owner')).wallets).toHaveLength(2);
     expect(h.getUser).toHaveBeenCalledTimes(2);

@@ -48,7 +48,7 @@ import { errorText } from '@/data/apiError';
 import { faucetStatus, requestFaucet, walletFunds, type FaucetOutcome, type WalletFunds } from '@/data/deposit';
 import { useIntentKeys } from '@/data/useIntentKeys';
 
-import { openMoonPayBuy } from '@/deposit/moonpay';
+import { fetchMoonPayConfig, openMoonPayBuy } from '@/deposit/moonpay';
 
 /** Often enough to see a deposit land while you wait for it. Each read is two balance calls against the executor's node. */
 const POLL_MS = 5_000;
@@ -79,6 +79,9 @@ export default function Deposit() {
   const address = useStore((s) => s.wallet)?.address ?? auth.address;
   const funds = usePoll(walletFunds, POLL_MS);
   const faucet = useAsync(() => faucetStatus(), []);
+  // Whether card deposits are set up on this executor at all: with no MoonPay key it answers 503, and the button would
+  // only open a checkout that cannot work.
+  const moonPay = useAsync(() => fetchMoonPayConfig(), []);
   const now = useNow();
   const [copied, setCopied] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -185,12 +188,18 @@ export default function Deposit() {
             </Text>
             {address ? (
               <View style={{ marginTop: space.s12, gap: space.s10 }}>
-                <Button
-                  label="Buy with Card · MoonPay Sandbox"
-                  variant="secondary"
-                  loading={openingMoonPay}
-                  onPress={buyWithMoonPay}
-                />
+                {moonPay.data?.configured ? (
+                  <Button
+                    label="Buy with Card · MoonPay Sandbox"
+                    variant="secondary"
+                    loading={openingMoonPay}
+                    onPress={buyWithMoonPay}
+                  />
+                ) : moonPay.data || moonPay.error ? (
+                  <Text variant="footnote" color={colors.ink50} align="center">
+                    {moonPay.data ? moonPay.data.detail : errorText(moonPay.error)}
+                  </Text>
+                ) : null}
                 {moonPayError ? (
                   <Text variant="footnote" color={colors.down} align="center">
                     {moonPayError}

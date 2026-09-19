@@ -18,7 +18,7 @@
  * refused before anything is signed.
  */
 import { useCallback, useState } from 'react';
-import type { Address, Hex } from 'viem';
+import { parseUnits, type Address, type Hex } from 'viem';
 import { PublicKey } from '@solana/web3.js';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { isSolana } from '@/chain';
@@ -27,7 +27,8 @@ import { transferCall } from './transfer';
 import { humanWalletError } from './walletError';
 import { ApiError, errorText } from '@/data/apiError';
 import { withdrawals } from '@/data/withdrawals';
-import { getOrCreateSolanaKeypair, sendSolanaSplTransfer } from './solanaWallet';
+import { useSolanaSigner } from './solanaSigner';
+import { buildSplTransfer, solanaConnection } from './solanaTx';
 
 export class NotAllowlisted extends Error {
   constructor(detail = 'That address is not on your allowlist.') {
@@ -49,6 +50,7 @@ export class StillCoolingOff extends Error {
 
 export function useWithdraw() {
   const { sendTransaction } = useGrantDelegation();
+  const solanaSigner = useSolanaSigner();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [txHash, setTxHash] = useState<string>();
@@ -93,16 +95,21 @@ export function useWithdraw() {
 
         let hash: string;
         if (isSolanaAddress(entry.address) || isSolana) {
-          const signer = await getOrCreateSolanaKeypair();
-          const mint = new PublicKey(token.address);
-          const destination = new PublicKey(entry.address);
-          const rawAmount = BigInt(Math.round(Number(amount) * 10 ** token.decimals));
-          hash = await sendSolanaSplTransfer({
-            signer,
-            mint,
-            destination,
-            amountRaw: rawAmount,
+          /*
+           * The OWNER's Privy wallet signs (2026-09-19). This signed with a keypair the app generated and kept in
+           * localStorage — not the wallet the executor knew, and a raw secret key in the browser. The amount is parsed
+           * from the typed string in the token's own decimals, never through a float.
+           */
+          if (!solanaSigner.address) throw new Error('Your wallet is not ready yet. Give it a moment.');
+          const tx = await buildSplTransfer({
+            conn: solanaConnection(),
+            owner: new PublicKey(solanaSigner.address),
+            mint: new PublicKey(token.address),
+            destination: new PublicKey(entry.address),
+            amountRaw: parseUnits(amount, token.decimals),
+            decimals: token.decimals,
           });
+          hash = await solanaSigner.signAndSend(tx);
         } else {
           // In the token's own decimals, from the typed string — never through a float.
           const call = transferCall(token, entry.address as Address, amount);
@@ -130,7 +137,7 @@ export function useWithdraw() {
         setBusy(false);
       }
     },
-    [sendTransaction],
+    [sendTransaction, solanaSigner],
   );
 
   return { withdraw, busy, error, txHash };

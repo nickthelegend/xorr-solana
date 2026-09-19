@@ -1,6 +1,10 @@
 import pg from 'pg';
 import 'dotenv/config';
-import { CHAIN_KEY } from '../evm/chains.js';
+import { CHAIN_KEY as EVM_CHAIN_KEY } from '../evm/chains.js';
+import { ON_SOLANA, activeClusterKey } from '../solana/clusters.js';
+
+/** The chain every row is scoped to: the Solana cluster on a Solana executor (2026-09-19), the EVM chain otherwise. */
+const CHAIN_KEY = ON_SOLANA ? activeClusterKey() : EVM_CHAIN_KEY;
 
 const { Pool } = pg;
 

@@ -39,7 +39,11 @@ import {
   type Offer,
 } from '../evm/faucet.js';
 
-import { isSolanaCluster, getClusterConfig } from '../solana/clusters.js';
+import { isSolanaCluster, getClusterConfig, ON_SOLANA, activeClusterKey, DEFAULT_MINTS } from '../solana/clusters.js';
+import { CURRENT_FACTS } from '../solana/money.js';
+import { mintTokens } from '../solana/faucet.js';
+import { payerKeypair } from '../solana/keys.js';
+import { explorerTx as solanaExplorerTx } from '../solana/connection.js';
 import { readSolanaBalances } from '../solana/balances.js';
 
 export const faucetRoutes = new Hono();
@@ -134,6 +138,7 @@ function offerView(offer: FaucetOffer) {
 }
 
 export async function faucetStatus(w: WalletRow | undefined, now = Date.now()): Promise<FaucetResponse> {
+  if (ON_SOLANA) return solanaFaucetStatus(w, now);
   const [offer, last] = await Promise.all([readFaucetOffer(), w ? lastClaimAt(w.id) : null]);
   const nextAt = last !== null && now - last < CLAIM_WINDOW_MS ? last + CLAIM_WINDOW_MS : null;
   return {
@@ -189,6 +194,7 @@ async function withClaimLock(walletId: string, fn: () => Promise<FaucetResponse>
 }
 
 export async function claimFaucet(w: WalletRow, now: () => number = Date.now): Promise<FaucetResponse> {
+  if (ON_SOLANA) return claimSolanaFaucet(w, now);
   // Refused before the queue, the lock or a single read: on mainnet there is nothing to wait for.
   const outright = refusedOutright();
   if (outright) return blocked(outright.reason, outright.detail);
@@ -348,4 +354,125 @@ function sentView(offer: Offer, sent: FaucetSent, claimedAt: number, recorded: b
             'The USDC arrived, but the record of it could not be written, so this wallet is not yet held to once a day. The transaction is the proof it was sent.',
         }),
   };
+}
+
+// ── Solana (2026-09-19) ──────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Test USDC on a Solana fork or test cluster: minted to the owner's own USDC account by the cluster's USDC mint authority
+ * — on the fork, the authority the bootstrap gave the cloned mint. The EVM half moved USDC out of Aave's reserve on an
+ * anvil fork and called `getAddress` on the owner, which threw on a base58 key: the Fund step answered 500 and there
+ * was no way to put money in the wallet at all. `mintTokens` refuses where money is real, so this can never mint on
+ * mainnet; neither can the offer below, which says so first.
+ */
+const SOLANA_FAUCET_USDC_RAW = 500_000_000n;
+
+function solanaOffer():
+  | { available: true; detail: string; source: 'fork-mint'; from: string; usdcRaw: bigint }
+  | { available: false; reason: string; detail: string } {
+  if (!CURRENT_FACTS.canMintTokens) {
+    return { available: false, reason: 'real_money', detail: `Money on ${activeClusterKey()} is real, so there is no faucet here.` };
+  }
+  return {
+    available: true,
+    source: 'fork-mint',
+    from: payerKeypair().publicKey.toBase58(),
+    usdcRaw: SOLANA_FAUCET_USDC_RAW,
+    detail: `Minted by ${activeClusterKey()}'s USDC mint authority. Fork USDC exists only on this node and has no value.`,
+  };
+}
+
+async function solanaFaucetStatus(w: WalletRow | undefined, now: number): Promise<FaucetResponse> {
+  const offer = solanaOffer();
+  const last = w ? await lastClaimAt(w.id) : null;
+  const nextAt = last !== null && now - last < CLAIM_WINDOW_MS ? last + CLAIM_WINDOW_MS : null;
+  return {
+    status: 200,
+    body: {
+      chain: activeClusterKey(),
+      available: offer.available,
+      reason: offer.available ? null : offer.reason,
+      detail: offer.detail,
+      source: offer.available ? offer.source : null,
+      from: offer.available ? offer.from : null,
+      usdc: offer.available ? usdc(offer.usdcRaw) : null,
+      usdcRaw: offer.available ? offer.usdcRaw.toString() : null,
+      ethFloor: null,
+      windowHours: CLAIM_WINDOW_MS / 3_600_000,
+      wallet: w ? { address: w.address, lastClaimAt: last, nextAt, canAsk: offer.available && nextAt === null } : null,
+    },
+  };
+}
+
+async function claimSolanaFaucet(w: WalletRow, now: () => number): Promise<FaucetResponse> {
+  const offer = solanaOffer();
+  if (!offer.available) return blocked(offer.reason, offer.detail);
+  return withClaimLock(w.id, async () => {
+    const last = await lastClaimAt(w.id);
+    if (last !== null && now() - last < CLAIM_WINDOW_MS) {
+      const nextAt = last + CLAIM_WINDOW_MS;
+      return {
+        ...blocked('claimed_recently', `This wallet was sent test funds at ${when(last)}. It can ask again at ${when(nextAt)}.`, {
+          lastClaimAt: last,
+          nextAt,
+        }),
+        retryAfterSec: Math.ceil((nextAt - now()) / 1000),
+      };
+    }
+    const before = (await readSolanaBalances(w.address)).usdc.raw;
+    let minted: { signature: string; slot: number };
+    try {
+      minted = await mintTokens({ recipient: w.address, mint: DEFAULT_MINTS.USDC, amountUnits: offer.usdcRaw });
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      log.warn(`[faucet] minting to ${w.address} failed: ${raw}`);
+      return { status: 502, body: { status: 'failed', error: humanFailure(raw) } };
+    }
+    const after = await readSolanaBalances(w.address).then((b) => b.usdc.raw, () => null);
+    const claimedAt = now();
+    const amount = usdc(offer.usdcRaw).toLocaleString('en-US', { maximumFractionDigits: USDC_DECIMALS });
+    const recorded = await tx(async (client) => {
+      await client.query(
+        `INSERT INTO faucet_claims (id, wallet_id, address, paid_by, usdc_raw, usdc_tx, eth_added_wei, claimed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 0, $7)`,
+        [randomUUID(), w.id, w.address, offer.from, offer.usdcRaw.toString(), minted.signature, new Date(claimedAt)],
+      );
+      await append(
+        {
+          walletId: w.id,
+          agent: 'xorr',
+          action: `Received ${amount} test USDC`,
+          detail: offer.detail,
+          kind: 'risk',
+          signature: minted.signature,
+          payload: { usdcRaw: offer.usdcRaw.toString(), slot: minted.slot },
+        },
+        client,
+      );
+    }).then(
+      () => true,
+      (e: unknown) => {
+        log.error(`[faucet] ${minted.signature} reached ${w.address} and was not recorded: ${e instanceof Error ? e.message : String(e)}`);
+        return false;
+      },
+    );
+    return {
+      status: 200,
+      body: {
+        status: 'sent',
+        chain: activeClusterKey(),
+        source: offer.source,
+        from: offer.from,
+        to: w.address,
+        txHash: minted.signature,
+        block: String(minted.slot),
+        explorer: solanaExplorerTx(minted.signature),
+        usdc: { amount: usdc(offer.usdcRaw), raw: offer.usdcRaw.toString(), before: usdc(before), after: after === null ? null : usdc(after) },
+        eth: null,
+        claimedAt,
+        nextAt: claimedAt + CLAIM_WINDOW_MS,
+        recorded,
+      },
+    };
+  });
 }

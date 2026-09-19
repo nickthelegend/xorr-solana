@@ -639,6 +639,23 @@ export type NotificationPref = {
  * fetched to be looked at rather than acted on. Splitting them per-domain would give ten interfaces
  * with one method each.
  */
+/** What buying an xStock came to: a fill with its signature, or the executor's reason for not placing it. */
+export type XStockBuyOutcome =
+  | {
+      status: 'filled';
+      orderId: string;
+      symbol: string;
+      usd: number;
+      units: number;
+      price: number;
+      /** Where it filled. `venue-vault` is never called a Jupiter swap. */
+      venue: 'jupiter-route' | 'venue-vault';
+      signature: string;
+      slot: number;
+      explorer: string;
+    }
+  | { status: 'blocked'; reason: string; message: string };
+
 export const system = {
   /* trust */
   verifyReport: (owner?: string) =>
@@ -710,6 +727,21 @@ export const system = {
     } catch (e) {
       if (e instanceof ApiError && e.body && typeof e.body === 'object' && 'status' in e.body) {
         return e.body as SwapOutcome;
+      }
+      throw e;
+    }
+  },
+
+  /**
+   * Buy an xStock now, through the executor's one spend path (2026-09-19). A refusal (409) carries the executor's own
+   * sentence and is returned for the screen to show. Keyed, so the Buy sent again after a timeout is the same buy.
+   */
+  xstockBuy: async (body: { symbol: string; usd: number }, write: Keyed): Promise<XStockBuyOutcome> => {
+    try {
+      return await api.post<XStockBuyOutcome>('/xstocks/buy', body, write);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409 && e.body && typeof e.body === 'object' && 'status' in e.body) {
+        return e.body as XStockBuyOutcome;
       }
       throw e;
     }

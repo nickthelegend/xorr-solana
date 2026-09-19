@@ -30,7 +30,7 @@
  * is not the same answer as "there is none".
  */
 import { underlyingTicker } from './edgar.js';
-import { stockPriceUsd } from '../venues/stocks.js';
+import { xStockCatalog } from '../venues/xstocks-catalog.js';
 
 export { underlyingTicker };
 
@@ -64,14 +64,16 @@ const CLOSED_HOLD_PCT = 0.015;
 /**
  * A second opinion on what the underlying share is worth, or null when there is not one.
  *
- * The same company's tokenized share on Base, priced from a live 1inch route. Returns null for an
- * xStock with no Base counterpart (the index products, for instance) and for any symbol the Base
- * venue cannot route right now — both of which are real answers, and neither of which this module
- * papers over.
+ * The issuer's own mark for the underlying listing — the \`stockData\` price Jupiter publishes beside each xStock's pool
+ * price (2026-09-19). This was the same company's tokenized share on Base, priced through 1inch: a Solana build that
+ * needed a Base venue and a 1inch key to decide anything, and without that key every symbol read "hold" outside regular
+ * hours, so the agent could never be seen choosing. The issuer's mark is Solana-native and covers extended hours. A
+ * symbol with no mark right now is null — held, never guessed.
  */
 export async function referencePriceUsd(symbol: string): Promise<number | null> {
-  const ticker = underlyingTicker(symbol);
-  return await stockPriceUsd(`${ticker}c`).catch(() => null);
+  const rows = await xStockCatalog().catch(() => null);
+  const row = rows?.find((r) => r.symbol.toLowerCase() === symbol.toLowerCase());
+  return row?.underlyingPrice ?? null;
 }
 
 /**
@@ -157,7 +159,7 @@ export function evaluateOffHoursGuard(params: {
     ? Math.abs(onChainPrice - referencePrice) / referencePrice
     : null;
   const spreadBps = spreadPct === null ? null : Math.round(spreadPct * 10_000);
-  const drift = spreadPct === null ? '' : ` Drift against the Base listing is ${(spreadPct * 100).toFixed(2)}%.`;
+  const drift = spreadPct === null ? '' : ` Drift against the issuer's mark for the share is ${(spreadPct * 100).toFixed(2)}%.`;
 
   if (session.session === 'regular') {
     return {
@@ -189,7 +191,7 @@ export function evaluateOffHoursGuard(params: {
         spreadPct,
         action: 'hold',
         suggestedSlippageBps: 100,
-        reason: `Nasdaq ${session.phase} and the pool has drifted ${(spreadPct * 100).toFixed(2)}% from the Base listing, past 1.2%. Holding until the regular session.`,
+        reason: `Nasdaq ${session.phase} and the pool has drifted ${(spreadPct * 100).toFixed(2)}% from the issuer's mark for the share, past 1.2%. Holding until the regular session.`,
       };
     }
     return {
@@ -209,7 +211,7 @@ export function evaluateOffHoursGuard(params: {
       spreadPct,
       action: 'hold',
       suggestedSlippageBps: 150,
-      reason: `Nasdaq is closed (${session.phase}) and the pool has drifted ${(spreadPct * 100).toFixed(2)}% from the Base listing, past 1.5%. Holding to protect against off-hours slippage.`,
+      reason: `Nasdaq is closed (${session.phase}) and the pool has drifted ${(spreadPct * 100).toFixed(2)}% from the issuer's mark for the share, past 1.5%. Holding to protect against off-hours slippage.`,
     };
   }
 
@@ -219,6 +221,6 @@ export function evaluateOffHoursGuard(params: {
     spreadPct,
     action: 'widen_slippage',
     suggestedSlippageBps: 120,
-    reason: `Nasdaq is closed (${session.phase}), and the pool is still tracking the Base listing to within ${(spreadPct * 100).toFixed(2)}%. Trading 24/7 with a 120 bps slippage guard.`,
+    reason: `Nasdaq is closed (${session.phase}), and the pool is still tracking the issuer's mark for the share to within ${(spreadPct * 100).toFixed(2)}%. Trading 24/7 with a 120 bps slippage guard.`,
   };
 }

@@ -18,6 +18,7 @@ import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-
 import { agentGradient, assetGradient } from '@/design/gradients';
 import { Icon } from '@/design/Icon';
 import { useMadeAgents } from '@/chat/agents';
+import { solanaStandingOnChain } from '@/wallet/solanaStanding';
 import {
   AgentOrb,
   AssetMark,
@@ -70,7 +71,7 @@ import {
   type SetupStepState,
 } from '@/state/derived';
 import type { Address } from 'viem';
-import { pinnedDelegation } from '@/chain';
+import { isSolana, pinnedDelegation } from '@/chain';
 import { chainAccess } from '@/wallet/chainAccess';
 import { standingOnChain } from '@/wallet/delegationChain';
 import { killSwitchChip } from '@/state/killSwitch';
@@ -354,10 +355,19 @@ export default function Home() {
   const standing = useAsync<SetupStanding>(async () => {
     const owner = wallet?.address as Address | undefined;
     if (!owner) return 'none';
+    // Solana: the delegate on the owner's USDC account (2026-09-19). The EVM contract read answered "none" there.
+    if (isSolana) return solanaStandingOnChain(owner, Date.now());
     return (await standingOnChain(chainAccess, owner, pinnedDelegation, Date.now())).kind;
   }, [wallet?.address]);
-  /* The trade step is a fill the executor recorded, not a strategy somebody created. */
-  const recordedRuns = useAsync(() => system.runs(50), []);
+  /*
+   * The trade step is a fill the executor recorded, not a strategy somebody created. A strategy's run is one kind; a
+   * position is the other — the ledger is written only by a fill — and a buy from the ticket or by a hired agent opens
+   * one without a run, so this wallet had five confirmed fills and a step still reading "not done yet" (2026-09-19).
+   */
+  const recordedRuns = useAsync(async () => {
+    const [runs, held] = await Promise.all([system.runs(50), repos.portfolio.positions()]);
+    return [...runs, ...held.map(() => ({ status: 'filled' }))];
+  }, []);
   /*
    * The same runs, asked again on a clock, for the present-tense line (`TradingTicker`). `usePoll` only runs while this
    * screen is focused and never stacks a read behind itself, so a tab nobody is looking at asks nothing.

@@ -8,7 +8,7 @@
  * `eligible: false` with `indeterminate: true` means a gate could not be read. That is NOT a pass
  * and must never be drawn as one — which is why there is no boolean here that collapses the two.
  */
-import { API_BASE } from './apiBase';
+import { sessionFetch } from './sessionFetch';
 
 export type EligibilityCheck = {
   id: 'mint-paused' | 'transfer-hook' | 'account-frozen' | 'default-account-state';
@@ -45,8 +45,7 @@ export async function fetchEligibility(
   });
 
   try {
-    const res = await fetch(
-      `${API_BASE}/xstocks/${encodeURIComponent(symbol)}/eligibility?wallet=${encodeURIComponent(wallet)}`,
+    const res = await sessionFetch(`/xstocks/${encodeURIComponent(symbol)}/eligibility?wallet=${encodeURIComponent(wallet)}`,
       { signal },
     );
     if (!res.ok) return unreadable(`The executor answered ${res.status}, so eligibility is unknown.`);

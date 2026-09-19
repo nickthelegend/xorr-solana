@@ -19,10 +19,15 @@ import type { LinkedWallet } from './privy.js';
 import type { WalletRow } from '../routes/wallet-context.js';
 
 /** The caller's own wallet at this address, whichever case either side spelled it in. */
+/** A Solana public key as text: base58, 32 to 44 characters. */
+export const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 export function findLinkedWallet(
   wallets: readonly LinkedWallet[],
   address: string,
 ): LinkedWallet | undefined {
+  // Solana: base58 is case-sensitive and has one spelling, so equal strings are the only match (2026-09-19).
+  if (BASE58_ADDRESS.test(address)) return wallets.find((w) => w.address === address);
   if (!isAddress(address, { strict: false })) return undefined;
   const wanted = getAddress(address);
   return wallets.find((w) => isAddress(w.address, { strict: false }) && getAddress(w.address) === wanted);

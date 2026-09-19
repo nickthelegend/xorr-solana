@@ -11,17 +11,19 @@
  * report says "Not reported"; it never becomes a zero, which on this screen would read as a cost
  * that was measured and found to be nothing.
  *
- * The confirm is deliberately not here. `executor/place.ts` is the only path that can spend, and no
- * HTTP route reaches it for a Solana equity yet — so this screen says what the order would cost and
- * says plainly that it cannot yet be placed from the phone. A button that did nothing would be the
- * worse answer, and a button that pretended would be the worst.
+ * Buying is here since 2026-09-19: `POST /xstocks/buy` is a door to `executor/place.ts`, the only path that can spend,
+ * held by everything that path checks — the permission, the rules, the chain, the issuer's gates, a live quote. The
+ * button is enabled only for a symbol this cluster can settle and a size a quote has priced; the receipt is the
+ * transaction the chain confirmed, with where it filled. Selling from the phone is not built, and says so.
  */
-import React, { useMemo } from 'react';
-import { ScrollView, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Linking, ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
+  Button,
   CloseButton,
+  SignInButton,
   FailureNote,
   Keypad,
   Pill,
@@ -39,8 +41,20 @@ import {
 import { useAsync } from '@/data/useAsync';
 import { useDebounced } from '@/data/useDebounced';
 import { useStore } from '@/state/store';
-import { system } from '@/data/system';
+import { system, type XStockBuyOutcome } from '@/data/system';
+import { useIntentKeys } from '@/data/useIntentKeys';
+import { errorText } from '@/data/apiError';
+import { useSignedOut } from '@/auth/useSignedOut';
 import { breakdownRows, worstCase } from '@/markets/breakdown';
+import { useAuth } from '@/auth/useAuth';
+import { BackingBadge } from '@/ui/BackingBadge';
+import { BackingDrawer } from '@/ui/BackingDrawer';
+import { EligibilityNotice } from '@/ui/EligibilityNotice';
+import { fetchBacking } from '@/data/backing';
+import { fetchBackingDetail } from '@/data/backingDetail';
+import { fetchReservesHistory } from '@/data/reservesHistory';
+import { fetchYield } from '@/data/dividendYield';
+import { fetchEligibility, mayBuy } from '@/data/eligibility';
 
 const SIDES = [
   { value: 'buy', label: 'Buy' },
@@ -80,6 +94,42 @@ export default function XStockTicket() {
     [symbol, side, quoted],
   );
 
+  const signedOut = useSignedOut();
+  const keys = useIntentKeys();
+  // Tradable is a fact about this cluster: on a fork, the xStocks whose mint it cloned (`/market/tradable`).
+  const tradable = useAsync(() => system.tradable(), []);
+  const canSettle = !!tradable.data?.some((t) => t.symbol === symbol);
+  const [buying, setBuying] = useState(false);
+
+  // What backs the token, and whether the issuer's own gates let this wallet hold it — each read from its route, each
+  // saying so in words when it could not be read.
+  const { address } = useAuth();
+  const backing = useAsync(() => (symbol ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol]);
+  const detail = useAsync(() => (symbol ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol]);
+  const history = useAsync(() => (symbol ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol]);
+  const income = useAsync(() => (symbol ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol]);
+  const eligibility = useAsync(
+    () => (symbol && address ? fetchEligibility(symbol, address) : Promise.resolve(undefined)),
+    [symbol, address],
+  );
+  const [showBacking, setShowBacking] = useState(false);
+  const [result, setResult] = useState<XStockBuyOutcome>();
+  const [buyError, setBuyError] = useState<string>();
+
+  async function buy() {
+    if (buying || !(amount > 0)) return;
+    setBuying(true);
+    setBuyError(undefined);
+    setResult(undefined);
+    try {
+      setResult(await keys.send(`xstock-buy:${symbol}:${amount}`, (idempotencyKey) => system.xstockBuy({ symbol, usd: amount }, { idempotencyKey })));
+    } catch (e) {
+      setBuyError(errorText(e));
+    } finally {
+      setBuying(false);
+    }
+  }
+
   const rows = useMemo(
     () => (quote.data ? breakdownRows(quote.data, FORMAT) : []),
     [quote.data],
@@ -93,6 +143,19 @@ export default function XStockTicket() {
         </Text>
         <CloseButton onPress={() => goBack()} light />
       </View>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8, marginTop: space.s8, flexWrap: 'wrap' }}>
+        <BackingBadge backing={backing.data ?? undefined} testID="xstock-backing" />
+        <Pill
+          label={showBacking ? 'Hide backing' : 'What backs it'}
+          light
+          onPress={() => setShowBacking((v) => !v)}
+          testID="xstock-backing-toggle"
+        />
+      </View>
+      {address ? (
+        <EligibilityNotice eligibility={eligibility.data ?? undefined} style={{ marginTop: space.s8 }} testID="xstock-eligibility" />
+      ) : null}
 
       <Segmented
         options={SIDES}
@@ -126,6 +189,15 @@ export default function XStockTicket() {
         contentContainerStyle={{ paddingVertical: space.s12 }}
         style={{ flex: 1, marginTop: space.s12 }}
       >
+        {showBacking ? (
+          <View style={{ marginBottom: space.s12 }} testID="xstock-backing-drawer">
+            <BackingDrawer
+              detail={detail.loading ? undefined : detail.data ?? null}
+              history={history.loading ? undefined : history.data ?? null}
+              income={income.data ?? undefined}
+            />
+          </View>
+        ) : null}
         {amount <= 0 ? (
           <Text variant="secondary" color={colors.sheet.muted} align="center" style={{ paddingVertical: space.s20 }}>
             Enter an amount to see what it costs.
@@ -185,21 +257,55 @@ export default function XStockTicket() {
 
       <Keypad light onPress={pressKey} />
 
-      {/*
-        Said once, plainly, where a CTA would be.
-
-        The executor can spend — `guardAndSpend` does, and the on-chain proofs run through it — but
-        nothing serves that path over HTTP for an equity yet. Offering a button here would promise a
-        thing the app cannot do; leaving the space blank would leave someone waiting for one.
-      */}
-      <Text
-        variant="footnote"
-        color={colors.sheet.muted}
-        align="center"
-        style={{ paddingVertical: space.s14 }}
-      >
-        Costs only. Placing an xStock order from the phone is not wired up yet.
-      </Text>
+      {side === 'buy' ? (
+        <View style={{ paddingTop: space.s12, gap: space.s8 }}>
+          {result?.status === 'filled' ? (
+            <View style={{ gap: space.s4 }}>
+              <Text variant="rowPrimary" color={colors.sheet.ink} align="center">
+                {`Bought ${quantity(result.units)} ${result.symbol} at ${fmtPrice(result.price)}`}
+              </Text>
+              <Text variant="footnote" color={colors.sheet.muted} align="center">
+                {`${result.venue === 'jupiter-route' ? 'Routed by Jupiter' : 'Filled from the venue vault, not a Jupiter swap'} · slot ${result.slot}`}
+              </Text>
+              <Text
+                variant="footnote"
+                color={colors.sheet.ink}
+                align="center"
+                onPress={() => void Linking.openURL(result.explorer)}
+                accessibilityRole="link"
+              >
+                {`Transaction ${result.signature.slice(0, 8)}…${result.signature.slice(-6)}`}
+              </Text>
+            </View>
+          ) : result?.status === 'blocked' ? (
+            <Text variant="footnote" color={colors.down} align="center">
+              {result.message}
+            </Text>
+          ) : buyError ? (
+            <Text variant="footnote" color={colors.down} align="center">
+              {buyError}
+            </Text>
+          ) : !tradable.data || canSettle ? null : (
+            <Text variant="footnote" color={colors.sheet.muted} align="center">
+              {`${symbol} cannot settle on this network yet, so it can be priced here but not bought.`}
+            </Text>
+          )}
+          {signedOut ? (
+            <SignInButton label="Sign in to buy" />
+          ) : (
+            <Button
+              label={buying ? 'Buying' : `Buy ${money(amount)} of ${symbol}`}
+              loading={buying}
+              disabled={!(amount > 0) || !quote.data || !canSettle || (!!eligibility.data && !mayBuy(eligibility.data))}
+              onPress={buy}
+            />
+          )}
+        </View>
+      ) : (
+        <Text variant="footnote" color={colors.sheet.muted} align="center" style={{ paddingVertical: space.s14 }}>
+          Selling from the phone is not built yet. This shows what a sale would cost.
+        </Text>
+      )}
     </Screen>
   );
 }

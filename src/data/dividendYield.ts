@@ -7,7 +7,7 @@
  * `unmeasured` is a real answer and is kept distinct from zero all the way to the screen: a window
  * we have not watched long enough is not a window in which the token paid nothing.
  */
-import { API_BASE } from './apiBase';
+import { sessionFetch } from './sessionFetch';
 
 export type ExcludedStep = { from: number; to: number; factor: number; at: string; reason: string };
 
@@ -28,7 +28,7 @@ export type YieldWindow =
 export async function fetchYield(symbol: string, signal?: AbortSignal): Promise<YieldWindow> {
   const unmeasured = (reason: string): YieldWindow => ({ status: 'unmeasured', symbol, reason });
   try {
-    const res = await fetch(`${API_BASE}/xstocks/${encodeURIComponent(symbol)}/yield`, { signal });
+    const res = await sessionFetch(`/xstocks/${encodeURIComponent(symbol)}/yield`, { signal });
     if (!res.ok) return unmeasured(`The executor answered ${res.status}.`);
     const body = (await res.json()) as YieldWindow;
     if (body?.status === 'measured' && Number.isFinite(body.yieldFraction)) return body;

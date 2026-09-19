@@ -22,6 +22,10 @@ import { publicSurface } from '../auth/middleware.js';
 import { health as graphHealth, indexDescription } from '../graph/client.js';
 import { breakerState } from '../http/get.js';
 import { voiceConfigured } from '../bot/llm.js';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getConnection } from '../solana/connection.js';
+import { activeClusterKey, isSolanaCluster } from '../solana/clusters.js';
+import { delegateKeypair, payerKeypair } from '../solana/keys.js';
 
 export const ops = new Hono();
 
@@ -39,6 +43,15 @@ type DepStatus = 'up' | 'degraded' | 'down';
 type Dep = { name: string; status: DepStatus; ms: number; detail: string; critical: boolean };
 
 const started = Date.now();
+
+/**
+ * This executor settles on Solana (2026-09-19). `/health` probed an EVM RPC on :8545, an EVM delegation contract and a
+ * Base subgraph whatever the chain, so a Solana executor with a perfectly healthy fork answered 503 "down" and called
+ * itself `localnet`. On a Solana cluster it asks what this executor actually depends on instead.
+ */
+const SOLANA = isSolanaCluster(process.env.XORR_CHAIN ?? process.env.EXPO_PUBLIC_XORR_CHAIN ?? '');
+/** Below this the fee payer cannot cover a handful of transactions: trading stops, the server is not broken. */
+const FEE_FLOOR_SOL = 0.01;
 
 async function probe(
   name: string,
@@ -69,41 +82,60 @@ async function probe(
   }
 }
 
+/** The Solana half of `/health`: the RPC, the fee payer's SOL, and the upstreams. */
+function solanaDeps(): Promise<Dep>[] {
+  const conn = getConnection();
+  return [
+    probe('rpc', true, async () => `${activeClusterKey()} at slot ${await conn.getSlot('confirmed')}`),
+    // Not critical, for the reason the EVM gas probe gives: out of fees stops trading, not the server.
+    probe('gas', false, async () => {
+      const sol = (await conn.getBalance(payerKeypair().publicKey, 'confirmed')) / LAMPORTS_PER_SOL;
+      if (sol < FEE_FLOOR_SOL) throw new Error(`${sol.toFixed(4)} SOL, below the ${FEE_FLOOR_SOL} floor`);
+      return `${sol.toFixed(4)} SOL`;
+    }),
+  ];
+}
+
 ops.get('/health', async (c) => {
+  const chainDeps = SOLANA
+    ? solanaDeps()
+    : [
+        probe('rpc', true, async () => `${CHAIN_KEY} at block ${await publicClient.getBlockNumber()}`),
+        probe('delegation', true, async () => {
+          const code = await publicClient.getCode({ address: DELEGATION_ADDRESS });
+          if (!code || code.length <= 4) throw new Error(`no code at ${DELEGATION_ADDRESS}`);
+          return `${(code.length - 2) / 2} bytes`;
+        }),
+        // Not critical: the bot being out of gas stops trading, and trading stopping is not the
+        // server being broken. It is still the single most likely reason a strategy fails.
+        probe('gas', false, async () => {
+          const g = await gasStatus();
+          if (!g.enough) throw new Error(`${g.eth.toFixed(4)} ETH, below the ${g.floor} floor`);
+          return `${g.eth.toFixed(4)} ETH`;
+        }),
+        /*
+         * The index a trade decision reads (PLAN.md 2.11). Not critical — a run the index cannot answer for
+         * is decided without it and says so — but a health check that never mentions it lets an index stuck
+         * behind, erroring, or pointed at another deployment's contract go unnoticed.
+         */
+        probe('subgraph', false, async () => {
+          const [h, index] = [await graphHealth(), indexDescription()];
+          if (!h.healthy) throw new Error(`indexing errors at block ${h.block}`);
+          if (!index.indexedDelegation) {
+            throw new Error(`at block ${h.block}, but SUBGRAPH_DELEGATION_ADDRESS is not set, so which contract it follows is unknown`);
+          }
+          if (!index.indexesThisDeployment) {
+            throw new Error(`at block ${h.block}, but indexing ${index.indexedDelegation}, not this deployment's ${index.activeDelegation}`);
+          }
+          return `at block ${h.block}, indexing ${index.indexedDelegation}`;
+        }),
+      ];
   const deps = await Promise.all([
     probe('postgres', true, async () => {
       const rows = await query<{ now: Date }>('SELECT now()');
       return `responded at ${rows[0]?.now?.toISOString()}`;
     }),
-    probe('rpc', true, async () => `${CHAIN_KEY} at block ${await publicClient.getBlockNumber()}`),
-    probe('delegation', true, async () => {
-      const code = await publicClient.getCode({ address: DELEGATION_ADDRESS });
-      if (!code || code.length <= 4) throw new Error(`no code at ${DELEGATION_ADDRESS}`);
-      return `${(code.length - 2) / 2} bytes`;
-    }),
-    // Not critical: the bot being out of gas stops trading, and trading stopping is not the
-    // server being broken. It is still the single most likely reason a strategy fails.
-    probe('gas', false, async () => {
-      const g = await gasStatus();
-      if (!g.enough) throw new Error(`${g.eth.toFixed(4)} ETH, below the ${g.floor} floor`);
-      return `${g.eth.toFixed(4)} ETH`;
-    }),
-    /*
-     * The index a trade decision reads (PLAN.md 2.11). Not critical — a run the index cannot answer for
-     * is decided without it and says so — but a health check that never mentions it lets an index stuck
-     * behind, erroring, or pointed at another deployment's contract go unnoticed.
-     */
-    probe('subgraph', false, async () => {
-      const [h, index] = [await graphHealth(), indexDescription()];
-      if (!h.healthy) throw new Error(`indexing errors at block ${h.block}`);
-      if (!index.indexedDelegation) {
-        throw new Error(`at block ${h.block}, but SUBGRAPH_DELEGATION_ADDRESS is not set, so which contract it follows is unknown`);
-      }
-      if (!index.indexesThisDeployment) {
-        throw new Error(`at block ${h.block}, but indexing ${index.indexedDelegation}, not this deployment's ${index.activeDelegation}`);
-      }
-      return `at block ${h.block}, indexing ${index.indexedDelegation}`;
-    }),
+    ...chainDeps,
     // Upstreams the circuit breaker has shut out right now: prices and quotes fail fast while one is open.
     probe('upstreams', false, async () => {
       const open = breakerState().filter((b) => b.openUntil > Date.now());
@@ -122,9 +154,10 @@ ops.get('/health', async (c) => {
       // served, which is what they were asking.
       ok: !down,
       status,
-      chain: CHAIN_KEY,
+      chain: SOLANA ? activeClusterKey() : CHAIN_KEY,
       version: BUILD_SHA,
-      delegation: DELEGATION_ADDRESS,
+      // On Solana the permission is an SPL delegation to this key, not a contract.
+      delegation: SOLANA ? delegateKeypair().publicKey.toBase58() : DELEGATION_ADDRESS,
       uptimeSec: Math.round((Date.now() - started) / 1000),
       dependencies: deps,
       /** Every upstream host the HTTP lane has seen, with its consecutive failures and when a breaker closes. */
