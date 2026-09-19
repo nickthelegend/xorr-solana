@@ -56,6 +56,8 @@ vi.mock('../solana/grant.js', () => ({
   readSolanaPolicy: vi.fn(async () => ({ dailyCapUsd: 300, expiresAt: Date.now() + 86_400_000, revoked: false })),
 }));
 
+const { readDelegation } = await import('../solana/delegation.js');
+const { readSolanaPolicy } = await import('../solana/grant.js');
 const { guardAndSpend } = await import('./place.js');
 
 const BUY = { walletId: 'w1', ownerPubkey: OWNER, symbol: 'NVDAx', usd: 25 };
@@ -102,5 +104,35 @@ describe('guardAndSpend, when something fails', () => {
 
     await guardAndSpend(BUY).catch(() => undefined);
     expect(order).toEqual(['quote', 'broadcast', 'spend']);
+  });
+});
+
+describe('an empty USDC delegation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 300 });
+    vi.mocked(readDelegation).mockResolvedValue({
+      isRevoked: true,
+      delegate: null,
+      delegatedAmount: 0n,
+      remainingUsd: 0,
+    } as never);
+  });
+
+  it('tells someone who never granted to grant, not that they revoked something', async () => {
+    vi.mocked(readSolanaPolicy).mockResolvedValue(null as never);
+
+    const out = await guardAndSpend(BUY);
+    expect(out).toMatchObject({ placed: false, reason: 'no_permission' });
+    expect((out as { detail: string }).detail).not.toMatch(/revoked/i);
+    expect(spendMock).not.toHaveBeenCalled();
+  });
+
+  it('says revoked when a grant was recorded and the chain no longer names the delegate', async () => {
+    vi.mocked(readSolanaPolicy).mockResolvedValue({ dailyCapUsd: 300, expiresAt: Date.now() + 86_400_000, revoked: true } as never);
+
+    const out = await guardAndSpend(BUY);
+    expect(out).toMatchObject({ placed: false, reason: 'delegation_revoked' });
+    expect(spendMock).not.toHaveBeenCalled();
   });
 });

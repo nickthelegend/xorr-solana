@@ -22,11 +22,12 @@
  */
 import React, { useMemo, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   AssetMark,
   Button,
+  Fill,
   CloseButton,
   SignInButton,
   FailureNote,
@@ -76,6 +77,7 @@ const FORMAT = { money, quantity, price: fmtPrice };
 
 export default function XStockTicket() {
   const { symbol = '' } = useLocalSearchParams<{ symbol: string }>();
+  const router = useRouter();
   const logo = useLogo(symbol || undefined);
   const goBack = useGoBack();
 
@@ -96,18 +98,13 @@ export default function XStockTicket() {
    * decoration, and one measured buy waited 153 seconds before failing on a price that had moved.
    */
   const quoted = useDebounced(amount);
-  const quote = useAsync(
-    () =>
-      quoted > 0 && symbol
-        ? system.xstockQuote({ symbol, side, usd: quoted })
-        : Promise.resolve(null),
-    [symbol, side, quoted],
-  );
 
   const signedOut = useSignedOut();
   const keys = useIntentKeys();
   // Tradable is a fact about this cluster: on a fork, the xStocks whose mint it cloned (`/market/tradable`).
   const tradable = useAsync(() => system.tradable(), []);
+  /** Every xStock this build lists, to tell "not listed at all" from "listed but not settleable on this cluster". */
+  const catalog = useAsync(() => system.xstocks(), []);
   const canSettle = !!tradable.data?.some((t) => t.symbol === symbol);
   const [buying, setBuying] = useState(false);
 
@@ -129,6 +126,20 @@ export default function XStockTicket() {
   const held = tokens.data?.tokens.find((t) => t.symbol === symbol);
   const heldUnits = held?.units ?? 0;
   const heldUsd = held?.usd ?? 0;
+  /*
+   * A sale is never sized past the holding, so the breakdown is not quoted past it either (2026-09-20). Typing $1,009
+   * against 0.4499 NVDAx drew "Expected 997.52 USDC" over a button that would sell $100 of shares: the panel described
+   * a trade that could not happen. Only once the chain has answered — until then the typed amount stands.
+   */
+  const cappedToHolding = side === 'sell' && !!tokens.data && heldUsd > 0 && quoted > heldUsd;
+  const quoteUsd = cappedToHolding ? heldUsd : quoted;
+  const quote = useAsync(
+    () =>
+      quoteUsd > 0 && symbol
+        ? system.xstockQuote({ symbol, side, usd: quoteUsd })
+        : Promise.resolve(null),
+    [symbol, side, quoteUsd],
+  );
   const { sell: sellShares, selling, ready: canSell } = useXStockSell();
   const [sold, setSold] = useState<XStockSellOutcome>();
   const [sellError, setSellError] = useState<string>();
@@ -167,6 +178,31 @@ export default function XStockTicket() {
     () => (quote.data ? breakdownRows(quote.data, FORMAT) : []),
     [quote.data],
   );
+
+  /*
+   * A symbol this build does not list at all (2026-09-20). `/xstock/FAKEx` drew the whole ticket — backing unverified,
+   * eligibility unknown, a quote refusal with its error reference — for a token that does not exist. That is a
+   * not-found, and it says so once the catalogue has answered. A LISTED xStock whose mint this cluster lacks keeps its
+   * ticket and its own "cannot settle here" line; the two are different facts.
+   */
+  if (catalog.data && !catalog.data.rows.some((r) => r.symbol === symbol)) {
+    return (
+      <Screen light gutter="sheet">
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text variant="sheetTitle" color={colors.sheet.ink}>
+            Not listed
+          </Text>
+          <CloseButton onPress={() => goBack()} light />
+        </View>
+        <Fill style={{ justifyContent: 'center', gap: space.s12 }}>
+          <Text variant="body" color={colors.sheet.muted} align="center">
+            {`There is no xStock called ${symbol} here.`}
+          </Text>
+          <Button label="See the xStocks" onPress={() => router.replace('/xstocks')} testID="xstock-not-listed" />
+        </Fill>
+      </Screen>
+    );
+  }
 
   return (
     <Screen light gutter="sheet">
@@ -318,9 +354,20 @@ export default function XStockTicket() {
               </Text>
             </View>
           ) : result?.status === 'blocked' ? (
-            <Text variant="footnote" color={colors.down} align="center">
-              {result.message}
-            </Text>
+            <View style={{ gap: space.s8 }}>
+              <Text variant="footnote" color={colors.down} align="center">
+                {result.message}
+              </Text>
+              {/* A refusal the person can act on gets the door to act on it, rather than a sentence and a dead end. */}
+              {result.reason === 'no_permission' || result.reason === 'delegation_revoked' ? (
+                <Pill
+                  label="Give permission"
+                  light
+                  onPress={() => router.push('/delegate')}
+                  testID="xstock-grant-cta"
+                />
+              ) : null}
+            </View>
           ) : buyError ? (
             <Text variant="footnote" color={colors.down} align="center">
               {buyError}
@@ -373,7 +420,9 @@ export default function XStockTicket() {
             <Text variant="footnote" color={colors.sheet.muted} align="center">
               {tokens.data
                 ? heldUnits > 0
-                  ? `You hold ${quantity(heldUnits)} ${symbol}.`
+                  ? cappedToHolding
+                    ? `You hold ${quantity(heldUnits)} ${symbol}, so this sells all of it.`
+                    : `You hold ${quantity(heldUnits)} ${symbol}.`
                   : `You hold no ${symbol} to sell.`
                 : `Reading what you hold…`}
             </Text>

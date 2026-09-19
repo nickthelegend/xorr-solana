@@ -14,6 +14,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
+  NoteStrip,
   BackButton,
   Button,
   EmptyList,
@@ -82,6 +83,14 @@ export default function Strategies() {
     }, [reload]),
   );
 
+  /*
+   * The kill switch, said here too (2026-09-20). Safety read STOPPED while this screen read "1 running · Live": the
+   * strategy is live, and the chain permission it spends under is revoked, so nothing of it can run. Two screens, two
+   * answers to "is anything trading?", and the one a person opens to check is this one.
+   */
+  const permission = useAsync(() => repos.wallet.delegation(), []);
+  const stopped = permission.data?.revoked === true;
+
   const all = data ?? [];
   const live = all.filter((s) => s.state === 'live' || s.state === 'watch');
   /*
@@ -127,6 +136,12 @@ export default function Strategies() {
         <ScrollView refreshControl={refresh.control} showsVerticalScrollIndicator={false}>
           {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
           {refresh.notice}
+          {stopped ? (
+            <NoteStrip kind="blocked" style={{ marginBottom: space.s10 }}>
+              Trading is stopped: the permission is revoked on-chain, so nothing here runs until you resume it in
+              Safety.
+            </NoteStrip>
+          ) : null}
           {tab === 'running' ? (
             loading && !data ? (
               <LoadingRows count={3} />
