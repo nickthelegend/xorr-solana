@@ -19,6 +19,7 @@ import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
+import { spendPhrase } from '@/strategies/spend';
 import {
   AgentOrb,
   BackButton,
@@ -242,7 +243,7 @@ export default function AgentDetail() {
                   onPress={() => router.push(`/strategy/${s.id}`)}
                   title={s.label}
                   titleFigure={labelFigure(s.kind)}
-                  secondary={`${s.symbol} · ${money(s.dailyAllocationUsd)} a day`}
+                  secondary={`${s.symbol} · ${spendPhrase(money(s.dailyAllocationUsd), s.cadence)}`}
                   value={
                     <Text variant="secondarySm" color={s.state === 'live' ? colors.ink : colors.ink40}>
                       {STATE_LABEL[s.state] ?? s.state}
