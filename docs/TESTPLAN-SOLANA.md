@@ -217,6 +217,17 @@ accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim
 | CH16 | PASS | Kill switch on a second account: STOPPED, all six delegations none on chain; Strategies now says so (after the fix); Resume restores all six and clears the banner. |
 | CH17 | PASS | Console and network sweep after the fixes: no console errors and no response ≥ 400 across Home, xStocks, ticket, Portfolio, Activity, Strategies, Safety, Explore, Alerts, Runs, Leaderboard, Voice, Risk, Catchup. |
 
+| CH18 | PASS | Deposit, profile, risk disclosure, notifications, disposals, coverage, venues, system, metrics, limits, permission, audit-chain (18 entries, unbroken), compare agents, export ("18 rows · xorr-audit.csv"), briefing: all load, no failed calls. |
+| CH19 | PASS | Custom agent: Make agent disabled while empty; named, persona picked, one strategy chosen; created, hired, and its first AAPLx buy filled through Jupiter. |
+| CH20 | PASS | Agent strategy row states its own cadence ("$25.00 a week") after the fix, not "a day". |
+| CH21 | PASS | Edit TP/SL → Auto Close sets a stop and target; a live `exit-rules` strategy appears in Strategies and in Activity. |
+| CH22 | PASS | Alerts: the screen opens on an xStock after the fix ("Alert me when NVDAx is above $235.00"), and the alert is created and listed. |
+| CH23 | PASS | Activity times read in the reader's own clock after the fix (4:16 AM local, not 10:46 PM UTC). |
+| CH24 | PASS | Backtest is hidden on Solana (no xStock history to replay; it had offered WETH and CBBTC) and is delisted from Explore. |
+| CH25 | PASS | Sources names Jupiter and Backed on Solana, and no longer 1inch, Hyperliquid, Aave v3 or the Base subgraph. |
+| CH26 | PASS | Trade tab → xStocks; sector filter narrows the list; Add funds on an agent opens Deposit. |
+| CH27 | PASS | Final console and network sweep across Home, xStocks, ticket, Portfolio, Activity, Strategies and Safety: no errors, nothing ≥ 400. |
+
 | HS16 | PASS | xStock logos: `/market/logos` answers each xStock from Jupiter's registry (`source: jupiter`, issuer icon); hosted Watchlist, xStocks list, Home Stocks, ticket header, Portfolio cards and position screen all render `NVDAx.png`…`QQQx.png`. |
 | HS17 | PASS | Watchlist: Stocks tab first on Solana; its own tab choice (no longer Home's index); 11 prices, 23 sparkline paths, sparkline skeleton while loading; no response ≥ 400. |
 | HS18 | PASS | xStock charts: `/market/ohlc?symbol=NVDAx&days=1` → 27 half-hour rows from recorded Jupiter prices; Portfolio cards draw a chart ("No price history yet" gone). |
