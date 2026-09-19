@@ -198,6 +198,7 @@ accounts, with the Browser pane visible so Privy's sheets ran. Every chain claim
 | HS11 | PASS | Allowlist add → Pending, "usable from … in 24 h"; Send refuses ("No address is unlocked yet"); server `/withdrawal-addresses/check` → 409 `cooling_off`. |
 | HS12 | PASS | Recovery → Export private key opens Privy's own export window for the right wallet (the key was not revealed). |
 | HS14 | PASS | Cancel: see D4. |
+| HS15 | PASS | Close preview at the venue's quote: "Realises −$0.01 and frees $24.99 at the venue's live quote" for half of 0.2251 NVDAx; the executor's prepared sale for the same units priced $24.988 (the old mark-based preview would have said +$0.16). The live signature was not sent (Browser pane hidden); the earlier hosted close (#33) is the signed proof. |
 | HS13 | PASS | Screen audit (Home, xStocks, ticket, Portfolio, Activity, Safety, agent, Deposit, Explore, Send, Watchlist): no API response ≥ 400 after load. |
 
 Hosted fixes made during the run:
