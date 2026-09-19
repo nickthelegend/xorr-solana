@@ -8,7 +8,7 @@
 # One public port: `rpc-proxy.mjs` serves JSON-RPC and upgrades websockets onto the validator's second port, because a
 # Railway service exposes one port and the app's confirmations subscribe over a websocket.
 
-FROM node:24-bookworm-slim
+FROM public.ecr.aws/docker/library/node:20-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends curl bzip2 ca-certificates \
@@ -21,7 +21,9 @@ ENV PATH="/root/.local/share/solana/install/active_release/bin:${PATH}"
 
 WORKDIR /app/server
 COPY server/package.json server/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# `npm install` from the lockfile rather than `npm ci`: the container's npm finds optional peer entries missing from a
+# lockfile the developers' npm accepts, and refuses outright; install resolves them and keeps every locked version.
+RUN npm install --no-audit --no-fund
 COPY server/tsconfig.json ./
 COPY server/src ./src
 COPY infra/solana-fork/entrypoint.sh /usr/local/bin/fork-entrypoint
