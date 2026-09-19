@@ -684,8 +684,10 @@ async function probeStocks(): Promise<unknown[]> {
 export function warmMarketCache(): void {
   // The logo batch ahead of everything: one request every market list shows, and the sweep below never asked for it (E106).
   void warmLogos();
-  // The equities first: the slowest answer the Markets screen waits on, and one probe serves everyone.
-  void refreshStocks().catch(() => undefined);
+  // The equities first: the slowest answer the Markets screen waits on, and one probe serves everyone. Base's tokenized
+  // equities, priced through 1inch — on Solana the stocks are xStocks, priced through Jupiter, and there is nothing of
+  // Base's to warm (it only tripped the 1inch breaker and marked the executor degraded, 2026-09-19).
+  if (!ON_SOLANA) void refreshStocks().catch(() => undefined);
 
   // Ordered by what a cold user hits first: the market list, then the default 1D chart, then the
   // rest of the timeframe pills. The upstream serves these one at a time behind a rate limit, so

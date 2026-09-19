@@ -107,7 +107,7 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 2 | Wallet bound to executor, unlinked refused | ✅ | B3 |
 | 3 | Home balance = chain USDC + xStocks | ✅ | B4 |
 | 4 | Test-USDC faucet | ✅ | C1 |
-| 5 | Receive-USDC QR on Solana | ❌ | QR hidden on Solana (`depositQrWorks` false) |
+| 5 | Receive-USDC QR on Solana | ✅ | Solana Pay code on real clusters; correctly none on a fork (a phone would pay on mainnet) |
 | 6 | Grant capped SPL delegation from the app | ✅ | D1–D3 |
 | 7 | Kill switch: user-signed revoke from Safety | ✅ | H1, tx `4zgrs5nk…` (2026-09-19) |
 | 8 | After revoke every buy refused | ✅ | H2/F3 `delegation_revoked` |
@@ -129,7 +129,7 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 24 | Hosted demo (fork + executor + web) | ❌ | nothing Solana hosted |
 | 25 | Fork fills Jupiter-routed (pool re-clone, sell routes) | ✅ | live route resolution at boot; `jupiter-route` buy and sell |
 | 26 | Demo video | ❌ | only Base videos exist |
-| 27 | README Solana-first | ❌ | README top says Base |
+| 27 | README Solana-first | ✅ | rewritten 2026-09-19 |
 | 28 | Submission | ❌ | not submitted |
 | 29 | CI green | ✅ | main green; PR #35 |
 | 30 | Token-2022 (Scaled UI) holdings and P&L | ✅ | F4 |
@@ -146,17 +146,17 @@ Status is evidence, not claims. ✅ verified · ⚠️ partial · ❌ not done /
 | 37 | Agent reasoning + chat on a capable model | ⛔ | no `OPENROUTER_API_KEY` |
 | 38 | MoonPay card deposit | ⛔ | no MoonPay keys; honest message shown |
 | 39 | Withdrawal records correct (xStock sends, destination) | ✅ | `tokenMovement` reads any mint + recipient from the tx; unknown recipient refused; tests |
-| 40 | Send: real fee, balance refresh | ❌ | fee hardcoded; balance stale after send |
-| 41 | xStocks disclosure + Terms/Risk | ❌ | none |
-| 42 | Portfolio history snapshots on Solana | ❌ | `snapshots.ts` EVM |
-| 43 | Cap/expiry risk alerts on Solana | ❌ | `alerts/evaluate.ts` EVM `readPolicy` |
-| 44 | History screen on Solana (port or hide) | ❌ | reads Base logs |
-| 45 | Chat proposals on Solana (port or hide) | ❌ | `propose.ts` WETH/EVM |
-| 46 | Allowlist copy base58 on Solana | ❌ | placeholder "0x…" |
-| 47 | Solana env example + Solana web build | ❌ | `.env.example`, `build-web.mjs` EVM |
+| 40 | Send: real fee, balance refresh | ✅ | fee hardcoded; balance stale after send |
+| 41 | xStocks disclosure + Terms/Risk | ✅ | none |
+| 42 | Portfolio history snapshots on Solana | ✅ | `snapshots.ts` EVM |
+| 43 | Cap/expiry risk alerts on Solana | ✅ | `alerts/evaluate.ts` EVM `readPolicy` |
+| 44 | History screen on Solana (port or hide) | ✅ | hidden | reads Base logs |
+| 45 | Chat proposals on Solana (port or hide) | ✅ | answers plainly | `propose.ts` WETH/EVM |
+| 46 | Allowlist copy base58 on Solana | ✅ | placeholder "0x…" |
+| 47 | Solana env example + Solana web build | ✅ | `.env.example`, `build-web.mjs` EVM |
 | 48 | iOS simulator run of the Solana build | ❌ | never run |
-| 49 | Safety/Settings sub-screens Solana-correct (Flatten, Policy, Recovery) | ❌ | EVM |
-| 50 | Networks/fee chips Solana-correct | ❌ | `/networks` lists Base |
+| 49 | Safety/Settings sub-screens Solana-correct (Flatten, Policy, Recovery) | ⚠️ | Flatten/Policy hidden; Recovery (key export) unchecked | EVM |
+| 50 | Networks/fee chips Solana-correct | ✅ | `/networks` lists Base |
 
 ### P2 / post-MVP
 | # | Item | Status |
@@ -291,22 +291,29 @@ Exit: a DCA of $10 NVDAx runs on schedule on the fork and appears in runs, holdi
 Exit: buy and sell on the fork report `jupiter-route`.
 
 ### Phase 6 — Hosting (owner approval for paid resources)
-- [NOT STARTED] **6.1** `.env.example` Solana section; Solana-aware `scripts/build-web.mjs` (sets
+- [DONE] **6.1** `.env.example` Solana section; Solana-aware `scripts/build-web.mjs` (sets
   `EXPO_PUBLIC_SOLANA_RPC`, API URL, chain), new Vercel project `xorr-solana`.
-- [NOT STARTED] **6.2** Fork image (`infra/solana-fork`): current Agave installer, the bootstrap's clones and mint
+- [DONE] **6.2** Fork image (`infra/solana-fork`) — rebuilt: bootstrap in-container, Agave 2.3 (3.x needs io_uring,
+  which Railway lacks), mainnet Token-2022 cloned, RPC+WS on one port via `rpc-proxy.mjs`, refuses to start without
+  `XORR_KEY_*`. Hosted and answering: https://solana-fork-production.up.railway.app. Was: current Agave installer, the bootstrap's clones and mint
   overrides, volume, RPC + WS exposed.
-- [BLOCKED on owner approval] **6.3** Railway project: fork validator, executor (`XORR_KEY_*` generated and stored as
+- [IN PROGRESS] **6.3** (owner approved 2026-09-19) Railway project `xorr-solana` (d34de763…): Postgres ✅, fork ✅,
+  executor deploying (https://executor-production-a672.up.railway.app). Keys generated and set as secrets only
+  (local copy `server/.env.railway-solana`, gitignored). Deploys go by `railway up <ctx> --path-as-root` because the
+  Railway GitHub app has no access to this repo. Was: fork validator, executor (`XORR_KEY_*` generated and stored as
   Railway secrets), Postgres. `ALLOWED_ORIGINS` set.
 - [BLOCKED on owner] **6.4** Privy dashboard: allow the hosted origin; Solana embedded wallets on.
 Exit: a fresh account on the hosted URL completes the core loop.
 
 ### Phase 7 — Polish and remaining P1
-- [NOT STARTED] 7.1 Receive-USDC QR; 7.2 Send fee + refresh; 7.3 xStocks disclosure + Terms/Risk; 7.4 portfolio
-  snapshots on Solana; 7.5 cap/expiry alerts on Solana; 7.6 allowlist copy; 7.7 iOS simulator run.
+- [DONE] 7.1 Solana Pay deposit code on real clusters (none on a fork, by design); 7.2 Send fee from the cluster + rent,
+  balance refresh; 7.3 xStocks risk section + grant-screen disclosure; 7.4 snapshots on Solana; 7.5 cap/expiry alerts
+  on Solana; 7.6 allowlist/network copy; chat proposals answer honestly on Solana; Compare hidden.
+- [NOT STARTED] 7.7 iOS simulator run.
 - [BLOCKED] 7.8 OpenRouter model (key); 7.9 MoonPay (keys).
 
 ### Phase 8 — Demo and submission
-- [NOT STARTED] 8.1 README Solana-first (Base material moved to `docs/base/`); 8.2 demo script; 8.3 recording;
+- [DONE] 8.1 README Solana-first (Base material moved to `docs/base/README-base.md`); 8.2 demo script; 8.3 recording;
   8.4 submission text; [owner] 8.5 repo public + submit.
 
 ### Phase 9 — Clawpump (last, walled off)
