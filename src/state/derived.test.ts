@@ -1123,3 +1123,16 @@ describe('quotedClose', () => {
     expect(q.realise).toBeLessThan(0);
   });
 });
+
+describe('timelineChange', () => {
+  it('states the change and its percent when the window opens above zero', async () => {
+    const { timelineChange } = await import('./derived');
+    expect(timelineChange([100, 110])).toEqual({ delta: 10, pct: 10 });
+  });
+
+  it('states nothing when the wallet was empty at the first reading — a deposit is not a return', async () => {
+    const { timelineChange } = await import('./derived');
+    expect(timelineChange([0, 500.68])).toBeNull();
+    expect(timelineChange([500])).toBeNull();
+  });
+});

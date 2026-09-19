@@ -55,7 +55,7 @@ import { system, type SectorClassification } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import type { Strategy } from '@/data/types';
-import { driftSentence, holdingDrift } from '@/state/derived';
+import { driftSentence, holdingDrift, timelineChange } from '@/state/derived';
 
 const GRAPH_H = 150;
 /** The day's closes on each card: `1H` reads one day, folded to twelve candles (src/data/marketData.ts). */
@@ -181,8 +181,7 @@ export default function Portfolio() {
   useFreshOnReturn(balance, positions, realised, strategies, runs, activity, history);
   const points = useMemo(() => (history.data?.points ?? []).map((p) => p.totalUsd), [history.data]);
   const firstAt = history.data?.points[0]?.at;
-  const graphDelta = points.length > 1 ? points[points.length - 1]! - points[0]! : 0;
-  const graphPct = points.length > 1 && points[0]! > 0 ? (graphDelta / points[0]!) * 100 : 0;
+  const graphChange = timelineChange(points);
 
   /*
    * What each held company does, from the SEC (`/market/classification`). Asked only for what is actually held, and
@@ -325,9 +324,9 @@ export default function Portfolio() {
                 <Text variant="footnote" color={colors.ink55}>
                   {firstAt !== undefined ? historyCaption(firstAt) : 'Every reading recorded so far'}
                 </Text>
-                {points.length > 1 ? (
-                  <Price variant="footnote" tone={pnlTone(graphDelta)}>
-                    {`${signedMoney(graphDelta)} · ${percent(graphPct)}`}
+                {graphChange ? (
+                  <Price variant="footnote" tone={pnlTone(graphChange.delta)}>
+                    {`${signedMoney(graphChange.delta)} · ${percent(graphChange.pct)}`}
                   </Price>
                 ) : null}
               </View>

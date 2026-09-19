@@ -178,6 +178,22 @@ export function leverageWarnBand(lev: number): WarnBand {
 /** state.md: unrealised = 318.40, margin = 3800. */
 export const POSITION_UNREALISED = 318.4;
 export const POSITION_MARGIN = 3800;
+/**
+ * The change the value line may state, from the readings it draws (2026-09-20).
+ *
+ * The readings are what the wallet was worth, deposits included, so a wallet that was empty when recording started
+ * showed its first deposit as a gain: "+$500.68 · +0.0%" — a number that is not a return, beside a percentage that
+ * cannot be computed from zero. Where the window opens at zero there is no return to state, and this says so by
+ * declining to state one; the balance above and the realised and open P&L below are unaffected.
+ */
+export function timelineChange(points: readonly number[]): { delta: number; pct: number } | null {
+  if (points.length < 2) return null;
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
+  if (!(first > 0)) return null;
+  return { delta: last - first, pct: ((last - first) / first) * 100 };
+}
+
 export const CLOSE_STEPS = [25, 50, 75, 100] as const;
 
 /**
