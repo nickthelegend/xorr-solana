@@ -233,10 +233,17 @@ export type AutonomousTradeResult =
  * price — so "breaking out near the upper band" was a sentence about arithmetic, not about the
  * market, and the two branches that read it could never fire.
  */
-async function observedRange(
+/**
+ * A band, or the reason there is none (2026-09-21).
+ *
+ * Three different facts used to arrive as one `null`: too few readings, not enough hours, or a band too narrow to read
+ * a percentile into. The agent's account of itself named the first of them whatever the truth was, which on a quiet
+ * weekend meant telling an owner it had no readings for a symbol it had been watching for two days.
+ */
+async function observedBand(
   symbol: string,
   minObservations: number,
-): Promise<{ high: number; low: number; since: Date } | null> {
+): Promise<BandResult> {
   const rows = await query<{ usd: string; at: Date | string }>(
     `SELECT usd, at FROM price_observations
       WHERE symbol = $1 AND at > now() - ($2 || ' hours')::interval
@@ -247,7 +254,13 @@ async function observedRange(
   const seen = rows
     .map((r) => ({ usd: Number(r.usd), at: new Date(r.at) }))
     .filter((r) => Number.isFinite(r.usd) && r.usd > 0 && !Number.isNaN(r.at.getTime()));
-  if (seen.length < minObservations) return null;
+  if (seen.length < minObservations) {
+    return {
+      range: null,
+      why: 'too_few',
+      detail: `has ${seen.length} recorded ${seen.length === 1 ? 'reading' : 'readings'}; it needs ${minObservations} over a day before it will judge a move`,
+    };
+  }
 
   /*
    * A band is a day of history at least, and wide enough to mean something (2026-09-19). On a fresh deployment the
@@ -256,12 +269,36 @@ async function observedRange(
    * toss with a stop attached.
    */
   const since = seen[0]!.at;
-  if (Date.now() - since.getTime() < MIN_SPAN_HOURS * 3_600_000) return null;
+  const watchedHours = Math.floor((Date.now() - since.getTime()) / 3_600_000);
+  if (Date.now() - since.getTime() < MIN_SPAN_HOURS * 3_600_000) {
+    return {
+      range: null,
+      why: 'too_short',
+      detail: `has been watched for ${watchedHours}h; it needs ${MIN_SPAN_HOURS}h before it will judge a move`,
+    };
+  }
   const prices = seen.map((r) => r.usd);
   const high = Math.max(...prices);
   const low = Math.min(...prices);
-  if (!(high > low) || (high - low) / low < MIN_BAND_FRACTION) return null;
-  return { high, low, since };
+  if (!(high > low) || (high - low) / low < MIN_BAND_FRACTION) {
+    const width = low > 0 ? ((high - low) / low) * 100 : 0;
+    return {
+      range: null,
+      why: 'too_narrow',
+      detail: `has moved ${width.toFixed(2)}% across ${watchedHours}h of readings; under ${(MIN_BAND_FRACTION * 100).toFixed(0)}% a percentile is noise, so it holds`,
+    };
+  }
+  return { range: { high, low, since }, why: null, detail: null };
+}
+
+type Band = { high: number; low: number; since: Date };
+type BandResult =
+  | { range: Band; why: null; detail: null }
+  | { range: null; why: 'too_few' | 'too_short' | 'too_narrow'; detail: string };
+
+/** The band alone, for callers that only act on one. */
+async function observedRange(symbol: string, minObservations: number): Promise<Band | null> {
+  return (await observedBand(symbol, minObservations)).range;
 }
 
 /** The least history a band needs, and the least width, before either strategy reads it. */
@@ -397,7 +434,8 @@ export async function evaluateBestSetup(
     }
 
     const corporateAction = await corporateActionSignal(stock);
-    const range = await observedRange(stock.symbol, settings.minObservations);
+    const band = await observedBand(stock.symbol, settings.minObservations);
+    const range = band.range;
     const earnings = await earningsWindow(stock.symbol);
     const slippageBps = offHoursGuard.suggestedSlippageBps;
 
@@ -463,7 +501,8 @@ export async function evaluateBestSetup(
       looks?.push({
         symbol: stock.symbol,
         verdict: 'no_band',
-        detail: `${stock.symbol} has no band yet: this app needs ${settings.minObservations} readings over a day before it will judge a move.`,
+        // The true one of the three reasons, not a guess: "no readings" about a symbol watched for two days is a lie.
+        detail: `${stock.symbol} ${band.detail ?? 'has no band this app can read yet'}.`,
       });
     } else if (position < settings.momentumEntryAt && position >= settings.dcaEntryBelow) {
       looks?.push({

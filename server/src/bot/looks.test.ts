@@ -51,3 +51,21 @@ describe('what the agent says when it takes nothing', () => {
     expect(nothingQualifiedDetail([])).toBe('Nothing in the xStocks universe reads as a setup right now.');
   });
 });
+
+/**
+ * The three reasons a band can be missing are three different facts, and the agent must not report one as another.
+ * On a quiet weekend the honest answer is "it has barely moved", not "I have no readings" about a symbol this
+ * deployment has been watching for two days.
+ */
+describe('why there is no band', () => {
+  it('keeps the three reasons distinct in the sentence it shows', () => {
+    const tooFew: SymbolLook = { symbol: 'NVDAx', verdict: 'no_band', detail: 'NVDAx has 2 recorded readings; it needs 6 over a day before it will judge a move.' };
+    const tooShort: SymbolLook = { symbol: 'TSLAx', verdict: 'no_band', detail: 'TSLAx has been watched for 5h; it needs 24h before it will judge a move.' };
+    const tooNarrow: SymbolLook = { symbol: 'AAPLx', verdict: 'no_band', detail: 'AAPLx has moved 0.38% across 49h of readings; under 1% a percentile is noise, so it holds.' };
+
+    expect(nothingQualifiedDetail([tooFew])).toContain('recorded readings');
+    expect(nothingQualifiedDetail([tooShort])).toContain('watched for 5h');
+    expect(nothingQualifiedDetail([tooNarrow])).toContain('0.38%');
+    expect(nothingQualifiedDetail([tooNarrow])).not.toContain('readings; it needs');
+  });
+});
