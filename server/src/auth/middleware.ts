@@ -65,8 +65,15 @@ const PUBLIC_PATHS = new Set([
   '/deposit/moonpay/webhook',
 ]);
 
-/** Path prefixes that are public. `/perp/:symbol` is a mark price, not user data. */
-const PUBLIC_PREFIXES = ['/perp/'];
+/**
+ * Path prefixes that are public. `/perp/:symbol` is a mark price, not user data.
+ *
+ * `/strategies/library` is the research book: 313 backtests from the engine that produced them,
+ * holding nobody's money and naming nobody's wallet. Public for the same reason `/verify` is —
+ * making a reader sign in to look at a catalogue of results would be theatre. Note it is a prefix
+ * under `/strategies`, which is NOT public: that one is the caller's own live strategies.
+ */
+const PUBLIC_PREFIXES = ['/perp/', '/strategies/library'];
 
 /**
  * The public surface, published.
