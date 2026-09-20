@@ -50,12 +50,38 @@ export default function Splash() {
           <Text variant="onboardingTitle" align="center">
             {brand.TAGLINE}
           </Text>
+          {/*
+            What it trades and the claim that separates it. The headline alone could have been any trading bot; someone
+            deciding in five seconds whether this is worth an account needs the nouns — xStocks, Solana, revoke.
+          */}
+          <Text
+            variant="secondary"
+            color={colors.ink55}
+            align="center"
+            style={{ marginTop: space.s10 }}
+          >
+            {brand.SUBLINE}
+          </Text>
         </Rise>
 
         <Rise index={2} style={{ marginTop: space.s26 }}>
           <Button label="Get started" onPress={() => router.push('/goals')} />
           {/* A wallet that already exists goes straight to the email step, not through the questions a new one answers. */}
           <Button label="Sign in" variant="ghost" onPress={signIn} style={{ marginTop: space.s10 }} />
+          {/*
+            A way in that costs nothing (2026-09-21).
+            
+            Everything this app can show — the market, what backs each token, the issuer's own controls over it — sat
+            behind an email code, so anyone weighing up whether to open an account had to open one first. The xStocks
+            market reads live without a session and is the most convincing thing here, so it is offered before the ask.
+          */}
+          <Button
+            label="See the market first"
+            variant="ghost"
+            onPress={() => router.push('/xstocks')}
+            style={{ marginTop: space.s4 }}
+            testID="welcome-see-market"
+          />
           {/*
             The two documents the sentence names, as links. It was plain text, so the first screen asked for agreement
             to documents it gave no way to read. Each link keeps a full-size touch area without growing the line.
