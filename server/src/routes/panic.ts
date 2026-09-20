@@ -33,6 +33,10 @@ import { append } from '../audit/log.js';
 import { holdings } from '../evm/balances.js';
 import { ON_SOLANA } from '../solana/clusters.js';
 import { solanaHoldings } from '../solana/holdings.js';
+import { readDelegation } from '../solana/delegation.js';
+import { readMintScale, toUiAmount } from '../solana/balances.js';
+import { XSTOCKS, xStockPriceUsd } from '../venues/xstocks.js';
+import { guardAndSpend } from '../executor/place.js';
 import { closeAsDelegate, readPolicy, waitForTx } from '../evm/delegation.js';
 import { buildSwap, SLIPPAGE, TOKENS, canonicalSymbol } from '../venues/oneinch.js';
 import { DELEGATION_ADDRESS } from '../evm/delegation.js';
@@ -396,6 +400,76 @@ panic.post('/panic/flatten', async (c) => {
  * the chain's own number and the fraction is applied to it in integer maths, so a 100% close is
  * exactly the balance and never eight wei over it.
  */
+/**
+ * A close on Solana: the owner's shares, sold under the sell approval they granted.
+ *
+ * `fraction` is of what they actually hold right now, read from the chain rather than from our
+ * ledger — a position row can lag a sale made somewhere else, and selling a fraction of a number
+ * that is too large is how a "close 25%" becomes a close of everything.
+ */
+async function closeHoldingOnSolana(params: {
+  wallet: { id: string; address: string };
+  symbol: string;
+  fraction: number;
+  actor: string;
+}): Promise<{ status: number; body: Record<string, unknown> }> {
+  const { wallet: w, symbol, fraction, actor } = params;
+  const stock = XSTOCKS[symbol];
+  if (!stock) {
+    return { status: 409, body: { status: 'blocked', reason: 'not_tradable', detail: `${symbol} is not a tradable xStock on this cluster.` } };
+  }
+
+  const held = await readDelegation(w.address, stock.address);
+  const units = toUiAmount(held.balanceAmount, await readMintScale(stock.address)) * fraction;
+  if (!(units > 0)) {
+    return { status: 409, body: { status: 'blocked', reason: 'not_held', detail: `No ${symbol} to sell.` } };
+  }
+
+  const price = await xStockPriceUsd(symbol).catch(() => null);
+  if (price === null || !(price > 0)) {
+    return { status: 502, body: { status: 'blocked', reason: 'no_price', detail: `No venue would price ${symbol} just now, so nothing was sold.` } };
+  }
+
+  const outcome = await guardAndSpend({
+    walletId: w.id,
+    ownerPubkey: w.address,
+    symbol,
+    usd: units * price,
+    units,
+    side: 'sell',
+    // A close only reduces exposure; the daily cap is a limit on spending, not on getting out.
+    skipRulesEngine: true,
+  });
+
+  if (!outcome.placed) {
+    return { status: 409, body: { status: 'blocked', reason: outcome.reason, detail: outcome.detail } };
+  }
+
+  await append({
+    walletId: w.id,
+    agent: actor,
+    action: `Sold ${symbol}`,
+    detail: `${actor === 'You' ? 'You closed' : `${actor} closed`} ${(fraction * 100).toFixed(0)}% of your ${symbol}: ${outcome.filledUnits.toFixed(8)} units at $${outcome.fillPrice.toFixed(2)}.`,
+    kind: 'trade',
+    payload: { symbol, units: outcome.filledUnits, usd: outcome.filledUnits * outcome.fillPrice, side: 'sell', venue: outcome.venue, signature: outcome.signature },
+  });
+
+  return {
+    status: 200,
+    body: {
+      status: 'filled',
+      symbol,
+      units,
+      /** What the fill actually made, not what the pre-trade price implied. */
+      usd: outcome.filledUnits * outcome.fillPrice,
+      price: outcome.fillPrice,
+      venue: outcome.venue,
+      signature: outcome.signature,
+      slot: outcome.slot,
+    },
+  };
+}
+
 export async function closeHolding(params: {
   wallet: { id: string; address: string };
   symbol: string;
@@ -407,6 +481,21 @@ export async function closeHolding(params: {
   const owner = w.address as Address;
   // `NVDAc` uppercased is not a token anyone can flatten.
   const symbol = canonicalSymbol(params.symbol);
+
+  /*
+   * Close on the chain this deployment is on (2026-09-20).
+   *
+   * Everything below is EVM — `readPolicy`, `holdings`, a 1inch swap — so on Solana this route
+   * answered with viem's own words: `Chain "Base Sepolia (local fork)" does not support contract
+   * "multicall3"`. The position screen does not go through here on Solana (a close is the owner's
+   * own signed sale), which is why it was never noticed — but `withdrawEverything` does, with
+   * `fraction: 1` per leg, so "Withdraw everything" sold nothing and surfaced a viem string.
+   *
+   * The sell itself is the one the exits already use: `guardAndSpend` with `side: 'sell'`, which
+   * moves the owner's shares only under the sell approval they granted, and refuses in its own
+   * words if the permission is gone. Nothing new is trusted here.
+   */
+  if (ON_SOLANA) return closeHoldingOnSolana({ wallet: w, symbol, fraction, actor });
 
   const policy = await readPolicy(owner);
   if (!policy || policy.revoked || policy.expiresAt <= Date.now()) {
