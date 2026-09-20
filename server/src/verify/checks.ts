@@ -30,6 +30,8 @@ import { health as graphHealth } from '../graph/client.js';
 import { STOCKS, equitiesFunctional } from '../venues/stocks.js';
 import { earningsCalendar } from '../market/edgar.js';
 import { markBroadcast } from '../http/request-id.js';
+import { ON_SOLANA, activeClusterKey } from '../solana/clusters.js';
+import { connection } from '../solana/connection.js';
 import {
   ensurePolicy as ensurePrivyPolicy,
   allowedDestinations as privyAllowedDestinations,
@@ -144,6 +146,17 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       claim: 'The app is talking to a real chain.',
       how: `eth_chainId + eth_blockNumber against ${rpcUrl}`,
       run: async () => {
+        /*
+         * The claim is chain-agnostic; the call that proves it is not (2026-09-20). This asked
+         * `eth_chainId` unconditionally, so on Solana the one check that matters most — is there a
+         * real chain behind this at all — reported `fail` against `127.0.0.1:8545` on a public
+         * endpoint anyone can read.
+         */
+        if (ON_SOLANA) {
+          const [version, slot] = await Promise.all([connection.getVersion(), connection.getSlot()]);
+          if (!(slot > 0)) throw new Error('the RPC reports no slot');
+          return `solana-core ${version['solana-core']} (${activeClusterKey()}) at slot ${slot}`;
+        }
         const [id, block] = await Promise.all([
           publicClient.getChainId(),
           publicClient.getBlockNumber(),
@@ -157,6 +170,7 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       claim: 'XorrDelegation is deployed and has code.',
       how: `eth_getCode ${DELEGATION_ADDRESS}`,
       run: async () => {
+        if (ON_SOLANA) skip('This deployment settles on Solana; this claim is about the Base build and is not one it can make here.');
         const code = await publicClient.getCode({ address: DELEGATION_ADDRESS });
         if (!code || code.length <= 4) throw new Error(`no code at ${DELEGATION_ADDRESS}`);
         // Bytes, not hex characters — the number an explorer shows.
@@ -275,6 +289,14 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       how: 'GET /v1/policies/:id on Privy, then an UNSIGNED PATCH that must be refused',
       timeoutMs: 20_000,
       run: async () => {
+        /*
+         * On Solana the control is not a Privy policy (2026-09-20). The permission here is an SPL
+         * `ApproveChecked` the owner signs and can revoke, read off the chain — `privyAllowedDestinations`
+         * is a list of EVM addresses and means nothing to this deployment. Reporting `fail` said the
+         * app had lost a control it does not use, on a public page.
+         */
+        if (ON_SOLANA)
+          skip('This deployment is controlled by an on-chain SPL approval the owner can revoke, not by a Privy policy.');
         const policy = await ensurePrivyPolicy();
         const dests = privyAllowedDestinations().length;
         if (!policy.owner_id) {
@@ -299,6 +321,14 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       how: 'eth_sendTransaction to an address the policy omits, through Privy',
       timeoutMs: 25_000,
       run: async () => {
+        /*
+         * A pass for the wrong reason is worse than a skip (2026-09-20). This probes the policy by
+         * sending an `eth_sendTransaction` that must be refused — and on Solana it IS refused, but
+         * because the wallet is not an Ethereum wallet, which proves nothing about any policy. The
+         * check went green on this deployment while testing nothing.
+         */
+        if (ON_SOLANA)
+          skip('The probe is an Ethereum send; a Solana wallet refuses it for the wrong reason, which would be a green row that tested nothing.');
         const walletId = await privyDemoWalletId();
         if (!walletId) skip('No policy-bound wallet on this deployment.');
         const chainId = CHAIN_KEY === 'base-sepolia' ? 84532 : 8453;
@@ -432,6 +462,7 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       claim: '1inch routes real liquidity, and the Route row names what it routed through.',
       how: '1inch v6 quote, 100 USDC → WETH on chain 8453',
       run: async () => {
+        if (ON_SOLANA) skip('This deployment settles on Solana; this claim is about the Base build and is not one it can make here.');
         const q = await quote({ inSymbol: 'USDC', outSymbol: 'WETH', amount: 100 });
         if (!(q.outAmount > 0)) throw new Error('quote returned zero');
         return `100 USDC → ${q.outAmount.toFixed(6)} WETH via ${q.venues.join(', ') || 'an unnamed route'}`;
@@ -453,6 +484,7 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       claim: 'The idle-cash rate is currentLiquidityRate read from the Aave v3 Pool on Base.',
       how: 'getReserveData(USDC) on 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
       run: async () => {
+        if (ON_SOLANA) skip('This deployment settles on Solana; this claim is about the Base build and is not one it can make here.');
         // Asked now: this check proves the read works, which a cached answer would not.
         const r = await usdcReserve(0);
         return `${(r.apy * 100).toFixed(2)}% a year, aToken ${r.aToken}`;
@@ -558,6 +590,7 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       claim: 'The bot pays its own gas and never touches the user’s ETH.',
       how: `eth_getBalance on the delegate key ${delegatePublicKey}`,
       run: async () => {
+        if (ON_SOLANA) skip('This deployment settles on Solana; this claim is about the Base build and is not one it can make here.');
         const eth = Number(formatEther(await publicClient.getBalance({ address: delegatePublicKey })));
         if (eth <= 0) throw new Error('the delegate has no ETH — every run would fail');
         return `${eth.toFixed(4)} ETH at ${delegatePublicKey}`;
@@ -568,6 +601,7 @@ export async function runChecks(owner?: Address): Promise<VerifyReport> {
       claim: 'The delegation contract never holds funds between trades.',
       how: 'balanceOf(delegation) for USDC and WETH',
       run: async () => {
+        if (ON_SOLANA) skip('This deployment settles on Solana; this claim is about the Base build and is not one it can make here.');
         const [usdc, weth] = await publicClient.multicall({
           allowFailure: false,
           contracts: [

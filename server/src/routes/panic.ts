@@ -31,6 +31,8 @@ import { currentWallet } from './wallet-context.js';
 import { tx } from '../db/index.js';
 import { append } from '../audit/log.js';
 import { holdings } from '../evm/balances.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { solanaHoldings } from '../solana/holdings.js';
 import { closeAsDelegate, readPolicy, waitForTx } from '../evm/delegation.js';
 import { buildSwap, SLIPPAGE, TOKENS, canonicalSymbol } from '../venues/oneinch.js';
 import { DELEGATION_ADDRESS } from '../evm/delegation.js';
@@ -129,20 +131,40 @@ panic.get('/panic/preview', async (c) => {
    * as a 500 carrying viem's own message.
    */
   const patience = screenPatience();
-  const held = await readChain(
-    'your holdings',
-    () => holdings(w.address as Address, { priceDeadlineMs: patience.priceMs }),
-    patience.chainReadMs,
-  );
-  const legs = held.filter((h) => h.usd >= DUST_USD);
+  /*
+   * Read the chain this deployment is actually on (2026-09-20).
+   *
+   * This called the EVM reader unconditionally — `holdings()` over a viem `Address` — so on Solana
+   * every request answered 502 `chain_read_failed`. `/withdraw-everything` is reachable here and
+   * linked from Explore and Send, which made a money path dead on the chain the product ships on.
+   * `solanaHoldings` was already there; nothing needed building, only asking the right one.
+   *
+   * An xStock nothing can price comes back `usd: null` rather than zero. Treating null as zero
+   * would drop a real holding below the dust line and quietly leave it behind in a flow whose whole
+   * promise is "everything", so an unpriced holding is a leg with no value, never an absent one.
+   */
+  const held = ON_SOLANA
+    ? (await readChain('your holdings', () => solanaHoldings(w.address), patience.chainReadMs)).xstocks.map((h) => ({
+        symbol: h.symbol,
+        units: h.units,
+        usd: h.usd,
+      }))
+    : await readChain(
+        'your holdings',
+        () => holdings(w.address as Address, { priceDeadlineMs: patience.priceMs }),
+        patience.chainReadMs,
+      );
+  const legs = held.filter((h) => h.usd === null || h.usd >= DUST_USD);
   return c.json({
     legs: legs.map((h) => ({ symbol: h.symbol, units: h.units, usd: h.usd })),
-    totalUsd: legs.reduce((a, h) => a + h.usd, 0),
+    totalUsd: legs.reduce((a, h) => a + (h.usd ?? 0), 0),
+    /** A holding is in the list that nothing could price, so `totalUsd` is short of what will sell. */
+    partial: legs.some((h) => h.usd === null),
     // Named so the screen can say it out loud rather than implying it.
     dustBelowUsd: DUST_USD,
     /** Said out loud so the screen can, rather than surprising someone afterwards. */
     slippagePct: SLIPPAGE.panic,
-    skipped: held.filter((h) => h.usd < DUST_USD).map((h) => h.symbol),
+    skipped: held.filter((h) => h.usd !== null && h.usd < DUST_USD).map((h) => h.symbol),
   });
 });
 
