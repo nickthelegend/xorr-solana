@@ -45,7 +45,7 @@ import {
 } from './risk-profile.js';
 import {
   evaluateOffHoursGuard,
-  referencePriceUsd,
+  referenceFor,
   type OffHoursGuardVerdict,
 } from '../market/nasdaq.js';
 
@@ -221,6 +221,8 @@ export type AutonomousTradeResult =
       executed: false;
       reason: string;
       detail: string;
+      /** What it looked at, when it got as far as looking. Absent when it stopped before the scan. */
+      looks?: SymbolLook[];
     };
 
 /**
@@ -231,10 +233,17 @@ export type AutonomousTradeResult =
  * price — so "breaking out near the upper band" was a sentence about arithmetic, not about the
  * market, and the two branches that read it could never fire.
  */
-async function observedRange(
+/**
+ * A band, or the reason there is none (2026-09-21).
+ *
+ * Three different facts used to arrive as one `null`: too few readings, not enough hours, or a band too narrow to read
+ * a percentile into. The agent's account of itself named the first of them whatever the truth was, which on a quiet
+ * weekend meant telling an owner it had no readings for a symbol it had been watching for two days.
+ */
+async function observedBand(
   symbol: string,
   minObservations: number,
-): Promise<{ high: number; low: number; since: Date } | null> {
+): Promise<BandResult> {
   const rows = await query<{ usd: string; at: Date | string }>(
     `SELECT usd, at FROM price_observations
       WHERE symbol = $1 AND at > now() - ($2 || ' hours')::interval
@@ -245,7 +254,13 @@ async function observedRange(
   const seen = rows
     .map((r) => ({ usd: Number(r.usd), at: new Date(r.at) }))
     .filter((r) => Number.isFinite(r.usd) && r.usd > 0 && !Number.isNaN(r.at.getTime()));
-  if (seen.length < minObservations) return null;
+  if (seen.length < minObservations) {
+    return {
+      range: null,
+      why: 'too_few',
+      detail: `has ${seen.length} recorded ${seen.length === 1 ? 'reading' : 'readings'}; it needs ${minObservations} over a day before it will judge a move`,
+    };
+  }
 
   /*
    * A band is a day of history at least, and wide enough to mean something (2026-09-19). On a fresh deployment the
@@ -254,12 +269,36 @@ async function observedRange(
    * toss with a stop attached.
    */
   const since = seen[0]!.at;
-  if (Date.now() - since.getTime() < MIN_SPAN_HOURS * 3_600_000) return null;
+  const watchedHours = Math.floor((Date.now() - since.getTime()) / 3_600_000);
+  if (Date.now() - since.getTime() < MIN_SPAN_HOURS * 3_600_000) {
+    return {
+      range: null,
+      why: 'too_short',
+      detail: `has been watched for ${watchedHours}h; it needs ${MIN_SPAN_HOURS}h before it will judge a move`,
+    };
+  }
   const prices = seen.map((r) => r.usd);
   const high = Math.max(...prices);
   const low = Math.min(...prices);
-  if (!(high > low) || (high - low) / low < MIN_BAND_FRACTION) return null;
-  return { high, low, since };
+  if (!(high > low) || (high - low) / low < MIN_BAND_FRACTION) {
+    const width = low > 0 ? ((high - low) / low) * 100 : 0;
+    return {
+      range: null,
+      why: 'too_narrow',
+      detail: `has moved ${width.toFixed(2)}% across ${watchedHours}h of readings; under ${(MIN_BAND_FRACTION * 100).toFixed(0)}% a percentile is noise, so it holds`,
+    };
+  }
+  return { range: { high, low, since }, why: null, detail: null };
+}
+
+type Band = { high: number; low: number; since: Date };
+type BandResult =
+  | { range: Band; why: null; detail: null }
+  | { range: null; why: 'too_few' | 'too_short' | 'too_narrow'; detail: string };
+
+/** The band alone, for callers that only act on one. */
+async function observedRange(symbol: string, minObservations: number): Promise<Band | null> {
+  return (await observedBand(symbol, minObservations)).range;
 }
 
 /** The least history a band needs, and the least width, before either strategy reads it. */
@@ -327,34 +366,76 @@ async function corporateActionSignal(stock: XStockToken): Promise<CorporateActio
  * only ever right for a caller with no wallet in hand — a demo script, or a preview of what the
  * agent would consider in general. `runAutonomousCycle` always passes the wallet's own.
  */
+/**
+ * What the agent saw in one symbol on one sweep, and why it did or did not act on it (2026-09-21).
+ *
+ * The gates below each `continue` on a reason that was computed and then dropped, so a hired agent that looked at
+ * eleven xStocks and took none of them had nothing to say for itself: the app read "No agent is trading right now",
+ * which is the same sentence it shows a wallet that hired nobody. A judge — or an owner — watching an agent do nothing
+ * cannot tell "it is working and nothing qualifies" from "it is broken". Every sweep now writes down what it looked at.
+ */
+export type SymbolLook = {
+  symbol: string;
+  /** `taken` is the one it acted on; everything else says which gate stopped it. */
+  verdict:
+    | 'not_on_cluster'
+    | 'no_price'
+    | 'held_off_hours'
+    | 'corporate_action'
+    | 'no_band'
+    | 'between_bands'
+    | 'paced'
+    | 'candidate';
+  /** One sentence a person can read, naming the number that decided it. */
+  detail: string;
+  /** Where the price sits in the recorded band, 0-1, when there is a band to sit in. */
+  position?: number;
+};
+
 export async function evaluateBestSetup(
   settings: RiskSettings = settingsFor(DEFAULT_RISK_PROFILE),
   /** Only setups these personas would take — the agents this wallet hired. Every persona when omitted. */
   personas?: ReadonlySet<string>,
   /** `persona:symbol` pairs not to take again — pacing (`pacingExclusions`). */
   exclude?: ReadonlySet<string>,
+  /** Filled with one entry per symbol looked at, so the caller can say what the agent saw. */
+  looks?: SymbolLook[],
 ): Promise<CandidateSetup | null> {
   const candidates: CandidateSetup[] = [];
   // Only what can settle here: a symbol with a price and no mint on this cluster is not a setup, it is a refund.
   const here = await mintsOnCluster(Object.values(XSTOCKS).map((s) => s.address));
 
   for (const stock of Object.values(XSTOCKS)) {
-    if (!here.has(stock.address)) continue;
+    if (!here.has(stock.address)) {
+      looks?.push({ symbol: stock.symbol, verdict: 'not_on_cluster', detail: `${stock.symbol} has no mint on this network, so it cannot settle here.` });
+      continue;
+    }
     const price = await xStockPriceUsd(stock.symbol).catch(() => null);
-    if (!price || price <= 0) continue;
+    if (!price || price <= 0) {
+      looks?.push({ symbol: stock.symbol, verdict: 'no_price', detail: `No venue would price ${stock.symbol} on this sweep.` });
+      continue;
+    }
 
-    const reference = await referencePriceUsd(stock.symbol);
+    const reference = await referenceFor(stock.symbol);
     const offHoursGuard = evaluateOffHoursGuard({
       symbol: stock.symbol,
       onChainPrice: price,
-      referencePrice: reference,
+      reference,
     });
 
     // The guard holding is the whole answer for this symbol: nothing scores past it.
-    if (offHoursGuard.action === 'hold') continue;
+    if (offHoursGuard.action === 'hold') {
+      looks?.push({
+        symbol: stock.symbol,
+        verdict: 'held_off_hours',
+        detail: `${stock.symbol}: ${offHoursGuard.reason}`,
+      });
+      continue;
+    }
 
     const corporateAction = await corporateActionSignal(stock);
-    const range = await observedRange(stock.symbol, settings.minObservations);
+    const band = await observedBand(stock.symbol, settings.minObservations);
+    const range = band.range;
     const earnings = await earningsWindow(stock.symbol);
     const slippageBps = offHoursGuard.suggestedSlippageBps;
 
@@ -375,6 +456,11 @@ export async function evaluateBestSetup(
       corporateAction.pending.effectiveAtMs - Date.now() <=
         settings.corporateActionWindowHours * 3_600_000
     ) {
+      looks?.push({
+        symbol: stock.symbol,
+        verdict: 'corporate_action',
+        detail: `${stock.symbol} has a split or dividend taking effect in about ${corporateAction.hoursUntil}h; this profile stands ${settings.corporateActionWindowHours}h clear of one.`,
+      });
       continue;
     }
     const offHoursPenalty = offHoursGuard.session === 'closed' ? 15 : 0;
@@ -405,6 +491,34 @@ export async function evaluateBestSetup(
     }
 
     const position = range ? bandPosition(price, range) : null;
+    /*
+     * The band verdict, recorded before the strategy branches below decide anything. `no_band` is the honest answer for
+     * a symbol this deployment has not watched long enough: the agent needs a day of its own readings before it will
+     * call anything a breakout, and saying so is better than silence.
+     */
+    const pct = position === null ? null : Math.round(position * 100);
+    if (!range || position === null) {
+      looks?.push({
+        symbol: stock.symbol,
+        verdict: 'no_band',
+        // The true one of the three reasons, not a guess: "no readings" about a symbol watched for two days is a lie.
+        detail: `${stock.symbol} ${band.detail ?? 'has no band this app can read yet'}.`,
+      });
+    } else if (position < settings.momentumEntryAt && position >= settings.dcaEntryBelow) {
+      looks?.push({
+        symbol: stock.symbol,
+        verdict: 'between_bands',
+        detail: `${stock.symbol} sits at the ${pct}th percentile of its $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band; this profile buys a breakout at the ${Math.round(settings.momentumEntryAt * 100)}th or a dip below the ${Math.round(settings.dcaEntryBelow * 100)}th.`,
+        position,
+      });
+    } else {
+      looks?.push({
+        symbol: stock.symbol,
+        verdict: 'candidate',
+        detail: `${stock.symbol} is at the ${pct}th percentile of its $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band — inside this profile's entry.`,
+        position,
+      });
+    }
 
     // 2. Momentum: near the top of the range this app has actually recorded.
     if (range && position !== null && position >= settings.momentumEntryAt) {
@@ -452,10 +566,60 @@ export async function evaluateBestSetup(
   const eligible = candidates.filter(
     (c) => (!personas || personas.has(c.persona)) && !exclude?.has(`${c.persona}:${c.symbol}`) && !exclude?.has(`*:${c.symbol}`),
   );
+  /*
+   * A symbol that WAS a setup and was held back by pacing says so, replacing its candidate line: "it qualified and I am
+   * holding off" is a different fact from "it did not qualify", and the pacing rules (one entry per symbol a day, an
+   * hour between entries) are the ones an owner is most likely to think is a bug.
+   */
+  if (looks) {
+    for (const c of candidates) {
+      if (eligible.includes(c)) continue;
+      const pacedOut = exclude?.has(`${c.persona}:${c.symbol}`) || exclude?.has(`*:${c.symbol}`);
+      if (!pacedOut) continue;
+      const at = looks.findIndex((l) => l.symbol === c.symbol);
+      const line: SymbolLook = {
+        symbol: c.symbol,
+        verdict: 'paced',
+        detail: `${c.symbol} reads as a setup, but this wallet has already entered it today or is inside the hour it waits between entries.`,
+      };
+      if (at >= 0) looks[at] = line;
+      else looks.push(line);
+    }
+  }
   if (eligible.length === 0) return null;
 
   eligible.sort((a, b) => b.score - a.score);
   return eligible[0] ?? null;
+}
+
+/**
+ * One sentence for a sweep that took nothing, built from what it actually saw (2026-09-21).
+ *
+ * Ordered by what an owner most needs to hear: a symbol held back by pacing (it qualified), then the nearest miss in
+ * the band, then the structural reasons. "Nothing qualified" on its own is what the agent used to say, and it is the
+ * one answer that leaves somebody unable to tell working from broken.
+ */
+export function nothingQualifiedDetail(looks: readonly SymbolLook[]): string {
+  const paced = looks.find((l) => l.verdict === 'paced');
+  if (paced) return paced.detail;
+
+  const withBand = looks.filter((l) => l.verdict === 'between_bands' && l.position !== undefined);
+  if (withBand.length > 0) {
+    const nearest = withBand.reduce((a, b) => ((b.position ?? 0) > (a.position ?? 0) ? b : a));
+    return `Looked at ${looks.length} xStocks and took none. Nearest was ${nearest.detail}`;
+  }
+
+  const held = looks.filter((l) => l.verdict === 'held_off_hours');
+  if (held.length > 0 && held.length >= looks.length / 2) {
+    return `Looked at ${looks.length} xStocks and took none: ${held[0]!.detail}`;
+  }
+
+  const noBand = looks.filter((l) => l.verdict === 'no_band');
+  if (noBand.length > 0) return `Looked at ${looks.length} xStocks and took none. ${noBand[0]!.detail}`;
+
+  return looks.length > 0
+    ? `Looked at ${looks.length} xStocks and took none; nothing was inside this profile's entry.`
+    : 'Nothing in the xStocks universe reads as a setup right now.';
 }
 
 /**
@@ -549,12 +713,14 @@ export async function runAutonomousCycle(
 
   // 4. The setup the caller brought, or the best one a hired agent would take — paced (D3, 2026-09-19).
   const exclude = await pacingExclusions(walletId, policy);
-  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired, exclude));
+  const looks: SymbolLook[] = [];
+  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired, exclude, looks));
   if (!bestSetup) {
     return {
       executed: false,
       reason: 'no_setup',
-      detail: 'Nothing in the xStocks universe reads as a setup right now.',
+      detail: nothingQualifiedDetail(looks),
+      looks,
     };
   }
 
@@ -708,6 +874,27 @@ export async function runAutonomousCycle(
 /**
  * One scheduler tick's worth: the eligible wallets, each past its own cooldown.
  */
+/**
+ * Records what the sweep just saw for one wallet, overwriting the last one.
+ *
+ * A live status, not history: the trail already keeps what the agent DID, and a row per sweep every thirty seconds
+ * would bury it. Failure is logged, never thrown — an agent must not stop trading because it could not write down that
+ * it was not trading.
+ */
+export async function recordLook(
+  walletId: string,
+  outcome: string,
+  headline: string,
+  looks: readonly SymbolLook[],
+): Promise<void> {
+  await query(
+    `INSERT INTO agent_looks (wallet_id, at, outcome, headline, looks)
+     VALUES ($1, now(), $2, $3, $4::jsonb)
+     ON CONFLICT (wallet_id) DO UPDATE SET at = now(), outcome = $2, headline = $3, looks = $4::jsonb`,
+    [walletId, outcome, headline, JSON.stringify(looks)],
+  ).catch((e: unknown) => log.error('[autonomous] could not record what the agent looked at:', e));
+}
+
 export async function autonomousAgentSweep(_now: Date = new Date()): Promise<number> {
   /*
    * The profile comes back with the wallet, because the cooldown is part of it.
@@ -743,9 +930,27 @@ export async function autonomousAgentSweep(_now: Date = new Date()): Promise<num
           LIMIT 1`,
         [w.id, AGENT_DECISION, String(Math.max(MIN_COOLDOWN_MINUTES, settingsFor(profile).cooldownMinutes))],
       ).catch(() => null);
-      if (recent) continue;
+      if (recent) {
+        // Said, not silent: the cooldown is the pacing rule most likely to look like an agent that has stopped working.
+        const minutes = Math.max(MIN_COOLDOWN_MINUTES, settingsFor(profile).cooldownMinutes);
+        await recordLook(
+          w.id,
+          'cooldown',
+          `Holding off: this wallet traded recently and waits ${minutes} minutes between autonomous entries.`,
+          [],
+        );
+        continue;
+      }
 
       const res = await runAutonomousCycle(w.id);
+      await recordLook(
+        w.id,
+        res.executed ? 'taken' : res.reason,
+        res.executed
+          ? `${res.setup.personaName} bought ${res.setup.symbol}: ${res.setup.reason}`
+          : res.detail,
+        res.executed ? [] : (res.looks ?? []),
+      );
       if (res.executed) {
         executedCount += 1;
         log.info(

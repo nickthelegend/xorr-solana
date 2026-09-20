@@ -460,6 +460,27 @@ export type StrategyBacktest = {
  * `fillsByVenue` counts where trades actually settled, from the venue each filled run recorded — closes
  * and flattens included. It is the claim the 1inch integration rests on, as a number.
  */
+/** One symbol the agent looked at, and the gate that stopped it. */
+export type AgentSymbolLook = {
+  symbol: string;
+  verdict:
+    | 'not_on_cluster'
+    | 'no_price'
+    | 'held_off_hours'
+    | 'corporate_action'
+    | 'no_band'
+    | 'between_bands'
+    | 'paced'
+    | 'candidate';
+  detail: string;
+  position?: number;
+};
+
+/** The sweep's own account of itself. `looked: false` until it has run once — never a status invented for a blank. */
+export type AgentLastLook =
+  | { looked: false }
+  | { looked: true; at: number; outcome: string; headline: string; symbols: AgentSymbolLook[] };
+
 export type AgentsStopped = { stopped: boolean; since: number | null };
 
 /** Oldest first. `reason` says why each value was read: the 15-minute interval, or a fill, close or withdrawal. */
@@ -844,6 +865,13 @@ export const system = {
   }) => api.post<StrategyBacktest>('/strategies/backtest', body),
   proposals: () => api.get<ProposalRow[]>('/proposals'),
   notificationPrefs: () => api.get<NotificationPref[]>('/notifications/prefs'),
+  /**
+   * What the agent saw on its last sweep (2026-09-21).
+   *
+   * The agent takes nothing far more often than it trades — that is the point of the gates — and until now the app had
+   * no way to say so: Home read "No agent is trading right now", which is also what a wallet that hired nobody sees.
+   */
+  agentLastLook: () => api.get<AgentLastLook>('/agents/last-look'),
   /** The stop-all the executor enforces on every run, proposal and order (PLAN.md 2.14). */
   agentsStopped: () => api.get<AgentsStopped>('/agents/stopped'),
   stopAgents: () => api.post<AgentsStopped>('/agents/stop', {}),

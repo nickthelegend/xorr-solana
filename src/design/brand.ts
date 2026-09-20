@@ -16,6 +16,14 @@ export const brand = {
   domain: 'xorr.finance',
   /** Revised for the pivot — PLAN.md §1.1 "the bot is the product". */
   TAGLINE: 'A bot that trades while you get on with your life',
+  /**
+   * What it trades, where, and the thing that makes it different — the first screen said none of the three (2026-09-21).
+   *
+   * Somebody landing here saw "a bot that trades" and nothing to tell it apart from every other trading bot: not that
+   * it trades tokenized US stocks, not that it runs on Solana, and not the only claim that matters — that it spends
+   * inside a permission on the chain that the owner can take back in one tap, and never holds the money.
+   */
+  SUBLINE: 'Tokenized US stocks on Solana, traded inside a permission you can revoke in one tap. It never holds your money.',
   /** screens.md screen 1 terms line. */
   TERMS: 'By continuing you agree to the Terms and Privacy Policy.',
 } as const;

@@ -35,6 +35,20 @@ import { useNow } from '@/state/useNow';
 import { repos } from '@/data';
 import { kindLabel, labelFigure } from '@/strategies/ladder';
 import { PROFILE_TITLE, type RiskProfile, type RiskSettings } from '@/bot/risk';
+import { system, type AgentLastLook } from '@/data/system';
+import { clock } from '@/format';
+
+/** The gate that stopped a symbol, in two or three words for the right-hand column. */
+const VERDICT_LABEL: Record<string, string> = {
+  not_on_cluster: 'not here',
+  no_price: 'no price',
+  held_off_hours: 'market shut',
+  corporate_action: 'split due',
+  no_band: 'no band yet',
+  between_bands: 'mid-band',
+  paced: 'paced',
+  candidate: 'qualified',
+};
 
 /** Relative time, in the coarsest unit that still says something useful. */
 function when(at: number, now: number): { label: string; overdue: boolean } {
@@ -73,11 +87,14 @@ type AgentPreview = {
  */
 function AgentNext({
   preview,
+  lastLook,
   now,
   onEditRisk,
   onOpenBasket,
 }: {
   preview: AgentPreview;
+  /** What the sweep saw last time, so this panel can say what it did rather than only what it will do. */
+  lastLook: AgentLastLook | undefined;
   now: number;
   onEditRisk: () => void;
   onOpenBasket: () => void;
@@ -166,6 +183,35 @@ function AgentNext({
         Which of them it can actually act on is read at the moment it looks — a live price, the band
         it has recorded, the Nasdaq session, and whether the mint has a split or dividend queued.
       </Text>
+
+      {/*
+        What it saw last time, symbol by symbol (2026-09-21).
+
+        The list above is what the agent WILL look at; this is what it did look at, and the gate that stopped each one.
+        Without it, an agent that takes nothing for an hour is indistinguishable from one that has stopped working —
+        which is exactly the doubt an autonomous product has to answer.
+      */}
+      {lastLook?.looked ? (
+        <View style={{ gap: space.s8, marginTop: space.s6 }}>
+          <Text variant="cardTitle">{`Last look · ${clock(lastLook.at)}`}</Text>
+          <Text variant="secondarySm" color={colors.ink55}>
+            {lastLook.headline}
+          </Text>
+          {lastLook.symbols.map((l) => (
+            <Row
+              key={l.symbol}
+              title={l.symbol}
+              secondary={l.detail}
+              value={
+                <Text variant="footnote" color={l.verdict === 'candidate' ? colors.up : colors.ink55}>
+                  {VERDICT_LABEL[l.verdict] ?? l.verdict}
+                </Text>
+              }
+              height={size.rowLg}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -181,6 +227,8 @@ export default function Schedule() {
    * they came for.
    */
   const agent = useAsync(() => api.get<AgentPreview>('/agents/preview'), []);
+  /* What the sweep saw last time. Read beside the preview, and a failure costs only this panel's lower half. */
+  const lastLook = useAsync(() => system.agentLastLook(), []);
 
   const rows = useMemo(
     () =>
@@ -211,6 +259,7 @@ export default function Schedule() {
               <View style={{ marginBottom: space.s20 }}>
                 <AgentNext
                   preview={agent.data}
+                  lastLook={lastLook.data}
                   now={now}
                   onEditRisk={() => router.push('/agent/risk')}
                   onOpenBasket={() => router.push('/agent/basket')}

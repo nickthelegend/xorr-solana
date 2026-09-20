@@ -338,6 +338,35 @@ agents.get('/agents/basket/runs', async (c) => {
  * moved, and the drift would show up as a screen confidently describing behaviour the agent no
  * longer has.
  */
+/**
+ * GET /agents/last-look — what the agent saw on its most recent sweep (2026-09-21).
+ *
+ * The one thing the app could never answer: a hired agent takes nothing for an hour and Home reads "No agent is
+ * trading right now", which is also what a wallet that hired nobody sees. Working and broken looked identical. This is
+ * the sweep's own account of itself — when it last looked, what it looked at, and the gate that stopped each symbol.
+ *
+ * Never invents a status: a wallet whose agent has not swept yet gets `looked: false`, and the screens say the sweep
+ * has not run rather than drawing an encouraging sentence over nothing.
+ */
+agents.get('/agents/last-look', async (c) => {
+  const w = await currentWallet(c);
+  if (!w) return c.json({ error: 'no_wallet' }, 400);
+
+  const row = await one<{ at: Date; outcome: string; headline: string; looks: unknown }>(
+    `SELECT at, outcome, headline, looks FROM agent_looks WHERE wallet_id = $1`,
+    [w.id],
+  );
+  if (!row) return c.json({ looked: false });
+
+  return c.json({
+    looked: true,
+    at: new Date(row.at).getTime(),
+    outcome: row.outcome,
+    headline: row.headline,
+    symbols: Array.isArray(row.looks) ? row.looks : [],
+  });
+});
+
 agents.get('/agents/risk-profile', async (c) => {
   const w = await currentWallet(c);
   if (!w) return c.json({ error: 'no_wallet' }, 400);

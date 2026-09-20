@@ -35,6 +35,14 @@ const DOT = 7;
 const DIM = 0.35;
 
 export interface TradingTickerProps {
+  /**
+   * What the agent's last sweep said for itself, when it is not trading.
+   *
+   * Its headline replaces "No agent is trading right now": the agent is idle almost always, and an owner cannot tell a
+   * working agent from a stopped one unless the idle line says what it looked at.
+   */
+  lastLook?: { headline: string } | null;
+
   /** The recorded runs, or undefined while the read is out. */
   runs: readonly RunLike[] | undefined;
   /** The read came back unable to answer. Never resolved into "nothing is happening". */
@@ -45,10 +53,10 @@ export interface TradingTickerProps {
   testID?: string;
 }
 
-export function TradingTicker({ runs, failed = false, now, style, testID }: TradingTickerProps) {
+export function TradingTicker({ runs, failed = false, now, lastLook, style, testID }: TradingTickerProps) {
   const reduced = useReducedMotion();
   const state = tradingNow(runs, { failed, now });
-  const line = tradingLine(state);
+  const line = tradingLine(state, lastLook);
   const live = state.kind === 'trading';
 
   /* 1 at full, dimmer at the bottom of the breath. Only ever driven while something is genuinely in flight. */
