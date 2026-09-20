@@ -4,7 +4,7 @@
  */
 import React, { useEffect } from 'react';
 import { Stack, router, usePathname } from 'expo-router';
-import { solanaRedirect } from '@/nav/solanaRoutes';
+import { hiddenOn, solanaRedirect } from '@/nav/solanaRoutes';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -62,6 +62,18 @@ function SolanaRouteGuard() {
     if (to && to !== path) router.replace(to as never);
   }, [path]);
   return null;
+}
+
+/**
+ * A screen this build does not have is not mounted while the guard above navigates away (2026-09-20).
+ *
+ * That guard redirects in an effect, which runs AFTER the screen has mounted and started its own reads: `/judge` put a
+ * 400 in the network tab on its way out, asking the executor about a Base-only screen. Hidden routes render nothing for
+ * the frame or two the redirect takes. Routes that merely MOVE — `/swap` to the xStocks market — keep rendering, because
+ * there the destination is the point and a blank flash would be the only thing the user saw.
+ */
+function useHiddenHere(): boolean {
+  return hiddenOn(usePathname());
 }
 
 function NotificationRouting() {
@@ -142,6 +154,23 @@ export default function RootLayout() {
           spanning the whole window.
         */}
         <PhoneFrame>
+        <AppRoutes />
+        {/* After the Stack, so `useRouter` resolves against a mounted navigator. */}
+        <NotificationRouting />
+        <SolanaRouteGuard />
+        <ChatDrawer />
+        </PhoneFrame>
+        </ReachabilityProvider>
+      </SafeAreaProvider>
+      </AppPrivyProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+/** The navigator itself, so a hidden route can render nothing while the guard navigates away. */
+function AppRoutes() {
+  if (useHiddenHere()) return null;
+  return (
         <Stack
           screenOptions={{
             headerShown: false,
@@ -175,15 +204,6 @@ export default function RootLayout() {
           {/* Swap rises from the bottom, from the tab bar's centre: a sheet over the screen it was asked from. */}
           <Stack.Screen name="swap" options={{ presentation: 'modal' }} />
         </Stack>
-        {/* After the Stack, so `useRouter` resolves against a mounted navigator. */}
-        <NotificationRouting />
-        <SolanaRouteGuard />
-        <ChatDrawer />
-        </PhoneFrame>
-        </ReachabilityProvider>
-      </SafeAreaProvider>
-      </AppPrivyProvider>
-    </GestureHandlerRootView>
   );
 }
 
