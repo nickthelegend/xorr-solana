@@ -45,7 +45,7 @@ import {
 } from './risk-profile.js';
 import {
   evaluateOffHoursGuard,
-  referencePriceUsd,
+  referenceFor,
   type OffHoursGuardVerdict,
 } from '../market/nasdaq.js';
 
@@ -416,11 +416,11 @@ export async function evaluateBestSetup(
       continue;
     }
 
-    const reference = await referencePriceUsd(stock.symbol);
+    const reference = await referenceFor(stock.symbol);
     const offHoursGuard = evaluateOffHoursGuard({
       symbol: stock.symbol,
       onChainPrice: price,
-      referencePrice: reference,
+      reference,
     });
 
     // The guard holding is the whole answer for this symbol: nothing scores past it.

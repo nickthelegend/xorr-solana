@@ -34,6 +34,17 @@ vi.mock('../venues/xstocks.js', () => ({
 vi.mock('../market/nasdaq.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./../market/nasdaq.js')>()),
   referencePriceUsd: (symbol: string) => referencePriceMock(symbol),
+  /*
+   * The faked source is the issuer's mark, which is what `referenceFor` falls back to when Pyth has
+   * nothing. Naming it that way keeps these cases testing the drift arithmetic rather than the
+   * on-chain read, which has its own suite in `market/pyth.test.ts`.
+   */
+  referenceFor: async (symbol: string) => {
+    const usd = await referencePriceMock(symbol);
+    return usd === null || usd === undefined
+      ? null
+      : { usd, source: 'issuer' as const, label: "the issuer's mark for the share", publishedAt: null };
+  },
 }));
 
 const applyFillMock = vi.fn();
@@ -556,6 +567,7 @@ describe('autonomous xStocks trading agent', () => {
           spreadBps: 0,
           spreadPct: 0,
           action: 'normal' as const,
+          referenceSource: 'pyth' as const,
           suggestedSlippageBps: 50,
           reason: 'Nasdaq regular hours.',
         },
