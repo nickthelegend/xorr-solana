@@ -128,29 +128,52 @@ async function record(symbol: string, bars: Bar[]): Promise<number> {
 
 export type SeedResult = { symbol: string; inserted: number; bars: number; pool: string | null };
 
-let seeded = false;
+/**
+ * Symbols whose six weeks are already in. Only a sweep that actually wrote rows marks one done, so
+ * a symbol lost to a rate limit is retried rather than written off for the life of the process.
+ */
+const done = new Set<string>();
+let lastSweepAt = 0;
 
-/** Testing only — the module-level latch would otherwise carry one case into the next. */
+/** Testing only — module-level progress would otherwise carry one case into the next. */
 export function resetSeedLatch(): void {
-  seeded = false;
+  done.clear();
+  lastSweepAt = 0;
 }
 
 /**
- * Backfill every xStock's history once.
+ * How many symbols one sweep attempts, and how often a sweep may run.
  *
- * Sequential on purpose. The free tier allows about thirty requests a minute and answers a burst
- * with 429s; `getJson` already spaces per host and honours `Retry-After`, and going one at a time
- * keeps the whole sweep inside that budget rather than fighting it.
+ * The first implementation walked all eleven back to back and seeded exactly two. GeckoTerminal's
+ * free tier answers a burst with 429s well before its documented thirty-a-minute, `getJson`'s
+ * breaker then opens on the host, and every remaining symbol resolved to "no pool" — which looked
+ * identical to a symbol that genuinely has none. Two symbols a minute is slower than the limit
+ * rather than at it, and the whole universe is in within about six minutes of boot.
+ */
+const PER_SWEEP = 2;
+const SWEEP_EVERY_MS = Number(process.env.HISTORY_SWEEP_MS ?? 60_000);
+
+/** Whether every symbol has its history, so the caller can stop asking. */
+export function historyComplete(): boolean {
+  return done.size >= Object.keys(XSTOCKS).length;
+}
+
+/**
+ * Backfill the next few symbols that still have no history.
  *
- * A symbol that fails is logged and skipped. One unindexed pool is not a reason to leave the other
- * ten without a band.
+ * Paced rather than latched: called on every tick, it does nothing until `SWEEP_EVERY_MS` has
+ * passed, then takes the next `PER_SWEEP` symbols that are not done. A symbol that fails — rate
+ * limit, timeout, an index that does not know it yet — simply stays on the list for the next sweep.
  */
 export async function seedHistory(force = false): Promise<SeedResult[]> {
-  if (seeded && !force) return [];
-  seeded = true;
+  if (!force && Date.now() - lastSweepAt < SWEEP_EVERY_MS) return [];
+  lastSweepAt = Date.now();
+
+  const pending = Object.values(XSTOCKS).filter((t) => !done.has(t.symbol));
+  if (pending.length === 0) return [];
 
   const out: SeedResult[] = [];
-  for (const token of Object.values(XSTOCKS)) {
+  for (const token of pending.slice(0, PER_SWEEP)) {
     try {
       const pool = await deepestUsdcPool(token.symbol, token.address);
       if (!pool) {
@@ -158,19 +181,23 @@ export async function seedHistory(force = false): Promise<SeedResult[]> {
         continue;
       }
       const bars = await poolCloses(pool);
+      if (bars.length === 0) {
+        out.push({ symbol: token.symbol, inserted: 0, bars: 0, pool });
+        continue;
+      }
       const inserted = await record(token.symbol, bars);
+      /*
+       * Done on bars, not on rows inserted. A redeploy re-reads the same six weeks and inserts
+       * nothing, which is the system working — treating zero inserts as failure would make every
+       * restart walk the whole universe again forever.
+       */
+      done.add(token.symbol);
       out.push({ symbol: token.symbol, inserted, bars: bars.length, pool });
+      log.info(`[history] ${token.symbol}: ${bars.length} bars, ${inserted} new (${done.size}/${Object.keys(XSTOCKS).length})`);
     } catch (e) {
-      log.info(`[history] ${token.symbol}: ${e instanceof Error ? e.message : e}`);
+      log.info(`[history] ${token.symbol} deferred: ${e instanceof Error ? e.message : e}`);
       out.push({ symbol: token.symbol, inserted: 0, bars: 0, pool: null });
     }
   }
-
-  const total = out.reduce((n, r) => n + r.inserted, 0);
-  const missing = out.filter((r) => r.pool === null).map((r) => r.symbol);
-  log.info(
-    `[history] seeded ${total} hourly closes across ${out.filter((r) => r.inserted > 0).length} symbols` +
-      (missing.length > 0 ? `; no indexed pool for ${missing.join(', ')}` : ''),
-  );
   return out;
 }
