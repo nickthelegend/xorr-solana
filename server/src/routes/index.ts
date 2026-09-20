@@ -509,7 +509,21 @@ routes.get('/delegation', async (c) => {
       venueAllowlist: ['jupiter'],
       withdrawalAllowlist: [],
       revoked: p.revoked,
-      onChainRemainingUsd: p.remainingTodayUsd,
+      /*
+       * Named for what it is (2026-09-20).
+       *
+       * `onChainRemainingUsd` carried a claim it does not earn on Solana. On Base the contract
+       * tracked the daily spend itself, so the remainder for today genuinely came off the chain.
+       * Here the day is ours: the SPL approval is a single total the chain decrements on every
+       * delegate transfer, and the daily cap is enforced by the executor against its own tally.
+       * Reporting that executor arithmetic under a name beginning "onChain" is the kind of small
+       * lie this product exists not to tell — measured today, it read 1544 while the chain's own
+       * number was 4744.
+       *
+       * `allowanceUsd` below IS the chain's: verified on a live fill, $11 spent took the SPL
+       * delegated amount from 4755 to 4744 and the balance with it.
+       */
+      remainingTodayUsd: p.remainingTodayUsd,
       spentTodayUsd: p.spentTodayUsd,
       /** What the chain itself still lets the bot move, whatever the day. */
       allowanceUsd: p.allowanceUsd,
