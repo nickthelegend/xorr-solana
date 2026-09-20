@@ -126,3 +126,85 @@ The run uses a **fresh Privy test account** so the first-run path is the real on
 | J3 | No mocks | No mock, stub, fake, dummy, placeholder or TODO in any production path. |
 | J4 | Suites and CI | App and server suites pass; CI green on main. |
 | J5 | Route guard | No Base-only screen is reachable; a hidden route lands on "Not on Solana". |
+
+---
+
+# The run — 2026-09-20, hosted, fresh account `test-3645` (wallet `B3nvEG…AyvW`)
+
+Executed against https://xorr-solana.vercel.app in Chrome. A deliberate refusal that the item is testing (a 409 for a
+capped buy, a 409 `cooling_off`) is the correct result, not a network error; everything else ≥ 400 fails the item.
+
+| # | Status | Evidence |
+|---|---|---|
+| A1 | PASS | 200, welcome screen. |
+| A2 | PASS | `ok:true`, `solana-fork`, postgres/rpc/gas/upstreams up. |
+| A3 | PASS | Slot 141250 → 141260. |
+| A4 | PASS | `/metrics` served fills from earlier runs across six redeploys today. |
+| B1 | PASS | Welcome, no console error. |
+| B2 | PASS | `/portfolio` "Sign in to see this.", `/safety` "NOT SIGNED IN … Anything you granted stays in force.", `/send` "Sign in to send." |
+| B3 | PASS | Footer "0 selected", Continue `aria-disabled=true`, pressing it stayed on /goals. |
+| B4 | PASS | "1 selected · Aggressive" → /wallet. |
+| B5 | PASS | "not-an-email" left the button disabled; no code field appeared. |
+| B6 | PASS | "That code is not right. Check it and try again."; no session. |
+| B7 | PASS | Wallet created, Privy Solana embedded wallet `B3nvEG…AyvW`. |
+| B8 | PASS | Address shown, no card button. |
+| B9 | PASS | Double-clicked: exactly 500 USDC and 0.5 SOL on chain, "Available again Mon 5:08 AM". |
+| B10 | PASS | Aggressive carried to the grant (risk profile posted after signing). |
+| C1 | PASS | All five honesty cards present, including the sell approval and the US-persons warning. |
+| C2 | PASS | Floors at $200/day; cards read $200/day and $600 in all. |
+| C3 | PASS | "Not yet" → Home with NOT GRANTED. |
+| C4 | PASS | "You have not given xorr permission to spend yet…" plus a Give permission action. |
+| C5 | PASS | Chain: USDC delegate `ACikuh` for **exactly 600**, plus sell approvals on all five fork xStocks. |
+| C6 | PASS | Home ARMED, Safety LIVE. |
+| D1 | PASS | Eleven rows, eleven issuer logos, sectors, filter narrows. |
+| D2 | PASS | Pay, expected, impact, slippage, fee, route, minimum — all present. |
+| D3 | PASS | "That would take today past your $200 cap. $200.00 is left." |
+| D4 | PASS | "more than your permission still allows in total: 600.00 USDC … is left." |
+| D5 | PASS | Double-clicked: one fill, USDC 500 → 400, approval 600 → 500, "Routed by Jupiter". |
+| D6 | PASS | $1,009 against 0.4494 held quoted 0.4486 and said "so this sells all of it". |
+| D7 | PASS | Sold 0.4486 for $99.56; chain USDC 400 → 499.56, shares gone. |
+| D8 | **FAIL → fixed → PASS** | Screen was right but fired 4×404 + 502 for an unlisted symbol. Fixed (the ticket asks nothing until the catalogue confirms); re-run: zero failed requests, real tickets unaffected. |
+| D9 | PASS | Positions with entry, size, value, P&L; no deposit shown as a gain. |
+| D10 | PASS | Preview "frees $50.00", fill $50.00, half the position left. |
+| E1 | PASS | Momentum Scout HIRED, recorded in the trail. |
+| E2 | PASS | Weekly NVDAx buy created with its next run. |
+| E3 | PASS | Filled through Jupiter (AAPLx $50, `22NbVe3x…`, venue `jupiter-route`). |
+| E4 | PASS | Second Run now: "Already ran this period", USDC unchanged. |
+| E5 | PASS | Pause 3 → 2 running, resume 2 → 3. |
+| E6 | PASS | Make agent disabled until name, description, persona and a strategy; then hired with a live strategy. |
+| E7 | PASS | "MSFTx · $25.00 a week". |
+| E8 | PASS | Take-profit armed from Auto Close fired unattended: MSFTx 0.0505 → 0 on chain, "reached the target at $499.71: sold 0.050529 at $493.18 through Jupiter" (`ZHW9c6nC…`). |
+| — | **FAIL → fixed → PASS** | A run refused by the cap consumed its period. Fixed (the refused row keeps history under its own key); verified live: refused on an exhausted cap, then **filled** after the cap was raised. |
+| — | **FAIL → fixed → PASS** | An exit recorded no venue (`unrecorded` in `/metrics`). Fixed; the MSFTx exit now records `venue: jupiter-route, side: sell`. |
+| F1 | PASS | One signature; all six accounts read delegate none; STOPPED. |
+| F2 | PASS | "permission has been revoked on-chain, so nothing will be placed." |
+| F3 | PASS | Strategies: "Trading is stopped: the permission is revoked on-chain…" |
+| F4 | PASS | One signature restored all six; LIVE; banner cleared. |
+| F5 | PASS | "You cancelled the signature, so nothing changed."; chain untouched, still LIVE. |
+| G1 | PASS | EVM address refused ("Solana addresses are base58 public keys") and not added. |
+| G2 | PASS | Added Pending, "Usable from Mon 5:51 AM, in 24 h". |
+| G3 | PASS | Send disabled with the cooling-off explained; server `/withdrawal-addresses/check` → 409 `cooling_off`. |
+| G4 | PASS | Names all four positions and ~$301.82, "None is unlocked yet." |
+| G5 | PASS | Privy's own export window opened for this wallet; key never seen by the app. |
+| H1 | PASS | Every action with local time (5:54 AM against a 05:54 clock), amounts, explorer links. |
+| H2 | PASS | Each fill with strategy, amount and units. |
+| H3 | PASS | "Unbroken — 31 entries … 31 of 31 rows still hash to their own contents." |
+| H4 | PASS | The chain, xorr, Jupiter, Backed, CoinGecko, EDGAR, Privy — and no Base source. |
+| H5 | PASS | Venue jupiter; permission cap $600, expiry Sep 23, delegate; network solana-fork. |
+| H6 | PASS | "31 rows · xorr-audit.csv". |
+| H7 | PASS | Issuer powers and the on-chain revoke both stated. |
+| H8 | PASS | Opens on NVDAx seeded at $235.00 (5% over live); created and listed. |
+| I1 | PASS | Privy: OTP sign-in, wallet creation, four signing sheets, export — all real. |
+| I2 | PASS | Every fill "Routed by Jupiter"; runs record `venue: jupiter-route`. |
+| I3 | PASS | Backed proof of reserves: ratio 1.0013×, 185,727.25 shares held, attested 24 min ago, custody Alpaca, issuer controls listed. |
+| I4 | PASS | The fork's NVDAx mint is Token-2022 with `scaledUiAmountConfig` multiplier 1.00092 and a scheduled next multiplier. |
+| I5 | **UNTESTABLE (real answer)** | No `OPENROUTER_API_KEY` anywhere in the repo, env or Railway. The app answers "I cannot answer that here: this build has no language model" — correct for the missing key, but a real model answer cannot be tested. |
+| I6 | **UNTESTABLE** | No MoonPay keys anywhere. The app states card deposits are not configured, which is the correct behaviour without them. |
+| J1 | PASS | No console error across the whole walk. |
+| J2 | PASS | No response ≥ 400 outside the deliberate refusals the items test. |
+| J3 | PASS | Zero mock/stub/fake/dummy/placeholder/TODO in `app/`, `src/`, `server/src` production paths. |
+| J4 | PASS | App 2,648 and server 1,369 tests; CI green on main. |
+| J5 | PASS | `/backtest` → "Not on Solana". |
+
+**Result: 65 of 67 items PASS, 0 FAIL, 2 untestable without credentials that exist nowhere (I5, I6).** Three defects
+were found, fixed at the root and re-verified in the browser during the run.
