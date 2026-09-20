@@ -17,6 +17,7 @@ import { runStrategy, type StrategyRow } from './run.js';
 import { autonomousAgentSweep } from '../bot/autonomous.js';
 import { basketSweep } from '../bot/basket.js';
 import { observeSweep } from '../market/observe.js';
+import { seedHistory } from '../market/history.js';
 import { evaluateAlerts } from '../alerts/evaluate.js';
 import { anchorSweep } from '../audit/anchor-sweep.js';
 import { sweepCorporateActions } from '../venues/corporate-actions.js';
@@ -238,6 +239,22 @@ export async function guardedTick(now: Date = new Date()): Promise<number | 'ski
 
 export function startScheduler(): NodeJS.Timeout {
   console.log(`  scheduler every ${TICK_MS}ms`);
+
+  /*
+   * Fill in the price history this deployment was not running for, once, in the background.
+   *
+   * The agent's range strategies read a band out of `price_observations`, and a deployment that has
+   * only ever recorded its own readings has no band until it has been up for a day — so a fresh
+   * clone ran an agent that was armed, funded and structurally unable to take a setup until
+   * tomorrow. `seedHistory` backfills six weeks of real hourly closes from the pools themselves.
+   *
+   * Deliberately not awaited. It is a sequential walk of eleven symbols against a rate-limited
+   * public API, and nothing about serving requests or running the first tick depends on it
+   * finishing — the band is simply wider on the tick after it lands. Latched internally, so this
+   * costs one sweep per process rather than one per call.
+   */
+  void seedHistory().catch((e: unknown) => log.error('[history]', e));
+
   return setInterval(() => {
     guardedTick().catch((e: unknown) => log.error('[scheduler]', e));
   }, TICK_MS);
