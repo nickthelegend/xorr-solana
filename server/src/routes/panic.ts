@@ -445,13 +445,37 @@ async function closeHoldingOnSolana(params: {
     return { status: 409, body: { status: 'blocked', reason: outcome.reason, detail: outcome.detail } };
   }
 
-  await append({
-    walletId: w.id,
-    agent: actor,
-    action: `Sold ${symbol}`,
-    detail: `${actor === 'You' ? 'You closed' : `${actor} closed`} ${(fraction * 100).toFixed(0)}% of your ${symbol}: ${outcome.filledUnits.toFixed(8)} units at $${outcome.fillPrice.toFixed(2)}.`,
-    kind: 'trade',
-    payload: { symbol, units: outcome.filledUnits, usd: outcome.filledUnits * outcome.fillPrice, side: 'sell', venue: outcome.venue, signature: outcome.signature },
+  /*
+   * Record the fill, in the same transaction as the audit row.
+   *
+   * The first version of this appended the audit row and stopped, so the sale happened on chain and
+   * the position ledger went on reporting the units it had before — the chain said 0.0246 SPYx and
+   * `/positions` said 0.0328. A ledger that disagrees with the chain about what someone owns is
+   * worse than the broken route it replaced, because it looks like it worked.
+   *
+   * `applyFill` with negative units is how every other sell path on this chain records itself; the
+   * exits do exactly this, and reusing it is what keeps P&L, disposals and the holdings view all
+   * telling the same story.
+   */
+  await tx(async (client) => {
+    await applyFill(client, {
+      walletId: w.id,
+      symbol,
+      units: -outcome.filledUnits,
+      usd: outcome.usd,
+      attribution: { source: 'manual', id: null, label: `${actor} closed ${symbol}` },
+    });
+    await append(
+      {
+        walletId: w.id,
+        agent: actor,
+        action: `Sold ${symbol}`,
+        detail: `${actor === 'You' ? 'You closed' : `${actor} closed`} ${(fraction * 100).toFixed(0)}% of your ${symbol}: ${outcome.filledUnits.toFixed(8)} units at $${outcome.fillPrice.toFixed(2)} through ${outcome.venue === 'jupiter-route' ? 'Jupiter' : 'the venue vault'}.`,
+        kind: 'trade',
+        payload: { symbol, units: outcome.filledUnits, usd: outcome.usd, side: 'sell', venue: outcome.venue, signature: outcome.signature, slot: outcome.slot },
+      },
+      client,
+    );
   });
 
   return {
