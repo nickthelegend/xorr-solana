@@ -86,7 +86,7 @@ export function tradingNow(
  * Names the strategy and the symbol because those are on the run. It does not name an agent: a run does not carry one,
  * and putting a persona in this sentence would be inventing the actor in a claim about what is happening right now.
  */
-export function tradingLine(state: TradingNow): string | undefined {
+export function tradingLine(state: TradingNow, lastLook?: { headline: string } | null): string | undefined {
   switch (state.kind) {
     case 'trading': {
       const first = state.runs[0]!;
@@ -100,8 +100,13 @@ export function tradingLine(state: TradingNow): string | undefined {
         ? `${first.label} has been open on ${first.symbol} for a while with no result`
         : `${n} runs have been open for a while with no result`;
     }
+    /*
+     * Idle is where the agent spends nearly all its time, and "No agent is trading right now" was the same sentence a
+     * wallet that hired nobody saw (2026-09-21). Where the sweep has said what it looked at, that is the line: an agent
+     * that looked at eleven xStocks and took none is working, and this is the only place it can say so.
+     */
     case 'idle':
-      return 'No agent is trading right now';
+      return lastLook?.headline ?? 'No agent is trading right now';
     case 'checking':
       return 'Checking what the agents are doing';
     case 'unknown':

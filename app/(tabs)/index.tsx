@@ -383,6 +383,12 @@ export default function Home() {
    * screen is focused and never stacks a read behind itself, so a tab nobody is looking at asks nothing.
    */
   const liveRuns = usePoll(() => system.runs(20), TICKER_EVERY_MS);
+  /*
+   * What the agent saw on its last sweep, on the same clock as the runs. Home is where somebody looks to find out
+   * whether the thing they hired is doing anything, and until this line existed the answer was always the same
+   * sentence whether an agent was hired or not.
+   */
+  const lastLook = usePoll(() => system.agentLastLook(), TICKER_EVERY_MS);
   const signedOut = useSignedOut();
   const now = useNow();
 
@@ -609,7 +615,11 @@ export default function Home() {
         */}
         {signedOut ? null : (
           <Rise index={2} style={{ marginTop: space.s12, paddingHorizontal: space.gutter }}>
-            <TradingTicker runs={liveRuns.data} failed={liveRuns.error !== undefined} />
+            <TradingTicker
+              runs={liveRuns.data}
+              failed={liveRuns.error !== undefined}
+              lastLook={lastLook.data?.looked ? lastLook.data : null}
+            />
           </Rise>
         )}
 
