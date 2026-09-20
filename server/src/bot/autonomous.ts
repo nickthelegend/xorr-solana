@@ -274,7 +274,7 @@ async function observedBand(
     return {
       range: null,
       why: 'too_short',
-      detail: `has been watched for ${watchedHours}h; it needs ${MIN_SPAN_HOURS}h before it will judge a move`,
+      detail: `has ${watchedHours}h of recorded prices; it needs ${MIN_SPAN_HOURS}h before it will judge a move`,
     };
   }
   const prices = seen.map((r) => r.usd);
