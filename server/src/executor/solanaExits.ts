@@ -135,9 +135,15 @@ async function fireExit(row: ExitRow, symbol: string, price: number, trigger: No
   const runId = randomUUID();
   await tx(async (client) => {
     await client.query(
-      `INSERT INTO strategy_runs (id, strategy_id, period_key, status, usd, units, price, signature, finished_at)
-       VALUES ($1, $2, $3, 'filled', $4, $5, $6, $7, now())`,
-      [runId, row.id, `exit:${row.id}`, outcome.usd, outcome.filledUnits, outcome.fillPrice, outcome.signature],
+      /*
+       * With the venue, the side and the class the rest of the executor records (2026-09-20). This row carried none of
+       * them, so an exit that sold through Jupiter counted as `unrecorded` in `/metrics` and in fill quality — the one
+       * place that answers "where did the bot's sales actually fill", blind to the sales it makes unattended.
+       */
+      `INSERT INTO strategy_runs
+         (id, strategy_id, period_key, status, usd, units, price, signature, venue, side, asset_class, quoted_units, quoted_usd, finished_at)
+       VALUES ($1, $2, $3, 'filled', $4, $5, $6, $7, $8, 'sell', 'equity', $5, $4, now())`,
+      [runId, row.id, `exit:${row.id}`, outcome.usd, outcome.filledUnits, outcome.fillPrice, outcome.signature, outcome.venue],
     );
     await applyFill(client, {
       walletId: row.wallet_id,

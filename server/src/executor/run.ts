@@ -1341,8 +1341,21 @@ async function finishBlocked(
       `UPDATE strategy_runs SET status='blocked', error=$2, finished_at=now() WHERE id=$1`,
       [runId, reason],
     );
-    // The period is spent either way; a schedule left due was re-selected on every tick.
+    // The schedule moves on, so a strategy left due is not re-selected on every tick. Read before the key is freed.
     await settleSchedule(client, strategy, new Date());
+    /*
+     * The period is given back (2026-09-20).
+     *
+     * A refusal is not a run: nothing was bought and no money moved, but the claimed `period_key` made the strategy
+     * answer "Already ran this period" for the rest of it. A weekly buy refused by today's cap therefore lost the whole
+     * week — after the owner raised the cap, their own "Run now" still did nothing and said only that it had already
+     * run. The refused row keeps its place in history under a key of its own; the period it claimed is free for a real
+     * attempt. The guard against a double buy is untouched: that rests on the claim a pending or filled run holds.
+     */
+    await client.query(
+      `UPDATE strategy_runs SET period_key = period_key || ':blocked:' || id WHERE id = $1`,
+      [runId],
+    );
     // A non-action is logged exactly like an action. That is the point of the trail.
     const auditRow = await append(
       {

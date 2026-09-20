@@ -191,6 +191,18 @@ describe('a blocked run', () => {
   });
 });
 
+describe('a refusal and the period it claimed', () => {
+  it('gives the period back, so the owner can run it again once the blocker is gone', async () => {
+    vi.mocked(readPolicy).mockResolvedValue(null);
+
+    const out = await runStrategy(strategy(), at);
+    expect(out).toMatchObject({ status: 'blocked' });
+
+    const freed = statementsLike(/UPDATE strategy_runs SET period_key = period_key \|\| ':blocked:' \|\| id/)[0];
+    expect(freed, 'the refused run releases its period').toBeTruthy();
+  });
+});
+
 describe('a period that already has a run', () => {
   it('moves a schedule that is still due on, instead of re-selecting it every tick', async () => {
     h.claimTaken = true;
