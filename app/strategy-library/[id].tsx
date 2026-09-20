@@ -18,32 +18,13 @@
  * measured" and never zero.
  */
 import React from 'react';
-import { ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { Screen } from '@/ui/Screen';
-import { Text } from '@/ui/Text';
-import { Row } from '@/ui/Row';
-import { StatTile } from '@/ui/StatTile';
-import { BackButton } from '@/ui/IconButton';
+import { BackButton, colors, LoadingRows, radius, Row, Screen, size, space, StatTile, Text } from '@/ui';
 import { useGoBack } from '@/nav/useGoBack';
-import { LoadingRows } from '@/ui/States';
-import { colors, space, radius, size } from '@/ui/tokens';
+import { count, plainPct, ratio, returnPct, tone, usd } from '@/strategies/format';
 import { useAsync } from '@/data/useAsync';
 import { strategyLibrary, type Split, type StrategyDetail } from '@/data/strategyLibrary';
-
-/* ------------------------------------------------------------------ format */
-
-/** A number the research measured, or the plain fact that it did not. */
-function num(v: number | null | undefined, digits = 2, suffix = ''): string {
-  return v === null || v === undefined ? '—' : `${v.toFixed(digits)}${suffix}`;
-}
-function pct(v: number | null | undefined, digits = 2): string {
-  return v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(digits)}%`;
-}
-function toneOf(v: number | null | undefined): string {
-  if (v === null || v === undefined) return colors.ink55;
-  return v > 0 ? colors.up : v < 0 ? colors.down : colors.ink;
-}
 
 /* ------------------------------------------------------------------ panels */
 
@@ -72,11 +53,11 @@ function Panel({ title, note, children }: { title: string; note?: string; childr
  */
 function SplitCompare({ inSample, outOfSample }: { inSample: Split; outOfSample: Split }) {
   const rows: { label: string; a: string; b: string; tone: string }[] = [
-    { label: 'Return', a: pct(inSample.returnPct), b: pct(outOfSample.returnPct), tone: toneOf(outOfSample.returnPct) },
-    { label: 'Max drawdown', a: num(inSample.maxDdPct, 2, '%'), b: num(outOfSample.maxDdPct, 2, '%'), tone: colors.down },
-    { label: 'Sharpe', a: num(inSample.sharpe, 3), b: num(outOfSample.sharpe, 3), tone: toneOf(outOfSample.sharpe) },
-    { label: 'Expectancy (R)', a: num(inSample.expectancyR, 4), b: num(outOfSample.expectancyR, 4), tone: toneOf(outOfSample.expectancyR) },
-    { label: 'Trades', a: num(inSample.trades, 0), b: num(outOfSample.trades, 0), tone: colors.ink },
+    { label: 'Return', a: returnPct(inSample.returnPct), b: returnPct(outOfSample.returnPct), tone: tone(outOfSample.returnPct) },
+    { label: 'Max drawdown', a: plainPct(inSample.maxDdPct), b: plainPct(outOfSample.maxDdPct), tone: colors.down },
+    { label: 'Sharpe', a: ratio(inSample.sharpe, 3), b: ratio(outOfSample.sharpe, 3), tone: tone(outOfSample.sharpe) },
+    { label: 'Expectancy (R)', a: ratio(inSample.expectancyR, 4), b: ratio(outOfSample.expectancyR, 4), tone: tone(outOfSample.expectancyR) },
+    { label: 'Trades', a: count(inSample.trades), b: count(outOfSample.trades), tone: colors.ink },
   ];
   return (
     <View style={{ backgroundColor: colors.surface, borderRadius: radius.panel, padding: space.s16 }}>
@@ -144,7 +125,7 @@ function Sensitivity({ values, label }: { values: (number | null)[]; label: stri
           return (
             <View key={i} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
               <Text variant="eyebrowSm" color={colors.ink55} style={{ marginBottom: space.s4, fontVariant: ['tabular-nums'] }}>
-                {v === null ? '—' : v.toFixed(3)}
+                {ratio(v, 3)}
               </Text>
               <View
                 style={{
@@ -186,6 +167,7 @@ function Line({ label, value, tone }: { label: string; value: string; tone?: str
 
 export default function StrategyLibraryDetail() {
   const goBack = useGoBack();
+  const [aboutOpen, setAboutOpen] = React.useState(false);
   const { id } = useLocalSearchParams<{ id: string }>();
   const page = useAsync(() => strategyLibrary.get(String(id)), [id]);
 
@@ -244,24 +226,58 @@ export default function StrategyLibraryDetail() {
       </View>
 
       {s.about ? (
-        <Text variant="body" color={colors.ink70} style={{ marginTop: space.s12 }}>
-          {s.about}
-          {s.aboutSource === 'family' ? (
-            <Text variant="bodySm" color={colors.ink30}>
-              {'  '}— describes the family, not this variant.
+        <>
+          {/*
+            * Clamped, and tappable to open.
+            *
+            * These are module docstrings written for a reader with the source open — the Liquidation
+            * Flow one runs to a full page and pushed every number below the fold on a phone. Four
+            * lines is enough to know what the idea is; the rest is there for anyone who wants it.
+            */}
+          <Text
+            variant="body"
+            color={colors.ink70}
+            numberOfLines={aboutOpen ? undefined : 4}
+            style={{ marginTop: space.s12 }}
+          >
+            {s.about}
+          </Text>
+          <Pressable
+            onPress={() => setAboutOpen((v) => !v)}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={aboutOpen ? 'Show less of the description' : 'Show the full description'}
+          >
+            <Text variant="bodySm" color={colors.ink55} style={{ marginTop: space.s4 }}>
+              {aboutOpen ? 'Less' : 'More'}
+              {s.aboutSource === 'family' ? ' · describes the family, not this variant' : ''}
             </Text>
-          ) : null}
-        </Text>
+          </Pressable>
+        </>
       ) : null}
 
       {/* The headline five, all out of sample. */}
+      {/*
+        * Three to a row. Five across a phone cut every label to "RET…" and wrapped "+2.48%" onto
+        * two lines, which is a worse way to show a number than not showing it.
+        */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.s8, marginTop: space.s16 }}>
-        <StatTile label="Return (OOS)" value={pct(o.returnPct)} color={toneOf(o.returnPct)} figure="market" compact />
-        <StatTile label="Max drawdown" value={num(o.maxDdPct, 2, '%')} color={colors.down} figure="market" compact />
-        <StatTile label="Trades" value={num(o.trades, 0)} figure="market" compact />
-        <StatTile label="Win rate" value={num(o.winRate, 1, '%')} figure="market" compact />
-        <StatTile label="Profit factor" value={num(o.profitFactor, 3)} color={toneOf((o.profitFactor ?? 1) - 1)} figure="market" compact />
+        {[
+          { label: 'Return', value: returnPct(o.returnPct), color: tone(o.returnPct) },
+          { label: 'Drawdown', value: plainPct(o.maxDdPct), color: colors.down },
+          { label: 'Trades', value: count(o.trades), color: undefined },
+          { label: 'Win rate', value: plainPct(o.winRate, 1), color: undefined },
+          { label: 'PF', value: ratio(o.profitFactor, 2), color: tone((o.profitFactor ?? 1) - 1) },
+          { label: 'Sharpe', value: ratio(o.sharpe, 2), color: tone(o.sharpe) },
+        ].map((t) => (
+          <View key={t.label} style={{ flexBasis: '31.5%', flexGrow: 1 }}>
+            <StatTile label={t.label} value={t.value} color={t.color} figure="market" compact />
+          </View>
+        ))}
       </View>
+      <Text variant="bodySm" color={colors.ink30} style={{ marginTop: space.s8 }}>
+        All six measured out of sample. PF is the profit factor: gross profit over gross loss.
+      </Text>
 
       <Panel
         title="Fitted vs out of sample"
@@ -275,46 +291,47 @@ export default function StrategyLibraryDetail() {
       </Panel>
 
       <Panel title="At double commission" note="The test that kills most of them: the same book, with the fees doubled.">
-        <Line label="Expectancy (R)" value={num(s.doubleCommission.expectancyR, 4)} tone={toneOf(s.doubleCommission.expectancyR)} />
-        <Line label="Return" value={pct(s.doubleCommission.returnPct)} tone={toneOf(s.doubleCommission.returnPct)} />
+        <Line label="Expectancy (R)" value={ratio(s.doubleCommission.expectancyR, 4)} tone={tone(s.doubleCommission.expectancyR)} />
+        <Line label="Return" value={returnPct(s.doubleCommission.returnPct)} tone={tone(s.doubleCommission.returnPct)} />
       </Panel>
 
       {s.crossAsset.length > 0 ? (
         <Panel title="Assets it was not tuned on">
           {s.crossAsset.map((a) => (
-            <Line key={a.asset} label={a.asset} value={num(a.expectancyR, 4)} tone={toneOf(a.expectancyR)} />
+            <Line key={a.asset} label={a.asset} value={ratio(a.expectancyR, 4)} tone={tone(a.expectancyR)} />
           ))}
         </Panel>
       ) : null}
 
       <Panel title="Risk-adjusted">
-        <Line label="Sharpe" value={num(o.sharpe, 3)} tone={toneOf(o.sharpe)} />
-        <Line label="Sortino" value={num(o.sortino, 3)} tone={toneOf(o.sortino)} />
-        <Line label="Expectancy (R)" value={num(o.expectancyR, 4)} tone={toneOf(o.expectancyR)} />
-        <Line label="Avg hold" value={o.avgHoldBars === null || o.avgHoldBars === undefined ? '—' : `${o.avgHoldBars.toFixed(1)} bars`} />
+        <Line label="Sharpe" value={ratio(o.sharpe, 3)} tone={tone(o.sharpe)} />
+        <Line label="Profit factor" value={ratio(o.profitFactor, 3)} tone={tone((o.profitFactor ?? 1) - 1)} />
+        <Line label="Sortino" value={ratio(o.sortino, 3)} tone={tone(o.sortino)} />
+        <Line label="Expectancy (R)" value={ratio(o.expectancyR, 4)} tone={tone(o.expectancyR)} />
+        <Line label="Avg hold" value={o.avgHoldBars === null || o.avgHoldBars === undefined ? '—' : `${ratio(o.avgHoldBars, 1)} bars`} />
       </Panel>
 
       <Panel title="Wins and losses">
-        <Line label="Wins" value={num(o.wins, 0)} tone={colors.up} />
-        <Line label="Losses" value={num(o.losses, 0)} tone={colors.down} />
-        <Line label="Average win" value={o.avgWinUsd === null || o.avgWinUsd === undefined ? '—' : `$${o.avgWinUsd.toFixed(4)}`} tone={colors.up} />
-        <Line label="Average loss" value={o.avgLossUsd === null || o.avgLossUsd === undefined ? '—' : `$${o.avgLossUsd.toFixed(4)}`} tone={colors.down} />
-        <Line label="Best trade" value={pct(o.bestTradePct)} tone={colors.up} />
-        <Line label="Worst trade" value={pct(o.worstTradePct)} tone={colors.down} />
-        <Line label="Fees" value={o.feesUsd === null || o.feesUsd === undefined ? '—' : `$${o.feesUsd.toFixed(2)}`} tone={colors.ink55} />
+        <Line label="Wins" value={count(o.wins)} tone={colors.up} />
+        <Line label="Losses" value={count(o.losses)} tone={colors.down} />
+        <Line label="Average win" value={usd(o.avgWinUsd, 4)} tone={colors.up} />
+        <Line label="Average loss" value={usd(o.avgLossUsd, 4)} tone={colors.down} />
+        <Line label="Best trade" value={returnPct(o.bestTradePct)} tone={colors.up} />
+        <Line label="Worst trade" value={returnPct(o.worstTradePct)} tone={colors.down} />
+        <Line label="Fees" value={usd(o.feesUsd)} tone={colors.ink55} />
       </Panel>
 
       {s.detail ? (
         <Panel title="The deeper book" note="A longer run over the full universe, for the 35 strategies that have one.">
-          <Line label="Trades" value={num(s.detail.trades, 0)} />
-          <Line label="Win rate" value={s.detail.winRate === null ? '—' : `${(s.detail.winRate * 100).toFixed(1)}%`} />
-          <Line label="Net P&L" value={s.detail.totalPnlUsd === null ? '—' : `$${s.detail.totalPnlUsd.toFixed(2)}`} tone={toneOf(s.detail.totalPnlUsd)} />
-          <Line label="Fees paid" value={s.detail.totalFeesUsd === null ? '—' : `$${s.detail.totalFeesUsd.toFixed(2)}`} tone={colors.down} />
-          <Line label="Profit factor" value={num(s.detail.profitFactor, 3)} />
-          <Line label="Max drawdown" value={s.detail.maxDrawdownUsd === null ? '—' : `$${s.detail.maxDrawdownUsd.toFixed(2)}`} tone={colors.down} />
-          <Line label="Average win" value={s.detail.avgWinUsd === null ? '—' : `$${s.detail.avgWinUsd.toFixed(2)}`} tone={colors.up} />
-          <Line label="Average loss" value={s.detail.avgLossUsd === null ? '—' : `$${s.detail.avgLossUsd.toFixed(2)}`} tone={colors.down} />
-          <Line label="Average hold" value={s.detail.avgHoldMinutes === null ? '—' : `${Math.round(s.detail.avgHoldMinutes)} min`} />
+          <Line label="Trades" value={count(s.detail.trades)} />
+          <Line label="Win rate" value={plainPct(s.detail.winRate === null ? null : s.detail.winRate * 100, 1)} />
+          <Line label="Net P&L" value={usd(s.detail.totalPnlUsd)} tone={tone(s.detail.totalPnlUsd)} />
+          <Line label="Fees paid" value={usd(s.detail.totalFeesUsd)} tone={colors.down} />
+          <Line label="Profit factor" value={ratio(s.detail.profitFactor, 3)} />
+          <Line label="Max drawdown" value={usd(s.detail.maxDrawdownUsd)} tone={colors.down} />
+          <Line label="Average win" value={usd(s.detail.avgWinUsd)} tone={colors.up} />
+          <Line label="Average loss" value={usd(s.detail.avgLossUsd)} tone={colors.down} />
+          <Line label="Average hold" value={s.detail.avgHoldMinutes === null ? '—' : `${count(Math.round(s.detail.avgHoldMinutes))} min`} />
         </Panel>
       ) : null}
 

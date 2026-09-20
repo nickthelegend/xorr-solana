@@ -264,6 +264,18 @@ export default function Home() {
     setTab(key);
     setOpened((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
   };
+  /*
+   * A link that names a tab opens it, even when Home is already mounted (2026-09-20).
+   *
+   * `tab` was seeded from the param once, in `useState`, so `xorr:///?tab=strategies` did nothing
+   * to a Home that was already on screen — which is every time but the first. A deep link that
+   * silently lands you on the tab you were already looking at is worse than one that fails.
+   */
+  const wantedTab = isSheetTab(params.tab) ? params.tab : undefined;
+  useEffect(() => {
+    if (wantedTab) openTab(wantedTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedTab]);
   // The row of tabs scrolls sideways on a narrow phone, so the one opened — by a swipe too — is brought into view.
   useEffect(() => {
     if (TABS.findIndex((t) => t.key === tab) >= TABS.length / 2) tabsRef.current?.scrollToEnd({ animated: false });
@@ -920,6 +932,8 @@ export default function Home() {
                     <Pressable
                       onPress={() => setShowAllStrategies((v) => !v)}
                       style={{ paddingVertical: space.s12 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={showAllStrategies ? 'Show only strategies that survived' : 'Show every strategy tested'}
                       testID="strategies-toggle-all"
                     >
                       <Text variant="body" color={colors.ink55}>

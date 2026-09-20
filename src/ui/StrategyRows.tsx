@@ -83,7 +83,7 @@ export function StrategyRows({
               /* What the number is measured over, so the row never implies a live track record. */
               s.trades === null
                 ? (s.family ?? 'Backtested')
-                : `${s.family ?? 'Backtested'} · ${s.trades} trades out of sample`
+                : `${s.family ?? 'Backtested'} · ${s.trades} trades OOS`
             }
             value={<ReturnValue pct={s.returnPct} />}
             delta={
