@@ -20,9 +20,10 @@
 import React from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { BackButton, colors, LoadingRows, radius, Row, Screen, size, space, StatTile, Text } from '@/ui';
+import { BackButton, colors, LoadingRows, PnlBars, radius, Ring, Row, Screen, size, space, StatTile, Text } from '@/ui';
 import { useGoBack } from '@/nav/useGoBack';
 import { count, plainPct, ratio, returnPct, tone, usd } from '@/strategies/format';
+import { pnlStructure, pnlStructureFromDetail } from '@/strategies/pnl';
 import { useAsync } from '@/data/useAsync';
 import { strategyLibrary, type Split, type StrategyDetail } from '@/data/strategyLibrary';
 
@@ -198,6 +199,15 @@ export default function StrategyLibraryDetail() {
   const s: StrategyDetail = page.data.strategy;
   const o = s.portfolio.outOfSample;
   const prov = page.data.provenance;
+  /*
+   * The deeper book where a strategy has one, the out-of-sample split otherwise.
+   *
+   * Never the fitted split: a P&L drawn from the data a strategy was tuned on is the number that
+   * flatters it, and putting it under a heading that says "profit" would undo the point of the
+   * comparison above.
+   */
+  const pnl = s.detail ? pnlStructureFromDetail(s.detail) : pnlStructure(o);
+  const pnlBasis = s.detail ? 'the deeper book across the full universe' : 'the out-of-sample split';
 
   return (
     <Screen testID={`strategy-library-${s.id}`}>
@@ -285,6 +295,67 @@ export default function StrategyLibraryDetail() {
       >
         <SplitCompare inSample={s.portfolio.inSample} outOfSample={s.portfolio.outOfSample} />
       </Panel>
+
+      {pnl ? (
+        <Panel title="Profit and loss" note={`Where the money came from and went, over ${pnlBasis}.`}>
+          <PnlBars pnl={pnl} />
+        </Panel>
+      ) : null}
+
+      {pnl ? (
+        <Panel
+          title="Win rate"
+          /*
+           * The basis, said again.
+           *
+           * The tiles at the top count the out-of-sample split and this counts the deeper book, so
+           * the two trade counts differ — 80 against 26 on Liq Absorption. Both are true and a
+           * reader who spots the gap without being told which is which is right to distrust the page.
+           */
+          note={`Over ${pnlBasis}.`}
+        >
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: space.s20,
+              backgroundColor: colors.surface,
+              borderRadius: radius.panel,
+              padding: space.s16,
+            }}
+          >
+            <Ring
+              fraction={pnl.winRate}
+              value={plainPct(pnl.winRate * 100, 1)}
+              label="Won"
+              accessibilityLabel={`Win rate ${plainPct(pnl.winRate * 100, 1)}`}
+            />
+            <View style={{ flex: 1, gap: space.s6 }}>
+              <Text variant="body" color={colors.up}>
+                {count(pnl.wins)} won{'  '}
+                <Text variant="bodySm" color={colors.ink55}>
+                  avg {usd(pnl.grossProfitUsd / Math.max(1, pnl.wins), 4)}
+                </Text>
+              </Text>
+              <Text variant="body" color={colors.down}>
+                {count(pnl.losses)} lost{'  '}
+                <Text variant="bodySm" color={colors.ink55}>
+                  avg {usd(pnl.grossLossUsd / Math.max(1, pnl.losses), 4)}
+                </Text>
+              </Text>
+              {/*
+                * The sentence a win rate needs beside it. Several survivors here win under half
+                * their trades and still make money, and a bare "40%" reads as failure without it.
+                */}
+              <Text variant="bodySm" color={colors.ink55}>
+                {pnl.winRate < 0.5
+                  ? 'It loses more often than it wins, and makes it back on the size of the wins.'
+                  : 'It wins more often than it loses.'}
+              </Text>
+            </View>
+          </View>
+        </Panel>
+      ) : null}
 
       <Panel title="Parameter sweep">
         <Sensitivity values={s.sensitivity.expectancyR} label={s.sensitivity.label} />
