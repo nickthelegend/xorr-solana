@@ -15,6 +15,10 @@ import { THIS_CHAIN } from '../db/chain-scope.js';
 import { recordSleeve, type FillAttribution } from './sleeves.js';
 import { priceOf } from '../market/prices.js';
 import { chainUnitsOf } from '../evm/balances.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { readDelegation } from '../solana/delegation.js';
+import { readMintScale, toUiAmount } from '../solana/balances.js';
+import { XSTOCKS } from '../venues/xstocks.js';
 import { readChain } from '../http/chain-read.js';
 import type { Address } from 'viem';
 
@@ -256,9 +260,47 @@ export async function listPositions(wallet: { id: string; address: string }): Pr
   const symbols = rows.map((r) => r.symbol);
   const [marks, held] = await Promise.all([
     marksFor(symbols),
-    readChain('your holdings', () => chainUnitsOf(wallet.address as Address, symbols)),
+    readChain('your holdings', () =>
+      /*
+       * Ask the chain this deployment is on (2026-09-20).
+       *
+       * `chainUnitsOf` is the EVM reader, so on Solana every row came back `chainUnits: null` —
+       * and the cap in `toPosition` is what keeps a ledger row from reporting more than the wallet
+       * holds. With no cap the book could over-report, and it did: a close that sold 0.008198 SPYx
+       * on chain left `/positions` still saying 0.032792078, because nothing measured the ledger
+       * against the wallet. A book that disagrees with the chain about what someone owns is the
+       * one number in this product that must never be ours alone.
+       */
+      ON_SOLANA ? solanaChainUnits(wallet.address, symbols) : chainUnitsOf(wallet.address as Address, symbols),
+    ),
   ]);
   return rows.map((r) => toPosition(r, marks.get(r.symbol), held.get(r.symbol) ?? null));
+}
+
+
+/**
+ * What the wallet actually holds of each symbol, in the units a holder sees.
+ *
+ * The same read the exits use before selling — the token account balance times the mint's Scaled UI
+ * multiplier — so the cap in `toPosition` is measured the same way the sale will be. A symbol this
+ * cluster has no mint for is absent rather than zero: "we cannot ask" and "you hold none" are
+ * different answers, and only the second one should cap a row to nothing.
+ */
+async function solanaChainUnits(owner: string, symbols: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  await Promise.all(
+    [...new Set(symbols)].map(async (symbol) => {
+      const stock = XSTOCKS[symbol];
+      if (!stock) return;
+      try {
+        const held = await readDelegation(owner, stock.address);
+        out.set(symbol, toUiAmount(held.balanceAmount, await readMintScale(stock.address)));
+      } catch {
+        // Left out, so the row reads `chainUnits: null` rather than being capped to zero by a failed read.
+      }
+    }),
+  );
+  return out;
 }
 
 /**
