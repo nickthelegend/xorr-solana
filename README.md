@@ -41,6 +41,11 @@ on Solana; nobody can watch a market all night. xorr lets an agent do it for you
   would refuse.
 - **Nothing is invented.** Every price is a live quote or says it has none; a fill that did not go through Jupiter is
   labelled `venue-vault`; a signature is only ever one the chain confirmed.
+- **The guard is measured against someone else's number.** An xStock trades 24/7; the share behind it does not. While
+  Nasdaq is shut, nothing arbitrages the pool back, so before any entry xorr compares the pool price to **Pyth's
+  `Equity.US.<TICKER>/USD` feed, read straight off its Solana price account** — and holds if they have come apart by
+  more than 1.2% in extended hours or 1.5% overnight. Checking a Jupiter pool price against a mark from the same
+  response would be one source grading its own homework.
 
 ## How it works
 
@@ -49,7 +54,31 @@ on Solana; nobody can watch a market all night. xorr lets an agent do it for you
 | App | Expo (web + iOS/Android), Privy Solana embedded wallet — signs grant, revoke, sells and withdrawals |
 | Executor | Hono + Postgres (`server/`): the grant record, `guardAndSpend`, the scheduler (agents, exits, recurring buys), Jupiter |
 | Chain | `solana-test-validator --clone` of mainnet: real USDC, xStocks (Token-2022), Jupiter v6 and today's routes |
+| Oracle | **Pyth** `Equity.US.*` price accounts on Solana mainnet (`server/src/market/pyth.ts`) — the independent Nasdaq print the off-hours guard measures against |
 | Hosting | Railway (fork + executor + Postgres), Vercel (web) |
+
+### The off-hours guard, and why Pyth
+
+The hard part of trading a tokenized equity is the fourteen hours a day the equity is not trading. The token keeps
+moving; the thing it represents does not. To know whether a pool price is still the share's price you need a second
+opinion from somebody who is not the pool.
+
+Pyth is that, and it is already on chain — so the reference for a trade that settles on Solana is itself a Solana
+account, one `getMultipleAccounts` away, with no key and no vendor relationship. Three details worth reading the code
+for:
+
+- **Both shards, freshest wins.** The push oracle writes each feed to sharded accounts maintained by whoever pays for
+  the updates. Shard 0's equity feeds are abandoned — NVDA there was last written 2026-08-26. Shard 1 is live. Hardcoding
+  a shard number would be betting on one afternoon's evidence.
+- **Staleness is keyed to the session, not to a clock.** A feed silent for sixteen hours is not broken, it is Tuesday
+  night — and that is exactly when the guard matters. Off-hours the last close stands (up to four days, past which it is
+  an abandoned shard rather than a weekend); during a regular session the print must be minutes old or the publishers
+  are down.
+- **The confidence interval is load-bearing.** A feed reporting "around $220, give or take 3%" cannot measure a 1.2%
+  decoupling, so anything wider than 100 bps is refused outright rather than rounded into a verdict.
+
+When Pyth has no usable mark — COIN, today — xorr falls back to the issuer's own mark and **says so in the verdict**,
+because "drifted 1.4% from Pyth's NVDA feed" and "drifted 1.4% from the issuer's own mark" are different claims.
 
 ## Verify it yourself, on your own machine
 
