@@ -208,3 +208,27 @@ capped buy, a 409 `cooling_off`) is the correct result, not a network error; eve
 
 **Result: 65 of 67 items PASS, 0 FAIL, 2 untestable without credentials that exist nowhere (I5, I6).** Three defects
 were found, fixed at the root and re-verified in the browser during the run.
+
+
+---
+
+# Second pass — the break-it run, 2026-09-20 (account `test-3645`)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Debug routes in production | PASS | `/_dev/ui`, `/_dev/boom`, `/_dev/fidelity` all redirect to Home; the gallery is behind `__DEV__`. |
+| Refresh mid-transaction | PASS | Reloaded 4s into a buy: exactly one fill (AAPLx 0.1490 → 0.4469), recorded with its signature, visible after the reload. |
+| Duplicate submission | PASS | Re-adding the same allowlist address: "That address is already on the list."; one row, cooling-off not reset. |
+| Backend outage (reads) | PASS | With every executor call failing: dashes not zeros, "Couldn't load positions.", and a banner — "Can't reach xorr · Trying again in 8s … Your funds and your permission are on chain and unaffected." |
+| Backend outage (writes) | PASS | Buy disabled with no quote, banner shown, no fake success. |
+| Back mid-flow | PASS | Browser Back from a half-filled recurring-buy form returns to the previous screen intact. |
+| Notification prefs | PASS | Toggle posts `{kind, enabled:false}` → 200 and the server reports it off; restored after. |
+| Voice | PASS | Sharp selected, "In use" persists. |
+| Agent risk | PASS | Aggressive `aria-checked=true`, and the IN FORCE numbers are the aggressive ones ($50 entry, 50% of what is left, 65th percentile). |
+| Hidden routes fetch on exit | **FAIL → fixed → PASS** | `/judge` fired a 400 before redirecting. Hidden screens no longer mount; `/judge`, `/futures`, `/yield` now redirect with zero requests, `/swap` still lands on xStocks. |
+| Screens not previously walked | PASS | `/inbox`, `/proposals` (→ Not on Solana), `/watchlist`, `/notifications`, `/asset/SOL`, `/chart/SOL`, `/stocks`, `/agent/basket`, `/agent/risk`, `/legal/terms`, `/legal/privacy`: all clean. |
+| Stray logs / demo data | PASS | The one `console.log` is behind `__DEV__`; the design-era figures live only in `_dev` (redirected) and in comments. |
+| Console / network | PASS | Cleared and re-walked Home, Portfolio, ticket, Activity, Strategies, Safety, Settings: no errors, nothing ≥ 400. |
+
+**Not exercisable here:** a desktop-width viewport (the Chrome window in this tool is capped at 606px, which is the
+app's own phone-column width), and the two credential-blocked items (I5 the model answer, I6 MoonPay).
