@@ -12,7 +12,7 @@
  */
 import { readSolanaPolicy } from '../solana/grant.js';
 import { ON_SOLANA } from '../solana/clusters.js';
-import { XSTOCKS, xStockKey } from '../venues/xstocks.js';
+import { tradableToken, tradableSymbols } from '../venues/tradable-token.js';
 import { randomUUID } from 'node:crypto';
 import { httpStatusFor } from '../executor/failure.js';
 import { Hono, type Context } from 'hono';
@@ -123,15 +123,20 @@ const StrategyInput = z.object({
    * targeted stays cash, which is why the settlement token itself is not a target.
    */
   /*
-   * Solana (2026-09-19): what runs here is a recurring buy or an exit, on an xStock. This checked the Base token list,
-   * so every xStock was refused and WETH was accepted — a strategy that could never settle.
+   * Solana (2026-09-19): what runs here is a recurring buy or an exit, on a tradable token. This checked the Base token
+   * list, so every xStock was refused and WETH was accepted — a strategy that could never settle.
+   *
+   * Both classes (2026-09-22). This gated on `XSTOCKS` while everything underneath it did not: the buy spends through
+   * `place.ts`, which reads `tradableToken`, and the exit sweep gates on the same list, so a stop armed on a T-Token is
+   * already swept rather than skipped. The only thing that refused one was this validator — stricter than the machinery
+   * it guards, which is the direction that makes a refusal wrong rather than safe.
    */
   if (ON_SOLANA) {
     if (!SOLANA_KINDS.has(s.kind)) {
       ctx.addIssue({ code: 'custom', path: ['kind'], message: `a ${s.kind} strategy does not run on Solana — recurring buys (dca) and exits do` });
     }
-    if (!XSTOCKS[xStockKey(s.symbol) ?? s.symbol]) {
-      ctx.addIssue({ code: 'custom', path: ['symbol'], message: `not an xStock — one of: ${Object.keys(XSTOCKS).join(', ')}` });
+    if (!tradableToken(s.symbol)) {
+      ctx.addIssue({ code: 'custom', path: ['symbol'], message: `not a tradable token — one of: ${tradableSymbols().join(', ')}` });
     }
     return;
   }

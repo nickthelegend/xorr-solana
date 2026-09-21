@@ -20,7 +20,7 @@ import { connection as defaultConnection } from './connection.js';
 import { ataFor, readMintScale, tokenProgramForMint, fromUiAmount, toUiAmount } from './balances.js';
 import { DEFAULT_MINTS } from './clusters.js';
 import { venueVaultKeypair } from './keys.js';
-import { XSTOCKS, xStockKey } from '../venues/xstocks.js';
+import { tradableToken } from '../venues/tradable-token.js';
 import { quote } from '../venues/jupiter.js';
 
 export class SellRefused extends Error {
@@ -44,11 +44,22 @@ export type PreparedSell = {
   price: number;
 };
 
+/**
+ * The token this symbol names, whichever class issued it.
+ *
+ * This asked `XSTOCKS`, so the owner's own signed sale refused a T-Token — and "Withdraw
+ * everything" is built on exactly this call. Before `/wallet/tokens` reported the class, that flow
+ * skipped the holding and then sent the USDC, so "everything" left a position behind; once the
+ * holding became visible it aborted the whole withdrawal instead. Neither is a withdrawal.
+ *
+ * Nothing else in the sale is xStock-specific — the program, the scale, the quote and the transfer
+ * are all read from the mint — and `delegation.ts`, the path that already closes a T-Token on
+ * chain, builds the same `transferChecked`. So this is the one line that differed.
+ */
 function stockFor(symbol: string) {
-  const key = xStockKey(symbol) ?? symbol;
-  const stock = XSTOCKS[key];
-  if (!stock) throw new SellRefused('not_tradable', `${symbol} is not an xStock this can sell.`);
-  return stock;
+  const token = tradableToken(symbol);
+  if (!token) throw new SellRefused('not_tradable', `${symbol} is not a token this can sell.`);
+  return token;
 }
 
 /** Build the two-leg sale for `units` shares (as a holder sees them), priced by a live Jupiter quote. */
