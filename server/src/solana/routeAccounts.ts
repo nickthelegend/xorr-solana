@@ -64,8 +64,15 @@ async function jupiterFetch(url: string, init?: RequestInit): Promise<Response> 
     const res = await fetch(url, init);
     if (res.ok) return res;
     last = `${res.status}`;
-    /* 4xx that is not a rate limit is a real refusal — asking again will not change it. */
-    if (res.status !== 429 && res.status !== 400 && res.status < 500) break;
+    /*
+     * Only a rate limit or a server fault is worth asking again.
+     *
+     * 400 was retried here for an afternoon, which was wrong twice over: the first route shape asks
+     * for a Whirlpool-only direct route, and a pair that trades on Meteora answers 400 to that
+     * every time — permanently and correctly. Retrying it burned twenty seconds per pair to arrive
+     * at the same answer.
+     */
+    if (res.status !== 429 && res.status < 500) break;
     await wait(SPACING_MS * attempt * 2);
   }
   throw new Error(`quote ${last}`);
@@ -114,11 +121,26 @@ export async function resolveRouteClones(params: {
       { inputMint: params.usdcMint, outputMint: x.mint, amount: 100_000_000n },
       { inputMint: x.mint, outputMint: params.usdcMint, amount: 10n ** BigInt(x.decimals) / 4n },
     ]) {
+      /*
+       * Warn once per PAIR, and only when every shape failed.
+       *
+       * This warned per SHAPE, so a pair whose route resolved perfectly well on the second shape
+       * still logged "no route resolved" from the first — and the first is Whirlpool-only, which
+       * every Meteora pair refuses. The fork's own log therefore reported all six Tessera pairs as
+       * unroutable while it was cloning their routes correctly, which is worse than silence: it
+       * sent someone reading it to look for a liquidity problem that did not exist.
+       */
+      let resolved = false;
+      const failures: string[] = [];
       for (const shape of ROUTE_SHAPES) try {
         for (const k of await routeKeys(pair, params.user, shape)) keys.add(k);
+        resolved = true;
         await wait(SPACING_MS);
       } catch (e) {
-        console.warn(`[fork] no route resolved for ${pair.inputMint.slice(0, 4)}→${pair.outputMint.slice(0, 4)}: ${e instanceof Error ? e.message : e}`);
+        failures.push(e instanceof Error ? e.message : String(e));
+      }
+      if (!resolved) {
+        console.warn(`[fork] no route resolved for ${pair.inputMint.slice(0, 4)}→${pair.outputMint.slice(0, 4)}: ${failures.join('; ')}`);
       }
     }
     keys.add(x.mint);
