@@ -190,6 +190,8 @@ function AppRoutes() {
           <Stack.Screen name="profile" options={{ presentation: 'modal' }} />
           <Stack.Screen name="order/[symbol]" options={{ presentation: 'modal' }} />
           <Stack.Screen name="xstock/[symbol]" options={{ presentation: 'modal' }} />
+          {/* A strategy from the research book opens over the list it was picked from. */}
+          <Stack.Screen name="strategy-library/[id]" options={{ presentation: 'modal' }} />
           <Stack.Screen name="auto-close/[id]" options={{ presentation: 'modal' }} />
           {/* The reasons behind a trade rise over the trail row they belong to, not away from it. */}
           <Stack.Screen name="explain/[seq]" options={{ presentation: 'modal' }} />

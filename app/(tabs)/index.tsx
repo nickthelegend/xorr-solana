@@ -13,7 +13,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { AccessibilityInfo, ScrollView, View } from 'react-native';
+import { AccessibilityInfo, Pressable, ScrollView, View } from 'react-native';
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { agentGradient, assetGradient } from '@/design/gradients';
 import { Icon } from '@/design/Icon';
@@ -79,13 +79,16 @@ import { killSwitchChip } from '@/state/killSwitch';
 import { KillSwitchChip } from '@/ui/KillSwitchChip';
 import { TradingTicker } from '@/ui/TradingTicker';
 import { usePoll } from '@/data/usePoll';
+import { strategyLibrary } from '@/data/strategyLibrary';
+import { StrategyRows } from '@/ui/StrategyRows';
 
-type SheetTab = 'agents' | 'gainers' | 'stocks' | 'futures';
+type SheetTab = 'agents' | 'gainers' | 'stocks' | 'strategies' | 'futures';
 
 const ALL_TABS: readonly { key: SheetTab; label: string }[] = [
   { key: 'agents', label: 'Agents' },
   { key: 'gainers', label: 'Gainers' },
   { key: 'stocks', label: 'Stocks' },
+  { key: 'strategies', label: 'Strategies' },
   { key: 'futures', label: 'Futures' },
 ];
 /** Futures are Hyperliquid data with nothing tradable on Solana, so the Solana build has no Futures tab. */
@@ -261,6 +264,18 @@ export default function Home() {
     setTab(key);
     setOpened((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
   };
+  /*
+   * A link that names a tab opens it, even when Home is already mounted (2026-09-20).
+   *
+   * `tab` was seeded from the param once, in `useState`, so `xorr:///?tab=strategies` did nothing
+   * to a Home that was already on screen — which is every time but the first. A deep link that
+   * silently lands you on the tab you were already looking at is worse than one that fails.
+   */
+  const wantedTab = isSheetTab(params.tab) ? params.tab : undefined;
+  useEffect(() => {
+    if (wantedTab) openTab(wantedTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedTab]);
   // The row of tabs scrolls sideways on a narrow phone, so the one opened — by a swipe too — is brought into view.
   useEffect(() => {
     if (TABS.findIndex((t) => t.key === tab) >= TABS.length / 2) tabsRef.current?.scrollToEnd({ animated: false });
@@ -298,6 +313,19 @@ export default function Home() {
   const stocksWanted = stocksOpened || (isSolana && opened.has('gainers'));
   const stocks = useAsync(async () => (stocksWanted ? system.stocks() : null), [stocksWanted]);
   const futures = useAsync(async () => (futuresOpened ? repos.perps.markets() : null), [futuresOpened]);
+  /*
+   * The research book, fetched only once the tab is opened.
+   *
+   * Survivors by default — the server decides that, not the screen, so every caller of the endpoint
+   * gets the same honest default. `showAllStrategies` is the reader asking to see the 303 that were
+   * cut, which is evidence for the ten rather than noise beside them.
+   */
+  const strategiesOpened = opened.has('strategies');
+  const [showAllStrategies, setShowAllStrategies] = useState(false);
+  const library = useAsync(
+    async () => (strategiesOpened ? strategyLibrary.list({ all: showAllStrategies }) : null),
+    [strategiesOpened, showAllStrategies],
+  );
   /* What this deployment trades and watches: nothing to trade beside things to watch is a chain that fills nothing. */
   const tradable = useAsync(() => system.tradable(), []);
   const watchable = useAsync(() => system.watchable(), []);
@@ -852,7 +880,32 @@ export default function Home() {
                     No stocks yet.
                   </Text>
                 ) : (
-                  stockRows.map((s, i) => (
+                  <>
+                    {/*
+                      * Pre-IPO sits above the listed names, not among them.
+                      *
+                      * A T-Token tracks a company with no exchange behind it, so nothing about it
+                      * can be compared to the rows below on the numbers those rows show. Its own
+                      * entry keeps that difference visible instead of burying three private
+                      * companies in a list of listed ones.
+                      */}
+                    <Rise index={ROWS_FROM}>
+                      <Row
+                        height={size.rowLg}
+                        divider
+                        onPress={() => router.push('/prestocks')}
+                        left={<AssetMark gradient={assetGradient('T-SpaceX')} size={size.mark} />}
+                        title="Pre-IPO"
+                        secondary="SpaceX, OpenAI and Kalshi, tokenised by Tessera"
+                        value={
+                          <Text variant="rowPrimary" color={colors.ink55}>
+                            3
+                          </Text>
+                        }
+                        figure="market"
+                      />
+                    </Rise>
+                    {stockRows.map((s, i) => (
                     <Rise key={s.symbol} index={ROWS_FROM + i}>
                       <Row
                         height={size.rowLg}
@@ -873,7 +926,49 @@ export default function Home() {
                         figure="market"
                       />
                     </Rise>
-                  ))
+                    ))}
+                  </>
+                )
+              ) : tab === 'strategies' ? (
+                !library.data ? (
+                  library.error ? (
+                    <TabFailed what="strategies" error={library.error} onRetry={library.reload} />
+                  ) : (
+                    <LoadingRows count={4} height={size.rowLg} />
+                  )
+                ) : (
+                  <>
+                    {/*
+                      * The headline is the ratio, not the count. "313 strategies" sounds like an
+                      * asset; "313 tested, 10 survived" is what the research actually found, and
+                      * it is the sentence the whole screen is built to support.
+                      */}
+                    <Text variant="bodySm" color={colors.ink55} style={{ marginBottom: space.s8 }}>
+                      {library.data.counts.total} tested against a walk-forward gauntlet ·{' '}
+                      <Text variant="bodySm" color={colors.up}>
+                        {library.data.counts.survivors} survived
+                      </Text>
+                      . Backtests, not a live record.
+                    </Text>
+                    <StrategyRows
+                      rows={library.data.strategies}
+                      from={ROWS_FROM}
+                      onOpen={(id) => router.push(`/strategy-library/${id}`)}
+                    />
+                    <Pressable
+                      onPress={() => setShowAllStrategies((v) => !v)}
+                      style={{ paddingVertical: space.s12 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={showAllStrategies ? 'Show only strategies that survived' : 'Show every strategy tested'}
+                      testID="strategies-toggle-all"
+                    >
+                      <Text variant="body" color={colors.ink55}>
+                        {showAllStrategies
+                          ? 'Show only what survived'
+                          : `Show all ${library.data.counts.total}, including the ${library.data.counts.total - library.data.counts.survivors} that were cut`}
+                      </Text>
+                    </Pressable>
+                  </>
                 )
               ) : !futures.data ? (
                 futures.error ? (
