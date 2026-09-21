@@ -70,7 +70,35 @@ export function blockhashOf(signed: Uint8Array): string | null {
  * Broadcast signed bytes and wait for the cluster to confirm them. Throws with the chain's own error when the
  * transaction failed — a signature is returned only for a transaction the ledger holds without an error.
  */
-export async function broadcastSigned(conn: Connection, signed: Uint8Array, prepared: Prepared): Promise<string> {
+/**
+ * Whatever the wallet handed back, as bytes.
+ *
+ * The declared type is `Uint8Array`, and that is not always what arrives: a wallet SDK may return
+ * base64, an array of numbers, or an `ArrayBuffer`. `sendRawTransaction` accepts none of those
+ * quietly — it mangles them into a body the cluster cannot parse, which comes back as an error
+ * about the transaction rather than about its encoding, and that sent this debugging in entirely
+ * the wrong direction for an afternoon.
+ *
+ * Normalising here is one function and removes the whole class.
+ */
+export function asBytes(signed: unknown): Uint8Array {
+  if (signed instanceof Uint8Array) return signed;
+  if (signed instanceof ArrayBuffer) return new Uint8Array(signed);
+  if (Array.isArray(signed)) return Uint8Array.from(signed as number[]);
+  if (typeof signed === 'string') {
+    const binary = atob(signed);
+    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  }
+  if (signed && typeof signed === 'object') {
+    /* Some SDKs wrap the bytes in a record keyed by index, which spreads into an object. */
+    const values = Object.values(signed as Record<string, unknown>);
+    if (values.length > 0 && values.every((v) => typeof v === 'number')) return Uint8Array.from(values as number[]);
+  }
+  throw new Error('The wallet returned a signed transaction in a form this app cannot broadcast.');
+}
+
+export async function broadcastSigned(conn: Connection, signedRaw: Uint8Array, prepared: Prepared): Promise<string> {
+  const signed = asBytes(signedRaw);
   /*
    * The wallet must hand back the transaction we gave it (2026-09-22).
    *
@@ -82,7 +110,19 @@ export async function broadcastSigned(conn: Connection, signed: Uint8Array, prep
    * Comparing costs one deserialize and turns an hour of guessing into a sentence.
    */
   const carried = blockhashOf(signed);
-  if (carried && carried !== prepared.blockhash) {
+  /*
+   * Unparseable bytes are their own failure, and a loud one.
+   *
+   * The guard below was silently skipped whenever `blockhashOf` returned null, so a wallet handing
+   * back something that is not a transaction looked exactly like a wallet handing back a correct
+   * one — right up until the cluster refused it for reasons of its own.
+   */
+  if (carried === null) {
+    throw new Error(
+      'The wallet returned bytes that are not a readable Solana transaction, so there is nothing to broadcast.',
+    );
+  }
+  if (carried !== prepared.blockhash) {
     throw new Error(
       `The wallet returned a transaction stamped with a different blockhash than the one it was given ` +
         `(${carried.slice(0, 8)}… instead of ${prepared.blockhash.slice(0, 8)}…), so this cluster will not accept it.`,

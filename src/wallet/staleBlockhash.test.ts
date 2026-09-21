@@ -61,3 +61,40 @@ describe('blockhashOf', () => {
     expect(blockhashOf(new Uint8Array(0))).toBeNull();
   });
 });
+
+import { asBytes } from './solanaTx';
+
+/*
+ * The declared type is Uint8Array and that is not always what arrives. sendRawTransaction accepts
+ * none of the other shapes quietly — it mangles them into a body the cluster cannot parse, and the
+ * resulting error talks about the transaction rather than its encoding.
+ */
+describe('asBytes', () => {
+  const sample = Uint8Array.from([1, 2, 3, 250]);
+
+  it('passes bytes through untouched', () => {
+    expect(asBytes(sample)).toBe(sample);
+  });
+
+  it('decodes base64, which is what a wallet returning a string gives', () => {
+    const b64 = Buffer.from(sample).toString('base64');
+    expect(Array.from(asBytes(b64))).toEqual([1, 2, 3, 250]);
+  });
+
+  it('takes an array of numbers', () => {
+    expect(Array.from(asBytes([1, 2, 3, 250]))).toEqual([1, 2, 3, 250]);
+  });
+
+  it('takes an ArrayBuffer', () => {
+    expect(Array.from(asBytes(sample.buffer.slice(0)))).toEqual([1, 2, 3, 250]);
+  });
+
+  it('takes an index-keyed object, which is what spreading bytes produces', () => {
+    expect(Array.from(asBytes({ 0: 1, 1: 2, 2: 3, 3: 250 }))).toEqual([1, 2, 3, 250]);
+  });
+
+  it('refuses anything it cannot turn into bytes, rather than broadcasting nonsense', () => {
+    expect(() => asBytes(null)).toThrow(/cannot broadcast/);
+    expect(() => asBytes(42)).toThrow(/cannot broadcast/);
+  });
+});
