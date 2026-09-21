@@ -300,12 +300,20 @@ export type SwapOutcome =
  * Every numeric is nullable because a run that never reached a fill has no price and no size, and
  * zero would be a different claim.
  */
-/** The regulator's own classification of a listed company. */
+/**
+ * How a held company is classified, and by whom.
+ *
+ * Two sources answer, and which one did is part of the answer. The SEC classifies a listed company;
+ * a private one has no filer, so for a T-Token the classification is the issuer's own — the same
+ * standing as the issuer mark shown beside the pool price. Neither is ever invented here: a symbol
+ * nothing can classify stays `null` and the donut draws it as Unclassified.
+ */
 export type SectorClassification = {
-  /** The SEC's wording for the SIC code — e.g. "Semiconductors & Related Devices". */
+  /** The SEC's wording for the SIC code — e.g. "Semiconductors & Related Devices" — or the issuer's. */
   sector: string;
-  /** The four-digit Standard Industrial Classification code it came from. */
-  sic: string;
+  /** The four-digit SIC code it came from. Null for an issuer answer: a private company has no SIC. */
+  sic: string | null;
+  source: 'sec' | 'issuer';
 };
 
 export type StrategyRunRow = {

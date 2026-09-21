@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import { ON_SOLANA, DEFAULT_MINTS } from '../solana/clusters.js';
 import { connection as solanaConnection } from '../solana/connection.js';
+import { TESSERA } from '../venues/tessera.js';
 import { XSTOCKS, xStockKey, xStockPriceUsd } from '../venues/xstocks.js';
 import { getJson, staleValue } from '../http/get.js';
 import { readChain } from '../http/chain-read.js';
@@ -394,6 +395,13 @@ market.get('/market/earnings', async (c) => {
  * **`null` is a real answer and the client keeps it as one.** A filer with no SIC on record — some trusts, index ETFs
  * among them — genuinely has none, and the donut draws that as Unclassified rather than guessing from the ticker. A
  * lookup that merely failed is also null here; both mean "this build cannot say", which is exactly what the chart shows.
+ *
+ * A private company has no filer at all, so the SEC could never answer for one, and every pre-IPO holding was drawn as
+ * Unclassified beside real sectors. Tessera publishes a sector for each of its T-Tokens, and that is the issuer's own
+ * classification of its own instrument — the same standing as the issuer mark this app already shows next to the pool
+ * price, and not the thing `edgar.ts` refuses, which is a sector WE invented for a company. `source` says which of the
+ * two answered so the distinction survives the wire, and `sic` is null for an issuer answer because a four-digit SEC
+ * code is exactly what a private company does not have.
  */
 market.get('/market/classification', async (c) => {
   const asked = (c.req.query('symbols') ?? '')
@@ -410,7 +418,10 @@ market.get('/market/classification', async (c) => {
   const found = await Promise.all(
     unique.map(async (symbol) => {
       const hit = await classificationFor(symbol).catch(() => null);
-      return [symbol, hit === null ? null : { sector: hit.description, sic: hit.sic }] as const;
+      if (hit !== null) return [symbol, { sector: hit.description, sic: hit.sic, source: 'sec' }] as const;
+      const issuer = TESSERA[symbol];
+      if (issuer) return [symbol, { sector: issuer.sector, sic: null, source: 'issuer' }] as const;
+      return [symbol, null] as const;
     }),
   );
   return c.json(Object.fromEntries(found));
