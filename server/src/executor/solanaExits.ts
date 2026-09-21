@@ -19,7 +19,7 @@ import { applyFill } from '../positions/index.js';
 import { send } from '../notifications/push.js';
 import { log } from '../http/request-id.js';
 import { guardAndSpend } from './place.js';
-import { XSTOCKS, xStockKey, xStockPriceUsd } from '../venues/xstocks.js';
+import { tradablePriceUsd, tradableToken } from '../venues/tradable-token.js';
 import { readDelegation } from '../solana/delegation.js';
 import { readMintScale, toUiAmount } from '../solana/balances.js';
 
@@ -50,7 +50,7 @@ type ExitRow = { id: string; wallet_id: string; label: string; symbol: string; p
 const BACKOFF_MS = 60 * 60_000;
 
 /** Check every live exit on this chain against the live price; sell the ones that crossed. Returns how many fired. */
-export async function solanaExitSweep(now: Date = new Date(), priceOf = xStockPriceUsd): Promise<number> {
+export async function solanaExitSweep(now: Date = new Date(), priceOf = tradablePriceUsd): Promise<number> {
   const rows = await query<ExitRow>(
     `SELECT s.id, s.wallet_id, s.label, s.symbol, s.params, w.address, w.agents_stopped
        FROM strategies s JOIN wallets w ON w.id = s.wallet_id
@@ -61,8 +61,17 @@ export async function solanaExitSweep(now: Date = new Date(), priceOf = xStockPr
   for (const row of rows) {
     if (row.agents_stopped) continue; // "Stops all trading, stop-losses too."
     if (row.params.retryAfter && row.params.retryAfter > now.getTime()) continue;
-    const key = xStockKey(row.symbol) ?? row.symbol;
-    if (!XSTOCKS[key]) continue;
+    /*
+     * Every class this executor can buy, not the xStocks alone (2026-09-22).
+     *
+     * A Tessera position fell through this `continue` without a log or an audit row, so a
+     * stop-loss set on one was not refused — it simply never fired, and the screen went on showing
+     * it as live. `tradableToken` is the same set the spend path admits, so a stop can only exist
+     * for something this sweep will actually check.
+     */
+    const token = tradableToken(row.symbol);
+    if (!token) continue;
+    const key = token.symbol;
     if (!prices.has(key)) prices.set(key, await priceOf(key).catch(() => null));
     const price = prices.get(key);
     if (!price) continue;
@@ -85,7 +94,7 @@ async function fireExit(row: ExitRow, symbol: string, price: number, trigger: No
   );
   if (!claimed) return false;
 
-  const stock = XSTOCKS[symbol]!;
+  const stock = tradableToken(symbol)!;
   const held = await readDelegation(row.address, stock.address);
   const scale = await readMintScale(stock.address);
   const units = toUiAmount(held.balanceAmount, scale);

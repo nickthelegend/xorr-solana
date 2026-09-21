@@ -49,7 +49,7 @@ describe('the grant approves every class the executor can buy', () => {
   });
 
   it('drops a mint this cluster does not carry, and nothing else', async () => {
-    const absent = tradableTokens()[0];
+    const absent = tradableTokens()[0]!;
     onCluster.mockImplementationOnce(
       async (addresses) => new Set([...addresses].filter((a) => a !== absent.address)),
     );

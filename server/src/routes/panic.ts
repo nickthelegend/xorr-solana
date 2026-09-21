@@ -35,7 +35,7 @@ import { ON_SOLANA } from '../solana/clusters.js';
 import { solanaHoldings } from '../solana/holdings.js';
 import { readDelegation } from '../solana/delegation.js';
 import { readMintScale, toUiAmount } from '../solana/balances.js';
-import { XSTOCKS, xStockPriceUsd } from '../venues/xstocks.js';
+import { tradablePriceUsd, tradableToken } from '../venues/tradable-token.js';
 import { guardAndSpend } from '../executor/place.js';
 import { closeAsDelegate, readPolicy, waitForTx } from '../evm/delegation.js';
 import { buildSwap, SLIPPAGE, TOKENS, canonicalSymbol } from '../venues/oneinch.js';
@@ -414,9 +414,19 @@ async function closeHoldingOnSolana(params: {
   actor: string;
 }): Promise<{ status: number; body: Record<string, unknown> }> {
   const { wallet: w, symbol, fraction, actor } = params;
-  const stock = XSTOCKS[symbol];
+  /*
+   * Whatever this executor can buy, it must be able to close (2026-09-22).
+   *
+   * This read `XSTOCKS` directly, so closing a Tessera position was refused as "not a tradable
+   * xStock" — the grant had by then been taught to approve the delegate on those accounts, so the
+   * chain would have allowed the sale and only this gate would not. A one-way door on the exit
+   * rather than on the entrance, which is the worse half. `tradableToken` is the same answer the
+   * spend path gives (`place.ts`), and it matches an xStock symbol case-insensitively, which a
+   * bare map lookup did not.
+   */
+  const stock = tradableToken(symbol);
   if (!stock) {
-    return { status: 409, body: { status: 'blocked', reason: 'not_tradable', detail: `${symbol} is not a tradable xStock on this cluster.` } };
+    return { status: 409, body: { status: 'blocked', reason: 'not_tradable', detail: `${symbol} cannot be traded on this cluster, so there is nothing to close.` } };
   }
 
   const held = await readDelegation(w.address, stock.address);
@@ -425,7 +435,7 @@ async function closeHoldingOnSolana(params: {
     return { status: 409, body: { status: 'blocked', reason: 'not_held', detail: `No ${symbol} to sell.` } };
   }
 
-  const price = await xStockPriceUsd(symbol).catch(() => null);
+  const price = await tradablePriceUsd(symbol).catch(() => null);
   if (price === null || !(price > 0)) {
     return { status: 502, body: { status: 'blocked', reason: 'no_price', detail: `No venue would price ${symbol} just now, so nothing was sold.` } };
   }
