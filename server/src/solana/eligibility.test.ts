@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PublicKey } from '@solana/web3.js';
 import { AccountState, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
-import { checkEligibility } from './eligibility.js';
+import { checkEligibility , readFailureReason } from './eligibility.js';
 
 const NVDAX = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
 const WALLET = '7v91N7iZEdMoQg6zJ5pA9oG3eF1n3hXyZ1W2v3u4t5s6';
@@ -139,5 +139,33 @@ describe('xStock transfer eligibility', () => {
   it('discloses the permanent delegate, which can seize from any account', async () => {
     const e = await run({ accountMissing: true });
     expect(e.permanentDelegate).toBe(ISSUER.toBase58());
+  });
+});
+
+/*
+ * Found on the hosted build: AMZNx has no mint on the fork, so `getMint` threw a spl-token error
+ * constructed with no message, and the eligibility card read "the token's mint could not be read
+ * ()." — empty brackets, in front of somebody about to spend money.
+ */
+describe('readFailureReason', () => {
+  it('uses the message when there is one', () => {
+    expect(readFailureReason(new Error('account not found'))).toBe('account not found');
+  });
+
+  it('falls back to the class name, which is where spl-token puts the meaning', () => {
+    const e = new Error();
+    e.name = 'TokenAccountNotFoundError';
+    expect(readFailureReason(e)).toBe('TokenAccountNotFoundError');
+  });
+
+  /* The empty brackets themselves. A caller that prints `(${reason})` must get null, not ''. */
+  it('returns null for an error carrying nothing, so no caller prints empty brackets', () => {
+    expect(readFailureReason(new Error())).toBeNull();
+    expect(readFailureReason({})).toBeNull();
+    expect(readFailureReason(undefined)).toBeNull();
+  });
+
+  it('takes a non-Error that stringifies to something', () => {
+    expect(readFailureReason('boom')).toBe('boom');
   });
 });

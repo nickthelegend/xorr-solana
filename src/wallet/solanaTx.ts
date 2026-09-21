@@ -63,6 +63,25 @@ export async function broadcastSigned(conn: Connection, signed: Uint8Array, prep
   return signature;
 }
 
+
+/**
+ * Whether a send failed because the blockhash it carried had aged out.
+ *
+ * A blockhash lives about 150 slots — on this cluster, measured, roughly fifty-five seconds. The
+ * app has to fetch one BEFORE the wallet's confirmation sheet opens, because the signature covers
+ * it, so the clock runs while the person reads what they are about to approve. On the permission
+ * screen that is exactly what we ask them to do: six paragraphs about what the bot may and may not
+ * touch. Reading them carefully is enough to lose the grant, and the failure arrives as
+ * "Transaction simulation failed: Blockhash not found", which tells them nothing.
+ *
+ * The cure is to notice this one error and go round again with a fresh blockhash, which costs a
+ * second signature and saves the flow.
+ */
+export function isStaleBlockhash(err: unknown): boolean {
+  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /blockhash not found|block ?height exceeded|BlockhashNotFound|TransactionExpired/i.test(text);
+}
+
 /** The token program that owns a mint: classic SPL for USDC, Token-2022 for xStocks. Read from the chain. */
 export async function tokenProgramOf(conn: Connection, mint: PublicKey): Promise<PublicKey> {
   const info = await conn.getAccountInfo(mint, 'confirmed');

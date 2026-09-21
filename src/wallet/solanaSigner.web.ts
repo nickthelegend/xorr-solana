@@ -10,7 +10,7 @@ import { PublicKey, type Transaction } from '@solana/web3.js';
 import { useSignTransaction, useWallets } from '@privy-io/react-auth/solana';
 import { useAuth } from '@/auth/useAuth';
 import { CANCELLED, isUserCancel } from './walletError';
-import { broadcastSigned, prepareForSigning, solanaConnection, unsignedBytes, type Prepared } from './solanaTx';
+import { broadcastSigned, isStaleBlockhash, prepareForSigning, solanaConnection, unsignedBytes, type Prepared } from './solanaTx';
 
 export type SolanaSigner = {
   /** The owner's base58 address, once Privy has made the wallet. */
@@ -35,13 +35,32 @@ export function useSolanaSigner(): SolanaSigner {
     async (tx: Transaction, already?: Prepared) => {
       if (!address || !wallet) throw new Error('Your wallet is not ready yet. Give it a moment.');
       const conn = solanaConnection();
-      const prepared = already ?? (await prepareForSigning(conn, tx, new PublicKey(address)));
-      const signed = await signTransaction({ transaction: unsignedBytes(tx), wallet }).catch((e: unknown) => {
-        // Privy reports a closed sheet as "Failed to connect to wallet"; every caller shows this message as it is.
-        throw isUserCancel(e) ? new Error(CANCELLED, { cause: e }) : e;
-      });
-      const { signedTransaction } = signed;
-      return broadcastSigned(conn, signedTransaction, prepared);
+      const once = async () => {
+        const prepared = already ?? (await prepareForSigning(conn, tx, new PublicKey(address)));
+        const signed = await signTransaction({ transaction: unsignedBytes(tx), wallet }).catch((e: unknown) => {
+          // Privy reports a closed sheet as "Failed to connect to wallet"; every caller shows this message as it is.
+          throw isUserCancel(e) ? new Error(CANCELLED, { cause: e }) : e;
+        });
+        return broadcastSigned(conn, signed.signedTransaction, prepared);
+      };
+      try {
+        return await once();
+      } catch (e) {
+        /*
+         * One more go with a fresh blockhash (2026-09-22).
+         *
+         * The blockhash is stamped before the wallet sheet opens, because the signature covers it,
+         * and it lives about fifty-five seconds. Reading the permission screen — which is six
+         * paragraphs we want read — takes longer than that often enough that the grant failed on
+         * the hosted build with "Blockhash not found". Going round once costs a second tap on a
+         * sheet the person has already decided to approve.
+         *
+         * Never for a `prepared` transaction: that one is the executor's, co-signed, and re-stamping
+         * the blockhash would void its signature. A cancel is the person's answer, not a fault.
+         */
+        if (already || !isStaleBlockhash(e) || (e instanceof Error && e.message === CANCELLED)) throw e;
+        return await once();
+      }
     },
     [address, wallet, signTransaction],
   );
