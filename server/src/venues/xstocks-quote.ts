@@ -16,6 +16,7 @@
  */
 import { quote, UnpricedError, type JupiterQuoteResponse } from './jupiter.js';
 import { XSTOCKS, xStockKey, xStockPriceUsd } from './xstocks.js';
+import { tradablePriceUsd, tradableToken } from './tradable-token.js';
 import { DEFAULT_MINTS } from '../solana/clusters.js';
 import { fromUiAmount, readMintScale } from '../solana/balances.js';
 
@@ -117,9 +118,17 @@ export async function xStockQuote(params: {
   usd: number;
   slippageBps?: number;
 }): Promise<XStockQuoteBreakdown> {
-  const key = xStockKey(params.symbol);
-  const token = key ? XSTOCKS[key] : undefined;
-  if (!key || !token) throw new UnpricedError(`${params.symbol} is not a tokenized equity here.`);
+  /*
+   * Either class (2026-09-21): a listed xStock or a Tessera pre-IPO token.
+   *
+   * This resolved through `XSTOCKS` alone, so a T-Token was refused as "not a tokenized equity
+   * here" — which is true and unhelpful, since it IS tokenized and it IS here. The breakdown below
+   * is venue-agnostic: it asks Jupiter for a route and reads back impact, slippage and minimum
+   * received. Nothing in it cares whether the fill lands on Orca or Meteora.
+   */
+  const token = tradableToken(params.symbol);
+  if (!token) throw new UnpricedError(`${params.symbol} is not a token this cluster prices.`);
+  const key = token.symbol;
   if (!(params.usd > 0)) throw new UnpricedError('The amount must be above zero.');
 
   const slippageBps = params.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
@@ -131,7 +140,7 @@ export async function xStockQuote(params: {
    * against on either side. Without it there is no honest way to put a token figure into money, so
    * a missing mark is a missing breakdown rather than a breakdown with a guessed denominator.
    */
-  const markPrice = await xStockPriceUsd(key);
+  const markPrice = await tradablePriceUsd(key);
   if (!markPrice || !(markPrice > 0)) {
     throw new UnpricedError(`No price for ${key}, so its cost cannot be broken down.`);
   }

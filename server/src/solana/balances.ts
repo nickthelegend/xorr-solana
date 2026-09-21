@@ -54,6 +54,25 @@ const TOKEN_2022_MINTS = new Set<string>([
   'Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu', // COINx
   'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W', // SPYx
   'Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ', // QQQx
+  /*
+   * Tessera's pre-IPO mints, which are Token-2022 too (2026-09-21).
+   *
+   * Missing them was not a cosmetic gap. `tokenProgramForMint` falls back to the LEGACY token
+   * program for anything not listed, so the first attempt at a T-SpaceX swap on the fork built its
+   * associated-token account under `Tokenkeg…` and the whole transaction failed simulation with
+   * `IncorrectProgramId` before Jupiter was ever reached. A list that silently defaults is only as
+   * right as it is complete.
+   */
+  'TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v', // T-SpaceX
+  'oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ', // T-OpenAI
+  'TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ', // T-Kalshi
+]);
+
+/** The pre-IPO mints are 9 decimals where the xStocks are 8. */
+const NINE_DECIMAL_MINTS = new Set<string>([
+  'TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v',
+  'oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ',
+  'TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ',
 ]);
 
 export function toPublicKey(key: string | PublicKey): PublicKey {
@@ -77,6 +96,7 @@ export function tokenProgramForMint(mint: PublicKey | string): PublicKey {
  */
 export function decimalsForMint(mint: PublicKey | string): number {
   const str = typeof mint === 'string' ? mint : mint.toBase58();
+  if (NINE_DECIMAL_MINTS.has(str)) return 9; // Tessera pre-IPO tokens
   if (TOKEN_2022_MINTS.has(str)) {
     return 8; // Backed Finance xStocks are 8 decimals
   }

@@ -33,6 +33,7 @@ async function countSpend(walletId: string, usd: number): Promise<void> {
   );
 }
 import { xStockPriceUsd, XSTOCKS, xStockKey } from '../venues/xstocks.js';
+import { tradablePriceUsd, tradableToken } from '../venues/tradable-token.js';
 import { quote, swap, resolveMint, type FillVenue } from '../venues/jupiter.js';
 import { checkEligibility } from '../solana/eligibility.js';
 import { readSolanaPolicy } from '../solana/grant.js';
@@ -88,14 +89,20 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     };
   }
 
-  // Verify symbol is a recognized xStock or tradable asset
-  const stock = XSTOCKS[symbolKey];
+  /*
+   * Either class: an xStock or a Tessera pre-IPO token (2026-09-21).
+   *
+   * This gated on `XSTOCKS` alone, so a T-Token was refused as "not a tradable xStock" — true, and
+   * useless to somebody holding one. Nothing about the money path differs between the two; only
+   * the AMM that fills them does, and that is Jupiter's problem, not this function's.
+   */
+  const stock = tradableToken(symbolKey);
   if (!stock && symbolKey !== 'USDC' && symbolKey !== 'SOL') {
     return {
       placed: false,
       status: 'blocked',
       reason: 'not_tradable',
-      detail: `${intent.symbol} is not a tradable xStock on this cluster.`,
+      detail: `${intent.symbol} is not a token this cluster trades.`,
     };
   }
 
@@ -228,8 +235,13 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     }
   }
 
-  // 4. Real mark from live quote / venues/xstocks
-  const markPrice = await xStockPriceUsd(symbolKey);
+  /*
+   * 4. Real mark from a live quote, from whichever venue prices this class.
+   *
+   * `xStockPriceUsd` returns null for a T-Token, which would have refused every pre-IPO buy as
+   * "could not obtain a live price" — a true sentence about the wrong lookup.
+   */
+  const markPrice = await tradablePriceUsd(symbolKey);
   if (!markPrice || markPrice <= 0) {
     return {
       placed: false,

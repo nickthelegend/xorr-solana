@@ -75,6 +75,24 @@ export const ROUTE_ACCOUNTS = [
  * The xStocks the fork trades: NVDAx (its mint is overridden so the fork can fund the venue vault) and the most traded
  * others, cloned as they are on mainnet with the routes Jupiter uses for them.
  */
+/**
+ * Tessera's pre-IPO tokens, cloned alongside the xStocks (2026-09-21).
+ *
+ * SpaceX, OpenAI and Kalshi are Token-2022 mints and Jupiter routes every one — and every route,
+ * in both directions, is **100% Meteora DLMM**. So cloning these does two things at once:
+ * the fork can settle a pre-IPO trade, and it gains the Meteora program, because
+ * `resolveRouteClones` clones whatever programs the resolved route actually touches.
+ *
+ * That matters more than it looks. Every xStock fill on this fork CPIs into Orca; every T-Token
+ * fill will CPI into Meteora. Both are the real mainnet programs, cloned, executing against the
+ * pools' real reserves — not a second code path pretending to be a venue.
+ */
+export const FORK_PREIPO: { mint: string; decimals: number }[] = [
+  { mint: 'TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v', decimals: 9 }, // T-SpaceX
+  { mint: 'oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ', decimals: 9 }, // T-OpenAI
+  { mint: 'TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ', decimals: 9 }, // T-Kalshi
+];
+
 export const FORK_XSTOCKS: { mint: string; decimals: number }[] = [
   { mint: NVDAX_MINT.toBase58(), decimals: 8 },
   { mint: 'XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB', decimals: 8 }, // TSLAx
@@ -254,7 +272,8 @@ export async function startValidator(
     clones = await resolveRouteClones({
       upstream: new Connection(UPSTREAM_RPC, 'confirmed'),
       usdcMint: USDC_MINT.toBase58(),
-      xstocks: FORK_XSTOCKS,
+      /* One list: the resolver is generic over mints, and a pre-IPO route is a route. */
+      xstocks: [...FORK_XSTOCKS, ...FORK_PREIPO],
       user: payer.publicKey.toBase58(),
       exclude: [USDC_MINT.toBase58(), NVDAX_MINT.toBase58(), JUPITER_PROGRAM, WHIRLPOOL_PROGRAM],
     });
