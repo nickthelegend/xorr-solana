@@ -18,6 +18,7 @@ import { PublicKey } from '@solana/web3.js';
 import { ON_SOLANA, DEFAULT_MINTS } from '../solana/clusters.js';
 import { connection as solanaConnection } from '../solana/connection.js';
 import { TESSERA } from '../venues/tessera.js';
+import { tradableToken, tradableTokens } from '../venues/tradable-token.js';
 import { XSTOCKS, xStockKey, xStockPriceUsd } from '../venues/xstocks.js';
 import { getJson, staleValue } from '../http/get.js';
 import { readChain } from '../http/chain-read.js';
@@ -220,8 +221,16 @@ market.get('/market/quotes', async (c) => {
 
 /** GET /market/ohlc?symbol=BTC&days=30 — raw OHLC rows; the client folds them to 12 candles. */
 market.get('/market/ohlc', async (c) => {
-  // Uppercased: `COINGECKO_IDS` is all-caps crypto with no equities in it, the one lookup rule 3 allows.
-  const symbol = (c.req.query('symbol') ?? '').trim().toUpperCase();
+  /*
+   * Kept in the caller's spelling as well as uppercased.
+   *
+   * `COINGECKO_IDS` is all-caps crypto with no equities in it, the one lookup rule 3 allows — but
+   * uppercasing FIRST and resolving everything from that is rule 3's actual failure. `T-OpenAI`
+   * became `T-OPENAI`, which is not a symbol Tessera issued, so this answered
+   * `No price feed for T-OPENAI.` for a token held in the app's own portfolio.
+   */
+  const raw = (c.req.query('symbol') ?? '').trim();
+  const symbol = raw.toUpperCase();
   /*
    * Refusals a client can act on, by name.
    *
@@ -236,14 +245,17 @@ market.get('/market/ohlc', async (c) => {
   }
 
   /*
-   * An xStock's rows are the executor's own recorded Jupiter prices (2026-09-20): no candle feed has them, and every
-   * xStock chart read "No price history yet". The series starts when this deployment started watching, and is no longer
+   * A tradable token's rows are the executor's own recorded prices (2026-09-20): no candle feed has them, and every
+   * such chart read "No price history yet". The series starts when this deployment started watching, and is no longer
    * than that.
+   *
+   * `tradableToken` rather than `xStockKey`, so the T-Tokens are served here too — and resolved from `raw`, because
+   * it matches an xStock case-insensitively and a T-Token exactly, which is what each registry actually promises.
    */
-  const equity = ON_SOLANA ? xStockKey(symbol) : undefined;
-  if (equity) {
-    const rows = ohlcRows(await observedSince(equity, Math.min(days, 365)), bucketFor(days));
-    return c.json({ symbol: equity, days, rows, source: 'observed' });
+  const token = ON_SOLANA ? tradableToken(raw) : undefined;
+  if (token) {
+    const rows = ohlcRows(await observedSince(token.symbol, Math.min(days, 365)), bucketFor(days));
+    return c.json({ symbol: token.symbol, days, rows, source: 'observed' });
   }
 
   const id = COINGECKO_IDS[symbol];
@@ -456,8 +468,18 @@ market.get('/market/stocks/history', async (c) => {
 
 /** GET /market/symbols — which symbols have a real feed. */
 market.get('/market/symbols', (c) =>
-  // On Solana the xStocks have a series too: the observed one `/market/ohlc` serves for them.
-  c.json(ON_SOLANA ? [...Object.keys(COINGECKO_IDS), ...Object.keys(XSTOCKS)] : Object.keys(COINGECKO_IDS)),
+  /*
+   * On Solana every tradable token has a series too: the observed one `/market/ohlc` serves for them.
+   *
+   * Both classes. This listed the xStocks alone, and the client treats this list as the gate on whether to ask for
+   * history at all (`marketData.ts#fetchRows`), so a T-Token's chart was refused here before any request was made —
+   * a second, independent reason the pre-IPO charts were empty.
+   */
+  c.json(
+    ON_SOLANA
+      ? [...Object.keys(COINGECKO_IDS), ...tradableTokens().map((t) => t.symbol)]
+      : Object.keys(COINGECKO_IDS),
+  ),
 );
 
 /**

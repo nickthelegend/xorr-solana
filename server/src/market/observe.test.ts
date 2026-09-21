@@ -1,31 +1,66 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 const priceMock = vi.fn<(symbol: string) => Promise<number | null>>();
+const tesseraMock = vi.fn<(symbol: string) => Promise<number | null>>();
+const recordMock = vi.fn<(symbol: string, usd: number) => void>();
 
 vi.mock('../venues/xstocks.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../venues/xstocks.js')>()),
   xStockPriceUsd: (s: string) => priceMock(s),
+  recordObservation: (s: string, usd: number) => recordMock(s, usd),
+}));
+
+vi.mock('../venues/tessera.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../venues/tessera.js')>()),
+  tesseraPriceUsd: (s: string) => tesseraMock(s),
 }));
 
 const { observeSweep, resetObserveClock, OBSERVE_EVERY_MS } = await import('./observe.js');
-const { XSTOCKS } = await import('../venues/xstocks.js');
+const { tradableTokens } = await import('../venues/tradable-token.js');
+
+/** The whole universe the sweep is responsible for: both classes, not just the xStocks. */
+const UNIVERSE = tradableTokens().length;
+const EQUITIES = tradableTokens().filter((t) => t.kind === 'equity').length;
+const PRE_IPO = tradableTokens().filter((t) => t.kind === 'pre-ipo').length;
 
 const T0 = new Date('2026-09-17T12:00:00Z');
 const later = (ms: number) => new Date(T0.getTime() + ms);
 
-describe('recording what the xStocks cost', () => {
+describe('recording what the tradable tokens cost', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetObserveClock();
     priceMock.mockResolvedValue(216.5);
+    tesseraMock.mockResolvedValue(978.43);
   });
 
   afterEach(() => resetObserveClock());
 
-  it('prices every symbol in the universe', async () => {
+  it('prices every symbol in the universe, both classes', async () => {
     const out = await observeSweep(T0);
-    expect(out).toEqual({ asked: Object.keys(XSTOCKS).length, recorded: Object.keys(XSTOCKS).length, unpriced: [] });
-    expect(priceMock).toHaveBeenCalledTimes(Object.keys(XSTOCKS).length);
+    expect(out).toEqual({ asked: UNIVERSE, recorded: UNIVERSE, unpriced: [] });
+    expect(priceMock).toHaveBeenCalledTimes(EQUITIES);
+    expect(tesseraMock).toHaveBeenCalledTimes(PRE_IPO);
+  });
+
+  /*
+   * The read is the write for an xStock and is NOT for a T-Token, because `tesseraPriceUsd` is on
+   * the hot path of every quote screen and a row per call would be write amplification rather than
+   * a series. So the sweep — the thing that decides the record's resolution — records that class.
+   */
+  it('records a T-Token reading itself, and does not double-record an xStock', async () => {
+    await observeSweep(T0);
+    expect(recordMock).toHaveBeenCalledTimes(PRE_IPO);
+    for (const t of tradableTokens().filter((x) => x.kind === 'pre-ipo')) {
+      expect(recordMock).toHaveBeenCalledWith(t.symbol, 978.43);
+    }
+  });
+
+  it('does not record a T-Token the venue could not price', async () => {
+    tesseraMock.mockResolvedValue(null);
+    const out = await observeSweep(T0);
+    expect(recordMock).not.toHaveBeenCalled();
+    expect(out?.recorded).toBe(EQUITIES);
   });
 
   /*
@@ -46,7 +81,7 @@ describe('recording what the xStocks cost', () => {
 
     const out = await observeSweep(later(OBSERVE_EVERY_MS));
     expect(out).not.toBeNull();
-    expect(priceMock).toHaveBeenCalledTimes(Object.keys(XSTOCKS).length);
+    expect(priceMock).toHaveBeenCalledTimes(EQUITIES);
   });
 
   /*
@@ -58,7 +93,7 @@ describe('recording what the xStocks cost', () => {
 
     const out = await observeSweep(T0);
     expect(out?.unpriced).toEqual(['TSLAx']);
-    expect(out?.recorded).toBe(Object.keys(XSTOCKS).length - 1);
+    expect(out?.recorded).toBe(UNIVERSE - 1);
   });
 
   it('treats a throw as unpriced rather than ending the sweep', async () => {
@@ -70,13 +105,16 @@ describe('recording what the xStocks cost', () => {
     const out = await observeSweep(T0);
     expect(out?.unpriced).toContain('NVDAx');
     // Every other symbol still got asked: one venue failure is not the whole sweep's.
-    expect(priceMock).toHaveBeenCalledTimes(Object.keys(XSTOCKS).length);
+    expect(priceMock).toHaveBeenCalledTimes(EQUITIES);
+    expect(tesseraMock).toHaveBeenCalledTimes(PRE_IPO);
   });
 
   it('does not count a zero or negative price as a reading', async () => {
     priceMock.mockResolvedValue(0);
+    tesseraMock.mockResolvedValue(0);
     const out = await observeSweep(T0);
     expect(out?.recorded).toBe(0);
-    expect(out?.unpriced).toHaveLength(Object.keys(XSTOCKS).length);
+    expect(out?.unpriced).toHaveLength(UNIVERSE);
+    expect(recordMock).not.toHaveBeenCalled();
   });
 });

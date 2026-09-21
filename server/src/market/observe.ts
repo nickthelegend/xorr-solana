@@ -18,12 +18,14 @@
  *
  * ## What it does not do
  *
- * It does not invent a reading when the venue does not answer. `xStockPriceUsd` returns null for a
- * symbol it cannot route, and a gap in the series is the honest record of a gap in what was
+ * It does not invent a reading when the venue does not answer. Both price reads return null for a
+ * symbol they cannot route, and a gap in the series is the honest record of a gap in what was
  * knowable — the whole reason the range logic counts observations rather than assuming a shape.
  */
 import { log } from '../http/request-id.js';
-import { XSTOCKS, xStockPriceUsd } from '../venues/xstocks.js';
+import { recordObservation, xStockPriceUsd } from '../venues/xstocks.js';
+import { tesseraPriceUsd } from '../venues/tessera.js';
+import { tradableTokens } from '../venues/tradable-token.js';
 
 /** How often a symbol is priced for the record. */
 export const OBSERVE_EVERY_MS = Number(process.env.OBSERVE_EVERY_MS ?? 5 * 60_000);
@@ -47,19 +49,36 @@ export async function observeSweep(now: Date = new Date()): Promise<ObserveResul
   if (now.getTime() - lastRunAt < OBSERVE_EVERY_MS) return null;
   lastRunAt = now.getTime();
 
-  const symbols = Object.keys(XSTOCKS);
+  /*
+   * Both classes. This swept the xStocks alone, so no T-Token ever got a reading and the pre-IPO
+   * charts had nothing to draw — the live half of the same gap `history.ts` had in the backfill.
+   */
+  const tokens = tradableTokens();
+  const symbols = tokens.map((t) => t.symbol);
   const unpriced: string[] = [];
   let recorded = 0;
 
-  for (const symbol of symbols) {
+  for (const token of tokens) {
     /*
-     * The read IS the write: `xStockPriceUsd` records what it sees. Asking is the whole job, and
-     * a failure is a symbol this venue could not price right now rather than something to retry
+     * For an xStock the read IS the write: `xStockPriceUsd` records what it sees. `tesseraPriceUsd`
+     * does not, and must not — it is called on the hot path of every quote and pricing screen, where
+     * a row per call would be a write amplification, not a series. So this sweep, which exists
+     * precisely to decide the resolution of the record, does the recording for that class itself.
+     *
+     * Either way a failure is a symbol the venue could not price right now, not something to retry
      * into a number.
      */
-    const price = await xStockPriceUsd(symbol).catch(() => null);
-    if (price === null || !(price > 0)) unpriced.push(symbol);
-    else recorded += 1;
+    const price =
+      token.kind === 'pre-ipo'
+        ? await tesseraPriceUsd(token.symbol).catch(() => null)
+        : await xStockPriceUsd(token.symbol).catch(() => null);
+
+    if (price === null || !(price > 0)) {
+      unpriced.push(token.symbol);
+      continue;
+    }
+    if (token.kind === 'pre-ipo') recordObservation(token.symbol, price);
+    recorded += 1;
   }
 
   if (unpriced.length > 0) {
