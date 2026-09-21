@@ -143,12 +143,16 @@ panic.get('/panic/preview', async (c) => {
    * linked from Explore and Send, which made a money path dead on the chain the product ships on.
    * `solanaHoldings` was already there; nothing needed building, only asking the right one.
    *
-   * An xStock nothing can price comes back `usd: null` rather than zero. Treating null as zero
+   * A holding nothing can price comes back `usd: null` rather than zero. Treating null as zero
    * would drop a real holding below the dust line and quietly leave it behind in a flow whose whole
    * promise is "everything", so an unpriced holding is a leg with no value, never an absent one.
+   *
+   * `.tokens`, which is both classes. It read `.xstocks`, so a held T-Token was not offered for
+   * closing at all — the panic screen reported nothing to sell while the wallet held one, and the
+   * delegate had been approved on it. An omission is the one failure this flow must not have.
    */
   const held = ON_SOLANA
-    ? (await readChain('your holdings', () => solanaHoldings(w.address), patience.chainReadMs)).xstocks.map((h) => ({
+    ? (await readChain('your holdings', () => solanaHoldings(w.address), patience.chainReadMs)).tokens.map((h) => ({
         symbol: h.symbol,
         units: h.units,
         usd: h.usd,

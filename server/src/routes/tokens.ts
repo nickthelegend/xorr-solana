@@ -52,12 +52,12 @@ tokenRoutes.get('/wallet/tokens', async (c) => {
    */
   if (ON_SOLANA) {
     const h = await readChain('your tokens', () => solanaHoldings(w.address));
-    const logos = await logosFor(['USDC', 'SOL', ...h.xstocks.map((x) => x.symbol)]);
+    const logos = await logosFor(['USDC', 'SOL', ...h.tokens.map((x) => x.symbol)]);
     const tokens = [
       ...(h.usdc > 0
         ? [{ symbol: 'USDC', name: 'USD Coin', address: DEFAULT_MINTS.USDC, decimals: 6, units: h.usdc, logo: logos.USDC?.url ?? null, usd: h.usdc }]
         : []),
-      ...h.xstocks.map((x) => ({ ...x, logo: logos[x.symbol]?.url ?? null })),
+      ...h.tokens.map((x) => ({ ...x, logo: logos[x.symbol]?.url ?? null })),
       ...(h.sol > 0
         ? [{ symbol: 'SOL', name: 'Solana', address: 'native', decimals: 9, units: h.sol, logo: logos.SOL?.url ?? null, native: true as const, usd: null }]
         : []),
