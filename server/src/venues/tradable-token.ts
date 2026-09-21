@@ -45,6 +45,31 @@ export function tradableToken(symbol: string): TradableToken | undefined {
   return undefined;
 }
 
+/**
+ * Every token this executor would attempt, both classes.
+ *
+ * The grant reads this to decide which accounts the owner approves the delegate on, so a class
+ * missing here is a class an agent can buy and then never sell — no stop-loss, no panic close.
+ */
+export function tradableTokens(): TradableToken[] {
+  return [
+    ...Object.values(XSTOCKS).map((x) => ({
+      symbol: x.symbol,
+      name: x.name,
+      address: x.address,
+      decimals: x.decimals,
+      kind: 'equity' as const,
+    })),
+    ...Object.values(TESSERA).map((t) => ({
+      symbol: t.symbol,
+      name: t.name,
+      address: t.address,
+      decimals: t.decimals,
+      kind: 'pre-ipo' as const,
+    })),
+  ];
+}
+
 /** Every symbol this executor would attempt, both classes. */
 export function tradableSymbols(): string[] {
   return [...Object.keys(XSTOCKS), ...Object.keys(TESSERA)];
