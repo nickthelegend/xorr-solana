@@ -30,10 +30,10 @@ import {
 import { assetGradient } from '@/design/gradients';
 import { price as fmtPrice, percent } from '@/format';
 import { useAsync } from '@/data/useAsync';
-import { prestocks, type PreStockRow } from '@/data/prestocks';
+import { preIpo, type PreIpoRow } from '@/data/preIpo';
 
 /** What the pool asks, or the plain fact that nothing would route it. */
-function PoolPrice({ row }: { row: PreStockRow }) {
+function PoolPrice({ row }: { row: PreIpoRow }) {
   if (row.poolUsd === null) {
     return (
       <Text variant="rowPrimary" color={colors.ink55}>
@@ -50,7 +50,7 @@ function PoolPrice({ row }: { row: PreStockRow }) {
  * Coloured by size rather than by direction. A pool above the mark is not "good" — it is what a
  * buyer pays over the number the issuer publishes, so wide is a warning whichever way it points.
  */
-function MarkLine({ row }: { row: PreStockRow }) {
+function MarkLine({ row }: { row: PreIpoRow }) {
   if (row.markUsd === null) {
     return (
       <Text variant="bodySm" color={colors.ink55}>
@@ -75,12 +75,12 @@ function MarkLine({ row }: { row: PreStockRow }) {
 
 export default function PreStocks() {
   const goBack = useGoBack();
-  const { data, loading, error, reload } = useAsync(() => prestocks.list(), []);
+  const { data, loading, error, reload } = useAsync(() => preIpo.list(), []);
   const rows = data?.rows ?? [];
   const feeBps = rows[0]?.transferFeeBps ?? null;
 
   return (
-    <Screen gutter="none" testID="prestocks">
+    <Screen gutter="none" testID="pre-ipo">
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Pre-IPO</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>

@@ -10,7 +10,7 @@
  */
 import { api } from './api';
 
-export type PreStockRow = {
+export type PreIpoRow = {
   symbol: string;
   name: string;
   address: string;
@@ -25,8 +25,8 @@ export type PreStockRow = {
   transferFeeBps: number;
 };
 
-export type PreStockPage = { venue: string; note: string; rows: PreStockRow[] };
+export type PreIpoPage = { venue: string; note: string; rows: PreIpoRow[] };
 
-export const prestocks = {
-  list: () => api.get<PreStockPage>('/market/prestocks'),
+export const preIpo = {
+  list: () => api.get<PreIpoPage>('/market/preipo'),
 };

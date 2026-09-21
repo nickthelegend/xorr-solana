@@ -893,7 +893,7 @@ export default function Home() {
                       <Row
                         height={size.rowLg}
                         divider
-                        onPress={() => router.push('/prestocks')}
+                        onPress={() => router.push('/pre-ipo')}
                         left={<AssetMark gradient={assetGradient('T-SpaceX')} size={size.mark} />}
                         title="Pre-IPO"
                         secondary="SpaceX, OpenAI and Kalshi, tokenised by Tessera"
