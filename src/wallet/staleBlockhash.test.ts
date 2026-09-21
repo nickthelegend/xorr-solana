@@ -31,3 +31,33 @@ describe('isStaleBlockhash', () => {
     expect(isStaleBlockhash(undefined)).toBe(false);
   });
 });
+
+import { Keypair, SystemProgram, Transaction } from '@solana/web3.js';
+import { blockhashOf } from './solanaTx';
+
+/*
+ * The guard that turns "Blockhash not found" — an error that reads like the cluster's fault — into
+ * a sentence naming the wallet that caused it.
+ */
+describe('blockhashOf', () => {
+  const stamped = (blockhash: string) => {
+    const kp = Keypair.generate();
+    const tx = new Transaction().add(
+      SystemProgram.transfer({ fromPubkey: kp.publicKey, toPubkey: kp.publicKey, lamports: 1 }),
+    );
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = kp.publicKey;
+    tx.sign(kp);
+    return new Uint8Array(tx.serialize());
+  };
+
+  it('reads the blockhash a signed transaction carries', () => {
+    const bh = Keypair.generate().publicKey.toBase58(); // any base58 32-byte value
+    expect(blockhashOf(stamped(bh))).toBe(bh);
+  });
+
+  it('is null for bytes that are not a transaction, so the guard never fires on garbage', () => {
+    expect(blockhashOf(new Uint8Array([1, 2, 3]))).toBeNull();
+    expect(blockhashOf(new Uint8Array(0))).toBeNull();
+  });
+});

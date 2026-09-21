@@ -9,7 +9,7 @@
  * This replaced `solanaWallet.ts`'s locally generated keypair, which stored the raw secret key in `localStorage` on the
  * web and was not the wallet the executor knew about at all.
  */
-import { Connection, PublicKey, Transaction, type TransactionInstruction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, VersionedTransaction, type TransactionInstruction } from '@solana/web3.js';
 import {
   TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
@@ -52,11 +52,42 @@ export function unsignedBytes(tx: Transaction): Uint8Array {
   return new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false }));
 }
 
+
+/** The blockhash inside signed bytes, or null when they cannot be read as a transaction. */
+export function blockhashOf(signed: Uint8Array): string | null {
+  try {
+    return Transaction.from(signed).recentBlockhash ?? null;
+  } catch {
+    try {
+      return VersionedTransaction.deserialize(signed).message.recentBlockhash ?? null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
  * Broadcast signed bytes and wait for the cluster to confirm them. Throws with the chain's own error when the
  * transaction failed — a signature is returned only for a transaction the ledger holds without an error.
  */
 export async function broadcastSigned(conn: Connection, signed: Uint8Array, prepared: Prepared): Promise<string> {
+  /*
+   * The wallet must hand back the transaction we gave it (2026-09-22).
+   *
+   * A wallet that re-stamps the blockhash returns something we never prepared, and the cluster then
+   * rejects it as "Blockhash not found" — an error that reads like ours and is not. That failure
+   * cost an afternoon on the hosted build, because the wallet's own sheet says "Transaction
+   * signed!" either way and the only symptom is a grant that never lands.
+   *
+   * Comparing costs one deserialize and turns an hour of guessing into a sentence.
+   */
+  const carried = blockhashOf(signed);
+  if (carried && carried !== prepared.blockhash) {
+    throw new Error(
+      `The wallet returned a transaction stamped with a different blockhash than the one it was given ` +
+        `(${carried.slice(0, 8)}… instead of ${prepared.blockhash.slice(0, 8)}…), so this cluster will not accept it.`,
+    );
+  }
   const signature = await conn.sendRawTransaction(signed, { skipPreflight: false, preflightCommitment: 'confirmed' });
   const result = await conn.confirmTransaction({ signature, ...prepared }, 'confirmed');
   if (result.value.err) throw new Error(`The transaction failed on chain: ${JSON.stringify(result.value.err)}`);
