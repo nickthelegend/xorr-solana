@@ -26,6 +26,8 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getConnection } from '../solana/connection.js';
 import { activeClusterKey, isSolanaCluster } from '../solana/clusters.js';
 import { delegateKeypair, payerKeypair } from '../solana/keys.js';
+import { pythEquityMarks } from '../market/pyth.js';
+import { tesseraMarks } from '../venues/tessera.js';
 
 export const ops = new Hono();
 
@@ -92,6 +94,31 @@ function solanaDeps(): Promise<Dep>[] {
       const sol = (await conn.getBalance(payerKeypair().publicKey, 'confirmed')) / LAMPORTS_PER_SOL;
       if (sol < FEE_FLOOR_SOL) throw new Error(`${sol.toFixed(4)} SOL, below the ${FEE_FLOOR_SOL} floor`);
       return `${sol.toFixed(4)} SOL`;
+    }),
+    /*
+     * The two market sources the Solana build decides with, probed rather than asserted (2026-09-22).
+     *
+     * `/sources` exists to say where every number comes from, and reads its live/not-live labels off
+     * this list. Pyth decides whether the agent may enter at all — the off-hours guard measures the
+     * pool against it — and Tessera is the only independent mark a private company has. Neither was
+     * on the page, so the one dependency that can stop the agent trading was invisible to anyone
+     * asking the screen built to answer exactly that.
+     *
+     * Neither is critical: losing Pyth makes the guard refuse rather than the server fall over, and
+     * losing Tessera costs a mark, not a trade.
+     */
+    probe('pyth', false, async () => {
+      const marks = await pythEquityMarks();
+      if (marks.size === 0) throw new Error('no usable equity marks on chain right now');
+      const [first] = [...marks.values()];
+      const ageMin = Math.round((Date.now() - first!.publishedAt.getTime()) / 60_000);
+      return `${marks.size} equity feeds, ${first!.ticker} $${first!.usd.toFixed(2)} ±${first!.confBps.toFixed(1)}bps, last print ${ageMin}m ago`;
+    }),
+    probe('tessera', false, async () => {
+      const marks = await tesseraMarks();
+      if (marks.size === 0) throw new Error('no pre-IPO marks published right now');
+      const stale = [...marks.values()].filter((m) => m.stale).length;
+      return `${marks.size} pre-IPO marks${stale > 0 ? `, ${stale} from cache` : ''}`;
     }),
   ];
 }

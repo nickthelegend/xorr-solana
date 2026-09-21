@@ -87,6 +87,16 @@ const SOLANA_SOURCES: Source[] = [
     owns: 'What backs each xStock, and the issuer controls on it',
     how: 'The issuer’s proof-of-reserves feed, carried with its age; the token’s own controls are read from the chain.',
   },
+  {
+    name: 'Pyth',
+    owns: 'The independent price of the share behind each xStock',
+    how: 'Its Equity.US feed, read from the price account on Solana mainnet. The agent measures the pool against it before entering, and holds when the two have come apart.',
+  },
+  {
+    name: 'Tessera',
+    owns: 'The issuer’s valuation of each pre-IPO company',
+    how: 'Its public token endpoint. A private company has no exchange price, so this mark is the only independent number these tokens have — and the pool can sit a long way from it.',
+  },
 ];
 
 const SOURCES: Source[] = [
@@ -155,9 +165,13 @@ export default function Sources() {
           contentContainerStyle={{ paddingBottom: space.s30, gap: space.s10 }}
         >
           {SOURCES.map((s) => {
-            /* Only the three the app can actually probe get a live state. Claiming to know
+            /* Only the ones the app can actually probe get a live state. Claiming to know
                CoinGecko is up because a price rendered ten minutes ago would be a guess. The
-               executor not answering `/health` at all is its database not answering us. */
+               executor not answering `/health` at all is its database not answering us.
+
+               Pyth and Tessera joined that list once `/health` began probing them (2026-09-22):
+               the oracle the agent refuses trades on was the one dependency this screen could not
+               tell you about, on the screen built to tell you where numbers come from. */
             const live =
               s.name === 'The chain'
                 ? up('rpc')
@@ -167,7 +181,11 @@ export default function Sources() {
                     : up('postgres')
                   : s.name === 'The Graph'
                     ? graphLive
-                    : undefined;
+                    : s.name === 'Pyth'
+                      ? up('pyth')
+                      : s.name === 'Tessera'
+                        ? up('tessera')
+                        : undefined;
 
             return (
               <SheetCard key={s.name} bordered borderRadius={radius.panel} padding={space.s16}>
