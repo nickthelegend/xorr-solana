@@ -880,7 +880,32 @@ export default function Home() {
                     No stocks yet.
                   </Text>
                 ) : (
-                  stockRows.map((s, i) => (
+                  <>
+                    {/*
+                      * Pre-IPO sits above the listed names, not among them.
+                      *
+                      * A T-Token tracks a company with no exchange behind it, so nothing about it
+                      * can be compared to the rows below on the numbers those rows show. Its own
+                      * entry keeps that difference visible instead of burying three private
+                      * companies in a list of listed ones.
+                      */}
+                    <Rise index={ROWS_FROM}>
+                      <Row
+                        height={size.rowLg}
+                        divider
+                        onPress={() => router.push('/prestocks')}
+                        left={<AssetMark gradient={assetGradient('T-SpaceX')} size={size.mark} />}
+                        title="Pre-IPO"
+                        secondary="SpaceX, OpenAI and Kalshi, tokenised by Tessera"
+                        value={
+                          <Text variant="rowPrimary" color={colors.ink55}>
+                            3
+                          </Text>
+                        }
+                        figure="market"
+                      />
+                    </Rise>
+                    {stockRows.map((s, i) => (
                     <Rise key={s.symbol} index={ROWS_FROM + i}>
                       <Row
                         height={size.rowLg}
@@ -901,7 +926,8 @@ export default function Home() {
                         figure="market"
                       />
                     </Rise>
-                  ))
+                    ))}
+                  </>
                 )
               ) : tab === 'strategies' ? (
                 !library.data ? (

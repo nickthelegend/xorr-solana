@@ -20,10 +20,13 @@
 import React from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { BackButton, colors, LoadingRows, PnlBars, radius, Ring, Row, Screen, size, space, StatTile, Text } from '@/ui';
+import { BackButton, Button, colors, LoadingRows, PnlBars, radius, Ring, Row, Screen, size, space, StatTile, Text } from '@/ui';
 import { useGoBack } from '@/nav/useGoBack';
 import { count, plainPct, ratio, returnPct, tone, usd } from '@/strategies/format';
 import { pnlStructure, pnlStructureFromDetail } from '@/strategies/pnl';
+import { seedFromStrategy } from '@/strategies/seedAgent';
+import { repos } from '@/data';
+import { useRouter } from 'expo-router';
 import { useAsync } from '@/data/useAsync';
 import { strategyLibrary, type Split, type StrategyDetail } from '@/data/strategyLibrary';
 
@@ -168,7 +171,10 @@ function Line({ label, value, tone }: { label: string; value: string; tone?: str
 
 export default function StrategyLibraryDetail() {
   const goBack = useGoBack();
+  const router = useRouter();
   const [aboutOpen, setAboutOpen] = React.useState(false);
+  const [hiring, setHiring] = React.useState(false);
+  const [hireError, setHireError] = React.useState<string | null>(null);
   const { id } = useLocalSearchParams<{ id: string }>();
   const page = useAsync(() => strategyLibrary.get(String(id)), [id]);
 
@@ -208,6 +214,7 @@ export default function StrategyLibraryDetail() {
    */
   const pnl = s.detail ? pnlStructureFromDetail(s.detail) : pnlStructure(o);
   const pnlBasis = s.detail ? 'the deeper book across the full universe' : 'the out-of-sample split';
+  const seed = seedFromStrategy(s);
 
   return (
     <Screen testID={`strategy-library-${s.id}`}>
@@ -415,6 +422,63 @@ export default function StrategyLibraryDetail() {
           ))}
         </Panel>
       ) : null}
+
+      {/*
+        * Hiring an agent that follows this.
+        *
+        * The seed fills in what the measurements support and recommends the rest with its reason,
+        * because 313 researched strategies do not map onto four fixed personas and quietly choosing
+        * one would be the dishonest half of this feature. The persona is editable on the agent
+        * afterwards; nothing here is irreversible except the agent existing, which Fire undoes.
+        */}
+      <Panel
+        title="Put it to work"
+        note="Hires an agent on this wallet that follows the persona below. It trades inside the permission you already granted — the same cap, the same kill switch — and nothing about this strategy's past is a promise about its future."
+      >
+        <View style={{ backgroundColor: colors.surface, borderRadius: radius.panel, padding: space.s16 }}>
+          <Text variant="rowPrimary" color={colors.ink}>
+            {seed.name}
+          </Text>
+          <Text variant="bodySm" color={colors.ink55} style={{ marginTop: space.s4 }}>
+            {seed.role}
+          </Text>
+          <Text variant="bodySm" color={colors.ink70} style={{ marginTop: space.s12 }}>
+            {seed.why}
+          </Text>
+          {hireError ? (
+            <Text variant="bodySm" color={colors.down} style={{ marginTop: space.s12 }}>
+              {hireError}
+            </Text>
+          ) : null}
+          <View style={{ marginTop: space.s16 }}>
+            <Button
+              label={hiring ? 'Hiring…' : 'Hire an agent for this'}
+              loading={hiring}
+              disabled={hiring}
+              testID="strategy-seed-agent"
+              onPress={async () => {
+                setHireError(null);
+                setHiring(true);
+                try {
+                  const existing = await repos.bot.listAgents().catch(() => []);
+                  const fresh = seedFromStrategy(s, existing.map((a) => a.name));
+                  const agent = await repos.bot.createAgent({
+                    name: fresh.name,
+                    role: fresh.role,
+                    style: fresh.style,
+                  });
+                  router.push(`/agent/${agent.id}`);
+                } catch (e) {
+                  /* The executor's own words: it knows why it refused and the screen does not. */
+                  setHireError(e instanceof Error ? e.message : 'That did not go through.');
+                } finally {
+                  setHiring(false);
+                }
+              }}
+            />
+          </View>
+        </View>
+      </Panel>
 
       <Panel title="Where these come from">
         <Text variant="bodySm" color={colors.ink55}>
