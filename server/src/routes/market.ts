@@ -510,14 +510,20 @@ market.get('/market/logos', async (c) => {
  * fills really settle. Here: USDC and the xStocks, by their mints.
  */
 const SOLANA_USDC = { symbol: 'USDC', address: DEFAULT_MINTS.USDC, decimals: 6 };
-const xStockRows = () => Object.values(XSTOCKS).map((x) => ({ symbol: x.symbol, address: x.address, decimals: x.decimals }));
+/*
+ * Both classes (2026-09-22). This was `XSTOCKS`, so `/market/tradable` — the authoritative answer to "can this
+ * deployment settle it", which the client caches as `settleableSymbols` — said no for a T-Token that O13 had already
+ * closed on chain. A list whose whole job is to stop the app offering what it cannot honour was understating what it
+ * can, which refuses real trades rather than preventing impossible ones.
+ */
+const tradableRows = () => tradableTokens().map((x) => ({ symbol: x.symbol, address: x.address, decimals: x.decimals }));
 
 /**
  * Tradable: the xStocks whose mint exists on this cluster — on a fork, the ones its bootstrap cloned — because an order
  * for a mint the node does not hold can only fail at settlement. Asked of the chain in one read, never assumed.
  */
 async function solanaTradable(): Promise<{ symbol: string; address: string; decimals: number }[]> {
-  const rows = xStockRows();
+  const rows = tradableRows();
   const infos = await solanaConnection.getMultipleAccountsInfo(rows.map((r) => new PublicKey(r.address)), 'confirmed');
   return [SOLANA_USDC, ...rows.filter((_, i) => infos[i] !== null)];
 }
@@ -555,7 +561,7 @@ market.get('/market/tradable', async (c) => {
  * "nothing to rebalance" and a new user could not finish. The portfolio is created watched instead — it reports
  * what it would trade and moves nothing — over these.
  */
-market.get('/market/watchable', async (c) => c.json(ON_SOLANA ? [SOLANA_USDC, ...xStockRows()] : await functioningHere()));
+market.get('/market/watchable', async (c) => c.json(ON_SOLANA ? [SOLANA_USDC, ...tradableRows()] : await functioningHere()));
 
 /**
  * The registry less the equities where they do not function, each at the address a fill would move.
