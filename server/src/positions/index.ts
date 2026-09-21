@@ -18,7 +18,7 @@ import { chainUnitsOf } from '../evm/balances.js';
 import { ON_SOLANA } from '../solana/clusters.js';
 import { readDelegation } from '../solana/delegation.js';
 import { readMintScale, toUiAmount } from '../solana/balances.js';
-import { XSTOCKS } from '../venues/xstocks.js';
+import { tradableToken } from '../venues/tradable-token.js';
 import { readChain } from '../http/chain-read.js';
 import type { Address } from 'viem';
 
@@ -290,7 +290,19 @@ async function solanaChainUnits(owner: string, symbols: string[]): Promise<Map<s
   const out = new Map<string, number>();
   await Promise.all(
     [...new Set(symbols)].map(async (symbol) => {
-      const stock = XSTOCKS[symbol];
+      /*
+       * Both classes, not just the xStocks (2026-09-22).
+       *
+       * This looked the symbol up in `XSTOCKS`, so a pre-IPO position came back with
+       * `chainUnits: null` — and null means "we could not ask", which switches off the cap in
+       * `toPosition` that stops a ledger row reporting more than the wallet holds. Measured on the
+       * hosted build: T-SpaceX showed `chain=None, drift=None` beside xStocks that were properly
+       * checked, so the one asset class whose mint charges a transfer fee on every movement was the
+       * one class nobody was measuring against the chain.
+       *
+       * `tradableToken` is the lookup the spend path already uses for exactly this reason.
+       */
+      const stock = tradableToken(symbol);
       if (!stock) return;
       try {
         const held = await readDelegation(owner, stock.address);
