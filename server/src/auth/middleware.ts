@@ -59,6 +59,8 @@ const PUBLIC_PATHS = new Set([
   '/market/corporate-action',
   /** A futures venue's public market data — the Futures screens' list. */
   '/market/futures',
+  /** Pre-IPO tokens: a mint, a pool price and a published mark are public facts about public tokens. */
+  '/market/prestocks',
   /** MoonPay dev sandbox public configuration. */
   '/deposit/moonpay/config',
   /** MoonPay webhook callbacks from MoonPay servers. */
