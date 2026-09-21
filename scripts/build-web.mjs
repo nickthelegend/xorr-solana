@@ -190,6 +190,20 @@ try {
     ])
     .join('\n');
   writeFileSync(ENV_FILE, patched);
+  /*
+   * Keep the Vercel link across the rebuild (2026-09-22).
+   *
+   * `vercel` stores which project a directory deploys to in `<OUT>/.vercel`, and this line wipes
+   * the whole directory. So the first deploy after a rebuild had no link, and `vercel deploy
+   * --prod` silently created a NEW project named after the folder — `dist-web` — and aliased it to
+   * `dist-web-seven-teal.vercel.app`. Production kept serving the previous bundle, and the deploy
+   * reported success, so the hosted app sat two days stale while every build "succeeded".
+   *
+   * Saving the link and putting it back is the whole fix: the directory is rebuilt, its identity is
+   * not.
+   */
+  const linkFile = join(OUT, '.vercel', 'project.json');
+  const keptLink = existsSync(linkFile) ? readFileSync(linkFile, 'utf8') : null;
   rmSync(OUT, { recursive: true, force: true });
   console.log(`\n  Building the hosted app → ${OUT}\n  executor: ${API}${CHAIN_RPC ? `\n  chain RPC: ${CHAIN_RPC}` : ''}\n`);
   /*
@@ -201,6 +215,14 @@ try {
   execFileSync('npx', ['expo', 'export', '--clear', '--platform', 'web', '--output-dir', OUT], {
     stdio: 'inherit',
   });
+  if (keptLink) {
+    mkdirSync(join(OUT, '.vercel'), { recursive: true });
+    writeFileSync(linkFile, keptLink);
+    console.log('  kept the existing Vercel project link, so --prod goes where it went last time');
+  } else {
+    console.log('  NOTE: no Vercel link in this directory. Run `vercel link --project xorr-solana` before deploying,');
+    console.log('        or `vercel deploy --prod` will create a new project named after the folder.');
+  }
 } finally {
   writeFileSync(ENV_FILE, original);
 }

@@ -9,7 +9,7 @@
  * This replaced `solanaWallet.ts`'s locally generated keypair, which stored the raw secret key in `localStorage` on the
  * web and was not the wallet the executor knew about at all.
  */
-import { Connection, PublicKey, Transaction, type TransactionInstruction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, VersionedTransaction, type TransactionInstruction } from '@solana/web3.js';
 import {
   TOKEN_2022_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
@@ -52,15 +52,65 @@ export function unsignedBytes(tx: Transaction): Uint8Array {
   return new Uint8Array(tx.serialize({ requireAllSignatures: false, verifySignatures: false }));
 }
 
+
+/** The blockhash inside signed bytes, or null when they cannot be read as a transaction. */
+export function blockhashOf(signed: Uint8Array): string | null {
+  try {
+    return Transaction.from(signed).recentBlockhash ?? null;
+  } catch {
+    try {
+      return VersionedTransaction.deserialize(signed).message.recentBlockhash ?? null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
  * Broadcast signed bytes and wait for the cluster to confirm them. Throws with the chain's own error when the
  * transaction failed — a signature is returned only for a transaction the ledger holds without an error.
  */
 export async function broadcastSigned(conn: Connection, signed: Uint8Array, prepared: Prepared): Promise<string> {
+  /*
+   * The wallet must hand back the transaction we gave it (2026-09-22).
+   *
+   * A wallet that re-stamps the blockhash returns something we never prepared, and the cluster then
+   * rejects it as "Blockhash not found" — an error that reads like ours and is not. That failure
+   * cost an afternoon on the hosted build, because the wallet's own sheet says "Transaction
+   * signed!" either way and the only symptom is a grant that never lands.
+   *
+   * Comparing costs one deserialize and turns an hour of guessing into a sentence.
+   */
+  const carried = blockhashOf(signed);
+  if (carried && carried !== prepared.blockhash) {
+    throw new Error(
+      `The wallet returned a transaction stamped with a different blockhash than the one it was given ` +
+        `(${carried.slice(0, 8)}… instead of ${prepared.blockhash.slice(0, 8)}…), so this cluster will not accept it.`,
+    );
+  }
   const signature = await conn.sendRawTransaction(signed, { skipPreflight: false, preflightCommitment: 'confirmed' });
   const result = await conn.confirmTransaction({ signature, ...prepared }, 'confirmed');
   if (result.value.err) throw new Error(`The transaction failed on chain: ${JSON.stringify(result.value.err)}`);
   return signature;
+}
+
+
+/**
+ * Whether a send failed because the blockhash it carried had aged out.
+ *
+ * A blockhash lives about 150 slots — on this cluster, measured, roughly fifty-five seconds. The
+ * app has to fetch one BEFORE the wallet's confirmation sheet opens, because the signature covers
+ * it, so the clock runs while the person reads what they are about to approve. On the permission
+ * screen that is exactly what we ask them to do: six paragraphs about what the bot may and may not
+ * touch. Reading them carefully is enough to lose the grant, and the failure arrives as
+ * "Transaction simulation failed: Blockhash not found", which tells them nothing.
+ *
+ * The cure is to notice this one error and go round again with a fresh blockhash, which costs a
+ * second signature and saves the flow.
+ */
+export function isStaleBlockhash(err: unknown): boolean {
+  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /blockhash not found|block ?height exceeded|BlockhashNotFound|TransactionExpired/i.test(text);
 }
 
 /** The token program that owns a mint: classic SPL for USDC, Token-2022 for xStocks. Read from the chain. */

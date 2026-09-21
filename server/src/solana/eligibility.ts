@@ -105,6 +105,34 @@ function verdict(checks: EligibilityCheck[]): Pick<Eligibility, 'eligible' | 'in
   };
 }
 
+/**
+ * Why a mint read failed, in words, or null when there are none worth showing.
+ *
+ * `err.message` alone rendered "the token's mint could not be read ()." on screen for every
+ * off-cluster token (2026-09-22). spl-token's own errors — `TokenAccountNotFoundError` and its
+ * siblings — are constructed with no message at all and carry their meaning in the class name, so
+ * interpolating the message produced an empty parenthesis in front of a user about to spend money.
+ *
+ * Falls back to the name, then to the stringified value, and returns null rather than let a caller
+ * print brackets around nothing.
+ */
+export function readFailureReason(err: unknown): string | null {
+  if (err instanceof Error) {
+    const message = err.message.trim();
+    if (message) return message;
+    const name = err.name?.trim();
+    return name && name !== 'Error' ? name : null;
+  }
+  /*
+   * Stringifying is the last resort, and most of what it produces is noise. "(undefined)" on a
+   * screen is exactly as useless as "()" — the whole point is that the brackets only appear when
+   * they hold something a reader can act on.
+   */
+  const text = String(err).trim();
+  const useless = new Set(['[object Object]', 'undefined', 'null', 'NaN', '{}']);
+  return text && !useless.has(text) ? text : null;
+}
+
 export async function checkEligibility(
   wallet: PublicKey | string,
   mint: PublicKey | string,
@@ -121,7 +149,10 @@ export async function checkEligibility(
   try {
     mintInfo = await getMint(conn, mintPk, 'confirmed', prog);
   } catch (err) {
-    const detail = `the token's mint could not be read (${err instanceof Error ? err.message : String(err)}).`;
+    const why = readFailureReason(err);
+    const detail = why
+      ? `the token's mint could not be read (${why}).`
+      : `the token's mint could not be read.`;
     for (const [id, title] of [
       ['mint-paused', 'Transfers paused'],
       ['transfer-hook', HOOK_TITLE],

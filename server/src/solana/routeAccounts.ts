@@ -39,18 +39,56 @@ type Pair = { inputMint: string; outputMint: string; amount: bigint };
  */
 const ROUTE_SHAPES = ['&dexes=Whirlpool&onlyDirectRoutes=true&asLegacyTransaction=true', ''];
 
+/** Between calls to Jupiter's public tier, which answers a burst with 400s and 429s. */
+const SPACING_MS = Number(process.env.FORK_ROUTE_SPACING_MS ?? 900);
+const ATTEMPTS = 4;
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One request to Jupiter, paced and retried.
+ *
+ * The bootstrap asks for a quote and a set of swap instructions for every mint in both directions,
+ * which is a burst the public tier refuses partway through. Before this it was a bare `fetch`, so
+ * the refusal surfaced as "no route resolved" and the mints that happened to be LAST in the list
+ * lost their routes — which on 2026-09-21 was every Tessera pair but one: the fork could buy
+ * T-SpaceX and not sell it, and could not trade T-OpenAI or T-Kalshi at all.
+ *
+ * A rate limit is not "there is no route", and a list whose tail silently loses its liquidity
+ * because of where it sits in an array is the kind of failure that looks like a data problem for a
+ * day before anyone reads the log.
+ */
+async function jupiterFetch(url: string, init?: RequestInit): Promise<Response> {
+  let last = '';
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
+    const res = await fetch(url, init);
+    if (res.ok) return res;
+    last = `${res.status}`;
+    /*
+     * Only a rate limit or a server fault is worth asking again.
+     *
+     * 400 was retried here for an afternoon, which was wrong twice over: the first route shape asks
+     * for a Whirlpool-only direct route, and a pair that trades on Meteora answers 400 to that
+     * every time — permanently and correctly. Retrying it burned twenty seconds per pair to arrive
+     * at the same answer.
+     */
+    if (res.status !== 429 && res.status < 500) break;
+    await wait(SPACING_MS * attempt * 2);
+  }
+  throw new Error(`quote ${last}`);
+}
+
 async function routeKeys(pair: Pair, user: string, shape: string): Promise<string[]> {
-  const q = await fetch(
+  const q = await jupiterFetch(
     `${JUPITER}/quote?inputMint=${pair.inputMint}&outputMint=${pair.outputMint}&amount=${pair.amount}&slippageBps=200${shape}`,
   );
-  if (!q.ok) throw new Error(`quote ${q.status}`);
   const quoteResponse = await q.json();
-  const r = await fetch(`${JUPITER}/swap-instructions`, {
+  await wait(SPACING_MS);
+  const r = await jupiterFetch(`${JUPITER}/swap-instructions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ quoteResponse, userPublicKey: user, ...(shape.includes('asLegacy') ? { asLegacyTransaction: true } : {}) }),
   });
-  if (!r.ok) throw new Error(`swap-instructions ${r.status}`);
   const body = (await r.json()) as {
     swapInstruction: { programId: string; accounts: { pubkey: string }[] };
     addressLookupTableAddresses?: string[];
@@ -83,10 +121,26 @@ export async function resolveRouteClones(params: {
       { inputMint: params.usdcMint, outputMint: x.mint, amount: 100_000_000n },
       { inputMint: x.mint, outputMint: params.usdcMint, amount: 10n ** BigInt(x.decimals) / 4n },
     ]) {
+      /*
+       * Warn once per PAIR, and only when every shape failed.
+       *
+       * This warned per SHAPE, so a pair whose route resolved perfectly well on the second shape
+       * still logged "no route resolved" from the first — and the first is Whirlpool-only, which
+       * every Meteora pair refuses. The fork's own log therefore reported all six Tessera pairs as
+       * unroutable while it was cloning their routes correctly, which is worse than silence: it
+       * sent someone reading it to look for a liquidity problem that did not exist.
+       */
+      let resolved = false;
+      const failures: string[] = [];
       for (const shape of ROUTE_SHAPES) try {
         for (const k of await routeKeys(pair, params.user, shape)) keys.add(k);
+        resolved = true;
+        await wait(SPACING_MS);
       } catch (e) {
-        console.warn(`[fork] no route resolved for ${pair.inputMint.slice(0, 4)}→${pair.outputMint.slice(0, 4)}: ${e instanceof Error ? e.message : e}`);
+        failures.push(e instanceof Error ? e.message : String(e));
+      }
+      if (!resolved) {
+        console.warn(`[fork] no route resolved for ${pair.inputMint.slice(0, 4)}→${pair.outputMint.slice(0, 4)}: ${failures.join('; ')}`);
       }
     }
     keys.add(x.mint);

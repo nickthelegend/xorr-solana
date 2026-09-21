@@ -27,6 +27,7 @@ import { readChain } from '../http/chain-read.js';
 import { screenPatience } from '../http/patience.js';
 import { beforeDeadline, StillFetching } from '../http/deadline.js';
 import { readPolicy } from '../evm/delegation.js';
+import { readSolanaPolicy } from '../solana/grant.js';
 import type { Address } from 'viem';
 import { decide } from '../graph/decide.js';
 import {
@@ -150,8 +151,21 @@ extra.get('/agents/:id/backtest', async (c) => {
    */
   // The default is for a wallet with no policy. A read that FAILED used to take it too, scaling the
   // chart to a cap the user may not have (PLAN.md 1.7) — that is a 502 now, not a guess.
-  const policy = w ? await readChain('your permission', () => readPolicy(w.address as Address)) : null;
-  const cap = policy?.dailyCapUsd ?? 1600;
+  /*
+   * Read the permission from the chain this deployment is on (2026-09-22).
+   *
+   * `readPolicy` is the EVM reader, so on Solana every backtest answered 502 `chain_read_failed` —
+   * "Could not read your permission from the chain just now" — for a permission `/limits` and
+   * `/delegation` were reading perfectly well two screens away. The cap is only used to scale the
+   * chart, so the whole screen was lost to a lookup that had nothing to do with the replay.
+   */
+  const cap = w
+    ? ((await readChain('your permission', async (): Promise<number | null> => {
+        /* Only the cap is wanted, and the two policy shapes agree on nothing else worth widening a type for. */
+        const policy = ON_SOLANA ? await readSolanaPolicy(w) : await readPolicy(w.address as Address);
+        return policy?.dailyCapUsd ?? null;
+      })) ?? 1600)
+    : 1600;
 
   /*
    * WETH, not SOL.
