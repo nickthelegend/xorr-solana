@@ -41,7 +41,7 @@
 import { query } from '../db/index.js';
 import { getJson } from '../http/get.js';
 import { log } from '../http/request-id.js';
-import { XSTOCKS } from '../venues/xstocks.js';
+import { tradableTokens } from '../venues/tradable-token.js';
 
 const API = 'https://api.geckoterminal.com/api/v2/networks/solana';
 
@@ -58,11 +58,27 @@ type PoolsResponse = { data?: PoolRow[] };
 type BarsResponse = { data?: { attributes?: { ohlcv_list?: number[][] } } };
 
 /**
- * The deepest `<SYMBOL>/USDC` pool for an xStock, or null when it is not indexed.
+ * The same ticker, however the two sources spell it.
  *
- * Depth is the tiebreak because a thin pool's hourly close is one trade's opinion. The name has to
- * start with the symbol as well as contain USDC: a `SI / NVDAx` pool contains both strings and
- * quotes NVDAx in the wrong direction, which would have seeded a band around $0.0000955.
+ * GeckoTerminal names a pool `<BASE> / <QUOTE>` from each token's on-chain symbol, which is not
+ * always the symbol this executor trades under: Tessera's `T-OpenAI` is `tOpenAI` on the mint. A
+ * prefix match on the traded symbol therefore found none of the T-Token pools, and every pre-IPO
+ * holding was left without history. Folding case and dropping separators makes those one word while
+ * still telling `T-OpenAI` from `T-Kalshi`.
+ */
+function sameTicker(a: string, b: string): boolean {
+  const fold = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return fold(a) !== '' && fold(a) === fold(b);
+}
+
+/**
+ * The deepest `<SYMBOL>/USDC` pool for a tradable token, or null when it is not indexed.
+ *
+ * Depth is the tiebreak because a thin pool's hourly close is one trade's opinion. The symbol has to
+ * be the pool's BASE and USDC its quote, not merely both present in the name: a `SI / NVDAx` pool
+ * contains both strings and quotes NVDAx in the wrong direction, which would have seeded a band
+ * around $0.0000955. Reading the sides apart refuses that for the reason it is wrong — NVDAx is
+ * being priced in, not priced — which also correctly refuses `FROGE / tOpenAI`.
  */
 export async function deepestUsdcPool(symbol: string, mint: string): Promise<string | null> {
   const res = await getJson<PoolsResponse>(`${API}/tokens/${mint}/pools?page=1`, POOL_TTL_MS, 20_000).catch(
@@ -71,7 +87,8 @@ export async function deepestUsdcPool(symbol: string, mint: string): Promise<str
   let best: { pool: string; liquidity: number } | null = null;
   for (const row of res?.data ?? []) {
     const name = row.attributes?.name ?? '';
-    if (!name.startsWith(symbol) || !name.includes('USDC')) continue;
+    const [base = '', ...quote] = name.split('/');
+    if (!sameTicker(base, symbol) || !quote.join('/').includes('USDC')) continue;
     const liquidity = Number(row.attributes?.reserve_in_usd ?? 0);
     if (!Number.isFinite(liquidity) || liquidity <= 0) continue;
     if (!best || liquidity > best.liquidity) best = { pool: row.id.replace(/^solana_/, ''), liquidity };
@@ -155,7 +172,7 @@ const SWEEP_EVERY_MS = Number(process.env.HISTORY_SWEEP_MS ?? 60_000);
 
 /** Whether every symbol has its history, so the caller can stop asking. */
 export function historyComplete(): boolean {
-  return done.size >= Object.keys(XSTOCKS).length;
+  return done.size >= tradableTokens().length;
 }
 
 /**
@@ -169,7 +186,12 @@ export async function seedHistory(force = false): Promise<SeedResult[]> {
   if (!force && Date.now() - lastSweepAt < SWEEP_EVERY_MS) return [];
   lastSweepAt = Date.now();
 
-  const pending = Object.values(XSTOCKS).filter((t) => !done.has(t.symbol));
+  /*
+   * Both classes. This walked `XSTOCKS` alone, so the T-Tokens — the one asset class with no
+   * listed-market history to fall back on — were the only holdings whose charts read
+   * "No price history yet", permanently.
+   */
+  const pending = tradableTokens().filter((t) => !done.has(t.symbol));
   if (pending.length === 0) return [];
 
   const out: SeedResult[] = [];
@@ -193,7 +215,7 @@ export async function seedHistory(force = false): Promise<SeedResult[]> {
        */
       done.add(token.symbol);
       out.push({ symbol: token.symbol, inserted, bars: bars.length, pool });
-      log.info(`[history] ${token.symbol}: ${bars.length} bars, ${inserted} new (${done.size}/${Object.keys(XSTOCKS).length})`);
+      log.info(`[history] ${token.symbol}: ${bars.length} bars, ${inserted} new (${done.size}/${tradableTokens().length})`);
     } catch (e) {
       log.info(`[history] ${token.symbol} deferred: ${e instanceof Error ? e.message : e}`);
       out.push({ symbol: token.symbol, inserted: 0, bars: 0, pool: null });

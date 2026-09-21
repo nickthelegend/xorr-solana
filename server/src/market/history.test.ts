@@ -40,6 +40,32 @@ describe('deepestUsdcPool', () => {
     expect(await deepestUsdcPool('NVDAx', 'Xsc9')).toBeNull();
   });
 
+  /*
+   * The real names GeckoTerminal returns for Tessera's pools. The mint's own symbol is `tOpenAI`
+   * while the executor trades `T-OpenAI`, so a prefix match found no pool at all and every pre-IPO
+   * holding's chart read "No price history yet" forever.
+   */
+  it('matches a T-Token pool named by the mint’s own spelling', async () => {
+    getJsonMock.mockResolvedValue(
+      pools([
+        { name: 'tOpenAI / USDC', liq: '585978.48', id: 'meteora' },
+        { name: 'tOpenAI / SOL', liq: '999999999', id: 'sol' },
+      ]),
+    );
+    expect(await deepestUsdcPool('T-OpenAI', 'oPAi')).toBe('meteora');
+  });
+
+  it('still tells one T-Token from another', async () => {
+    getJsonMock.mockResolvedValue(pools([{ name: 'tKalshi / USDC', liq: '451709', id: 'kalshi' }]));
+    expect(await deepestUsdcPool('T-OpenAI', 'oPAi')).toBeNull();
+  });
+
+  /* A memecoin paired against the T-Token quotes it in the wrong direction, exactly as `SI / NVDAx` did. */
+  it('rejects a pool that quotes the T-Token in the wrong direction', async () => {
+    getJsonMock.mockResolvedValue(pools([{ name: 'FROGE / tOpenAI USDC', liq: '135908.15', id: 'froge' }]));
+    expect(await deepestUsdcPool('T-OpenAI', 'oPAi')).toBeNull();
+  });
+
   it('rejects a pool quoted in something other than USDC', async () => {
     getJsonMock.mockResolvedValue(pools([{ name: 'NVDAx / SOL', liq: '999999', id: 'sol' }]));
     expect(await deepestUsdcPool('NVDAx', 'Xsc9')).toBeNull();
