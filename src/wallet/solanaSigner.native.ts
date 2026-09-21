@@ -7,7 +7,15 @@
 import { useCallback } from 'react';
 import { PublicKey, type Transaction } from '@solana/web3.js';
 import { useEmbeddedSolanaWallet } from '@privy-io/expo';
-import { isStaleBlockhash, broadcastSigned, prepareForSigning, solanaConnection, type Prepared } from './solanaTx';
+import {
+  SIGN_ATTEMPTS,
+  broadcastSigned,
+  isStaleBlockhash,
+  prepareForSigning,
+  solanaConnection,
+  untilFresh,
+  type Prepared,
+} from './solanaTx';
 
 export type SolanaSigner = {
   address?: string;
@@ -31,14 +39,10 @@ export function useSolanaSigner(): SolanaSigner {
         const { signedTransaction } = await provider.request({ method: 'signTransaction', params: { transaction: tx } });
         return broadcastSigned(conn, new Uint8Array(signedTransaction.serialize()), prepared);
       };
-      try {
-        return await once();
-      } catch (e) {
-        /* One more go with a fresh blockhash — see the web signer for why. Never for a prepared
-         * transaction: that one is the executor's and re-stamping would void its signature. */
-        if (already || !isStaleBlockhash(e)) throw e;
-        return await once();
-      }
+      /* Again with a fresh blockhash while the cluster says the old one aged out — see the web
+       * signer for why. Never for a prepared transaction: that one is the executor's, and
+       * re-stamping would void its signature. */
+      return await untilFresh(once, isStaleBlockhash, already ? 1 : SIGN_ATTEMPTS);
     },
     [wallet, address],
   );

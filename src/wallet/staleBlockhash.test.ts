@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { isStaleBlockhash } from './solanaTx';
+import { describe, expect, it, vi } from 'vitest';
+import { SIGN_ATTEMPTS, isStaleBlockhash, untilFresh } from './solanaTx';
 
 /*
  * The failure this guards, verbatim from the hosted build: the permission screen is six paragraphs
@@ -96,5 +96,59 @@ describe('asBytes', () => {
   it('refuses anything it cannot turn into bytes, rather than broadcasting nonsense', () => {
     expect(() => asBytes(null)).toThrow(/cannot broadcast/);
     expect(() => asBytes(42)).toThrow(/cannot broadcast/);
+  });
+});
+
+/*
+ * One retry was not enough (2026-09-22).
+ *
+ * Measured on this cluster, a blockhash lives 64 seconds, and the wallet's sheet has to be read,
+ * approved and then dismissed before the app gets the bytes back. A person slow enough to lose the
+ * first one had exactly one more go, and the hosted build showed them "Blockhash not found" under
+ * the kill switch when they lost that too.
+ */
+describe('untilFresh', () => {
+  const stale = () => new Error('Transaction simulation failed: Blockhash not found');
+
+  it('returns the first success without signing again', async () => {
+    const attempt = vi.fn(async () => 'sig');
+    await expect(untilFresh(attempt, isStaleBlockhash)).resolves.toBe('sig');
+    expect(attempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('goes round again for a stale blockhash and returns what finally lands', async () => {
+    let n = 0;
+    const attempt = vi.fn(async () => {
+      if (++n < 3) throw stale();
+      return 'sig';
+    });
+    await expect(untilFresh(attempt, isStaleBlockhash)).resolves.toBe('sig');
+    expect(attempt).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up after the bound, with the cluster\u2019s own last failure', async () => {
+    const attempt = vi.fn(async () => {
+      throw stale();
+    });
+    await expect(untilFresh(attempt, isStaleBlockhash)).rejects.toThrow(/Blockhash not found/);
+    expect(attempt).toHaveBeenCalledTimes(SIGN_ATTEMPTS);
+  });
+
+  /* A refusal is an answer. Asking for another signature would only collect the same one. */
+  it('does not retry a failure that is not an expiry', async () => {
+    const attempt = vi.fn(async () => {
+      throw new Error('custom program error: 0x1');
+    });
+    await expect(untilFresh(attempt, isStaleBlockhash)).rejects.toThrow(/0x1/);
+    expect(attempt).toHaveBeenCalledTimes(1);
+  });
+
+  /* The executor's co-signed transaction: re-stamping the blockhash would void its signature. */
+  it('signs a prepared transaction exactly once, however it fails', async () => {
+    const attempt = vi.fn(async () => {
+      throw stale();
+    });
+    await expect(untilFresh(attempt, isStaleBlockhash, 1)).rejects.toThrow(/Blockhash not found/);
+    expect(attempt).toHaveBeenCalledTimes(1);
   });
 });

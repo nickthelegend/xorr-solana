@@ -70,7 +70,8 @@ import { api } from '@/data/api';
 import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
-import { errorText, NotSignedIn } from '@/data/apiError';
+import { ApiError, errorText, NotSignedIn } from '@/data/apiError';
+import { humanWalletError } from '@/wallet/walletError';
 
 /**
  * What was running, in words, for the curtain that confirms the stop.
@@ -378,9 +379,19 @@ export default function Safety() {
         setStopping('stopped');
       }
     } catch (e) {
-      // The curtain comes back up: nothing was stopped, and the screen underneath says why.
+      /*
+       * The curtain comes back up: nothing was stopped, and the screen underneath says why.
+       *
+       * Everything thrown in here is a WALLET failure, not an executor one, so it goes through
+       * `humanWalletError` — the hook humanises it for its own `txError` and then rethrows the
+       * original, and `errorText` hands a non-`ApiError` back its raw `message`. For a Solana send
+       * that message is web3.js's five-line `SendTransactionError` dump, which is how "Catch the
+       * SendTransactionError and call getLogs() on it for full details" came to be rendered under
+       * the stop. An `ApiError` can still reach here from `/delegation/record`, and that one the
+       * server already wrote a sentence for.
+       */
       setStopping(undefined);
-      setLocalError(errorText(e));
+      setLocalError(e instanceof ApiError ? errorText(e) : humanWalletError(e));
       return;
     }
     /*
