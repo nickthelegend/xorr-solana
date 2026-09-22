@@ -71,7 +71,18 @@ async function jupiterFetch(url: string, init?: RequestInit): Promise<Response> 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     const res = await fetch(url, init);
     if (res.ok) return res;
-    last = `${res.status}`;
+    const body = await res.text().catch(() => '');
+    last = `${res.status} ${body.slice(0, 120)}`;
+    /*
+     * A 400 that says there is no route is final; any other 400 is the public tier refusing a burst (2026-09-23). All
+     * six Tessera pairs, last in the list, came back "quote 400" on a fresh fork and none was retried, so the fork
+     * booted unable to settle a single pre-IPO trade. Jupiter names the permanent case: `NO_ROUTES_FOUND`.
+     */
+    if (res.status === 400 && /NO_ROUTES_FOUND|COULD_NOT_FIND_ANY_ROUTE|TOKEN_NOT_TRADABLE/.test(body)) break;
+    if (res.status === 400) {
+      await wait(SPACING_MS * attempt * 2);
+      continue;
+    }
     /*
      * Only a rate limit or a server fault is worth asking again.
      *
