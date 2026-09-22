@@ -136,3 +136,47 @@ describe('an empty USDC delegation', () => {
     expect(spendMock).not.toHaveBeenCalled();
   });
 });
+
+describe("an agent's own wallet (2026-09-23)", () => {
+  const WALLET = Keypair.generate().publicKey.toBase58();
+  const AGENT = { ...BUY, agentWallet: { address: WALLET, name: 'Momentum Scout' } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 300 });
+  });
+
+  it('reads and spends the agent wallet, not the owner main account', async () => {
+    vi.mocked(readDelegation).mockResolvedValue({
+      isRevoked: false,
+      delegate: DELEGATE.publicKey.toBase58(),
+      delegatedAmount: 2n ** 64n - 1n,
+      balanceAmount: 100_000_000n,
+      balanceUsd: 100,
+      remainingUsd: 1e13,
+    } as never);
+    quoteMock.mockResolvedValue({ outAmount: '1' });
+    spendMock.mockRejectedValue(new Error('stop here'));
+
+    await guardAndSpend(AGENT).catch(() => undefined);
+    expect(vi.mocked(readDelegation).mock.calls[0]?.[3]).toBe(WALLET);
+    expect(spendMock.mock.calls[0]?.[0]).toMatchObject({ sourceAccount: WALLET });
+  });
+
+  it('refuses in words when the wallet holds less than the entry, before quoting or moving anything', async () => {
+    vi.mocked(readDelegation).mockResolvedValue({
+      isRevoked: false,
+      delegate: DELEGATE.publicKey.toBase58(),
+      delegatedAmount: 2n ** 64n - 1n,
+      balanceAmount: 10_000_000n,
+      balanceUsd: 10,
+      remainingUsd: 1e13,
+    } as never);
+
+    const out = await guardAndSpend(AGENT);
+    expect(out).toMatchObject({ placed: false, reason: 'agent_wallet_empty' });
+    expect((out as { detail: string }).detail).toContain("Momentum Scout's wallet holds 10.00 USDC");
+    expect(quoteMock).not.toHaveBeenCalled();
+    expect(spendMock).not.toHaveBeenCalled();
+  });
+});
