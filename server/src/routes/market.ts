@@ -27,6 +27,7 @@ import { COINGECKO_IDS, COINGECKO_PRICE_URL, type CoingeckoPrices } from '../mar
 import { CAN_SETTLE, TOKENS, canonicalSymbol, quote } from '../venues/oneinch.js';
 import { STOCKS, equitiesFunctional, isStock, observedHistory } from '../venues/stocks.js';
 import { classificationFor, earningsCalendar } from '../market/edgar.js';
+import { equityKey } from '../venues/equity-key.js';
 import { aavePoolIsDeployedHere, usdcSupplyYield, usdcReserve } from '../market/yield.js';
 import { logosFor, warmLogos } from '../market/logos.js';
 import { bucketFor, dayChangePct, hourlyCloses, observedDay, observedSince, ohlcRows } from '../market/observed.js';
@@ -345,9 +346,16 @@ function equityAsked(
   if (!asked) {
     return { status: 400, body: { error: 'missing_symbol', detail: 'Pass ?symbol=, for example ?symbol=NVDAc.' } };
   }
-  const symbol = canonicalSymbol(asked);
-  if (!isStock(symbol)) {
-    return { status: 404, body: { error: 'not_an_equity', detail: `${symbol} is not a tokenized equity.` } };
+  /* The family this deployment trades: xStocks on Solana, the Base equities on Base (see `equityKey`). */
+  const symbol = equityKey(ON_SOLANA ? asked : canonicalSymbol(asked), ON_SOLANA);
+  if (!symbol) {
+    return {
+      status: 404,
+      body: {
+        error: 'not_an_equity',
+        detail: `${asked} is not a tokenized equity ${ON_SOLANA ? 'this deployment lists' : 'on this network'}.`,
+      },
+    };
   }
   return { symbol };
 }
