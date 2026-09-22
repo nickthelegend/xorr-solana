@@ -211,7 +211,13 @@ export default function XStockTicket() {
   const [sold, setSold] = useState<XStockSellOutcome>();
   const [sellError, setSellError] = useState<string>();
   /** Shares this sale is for: what the quote says the dollar amount buys back, never more than is held. */
-  const sellUnits = side === 'sell' && quote.data ? Math.min(quote.data.pay, heldUnits) : 0;
+  /*
+   * Everything held, when that is what was asked (2026-09-23). The quote sizes shares from dollars at the quote's own
+   * price, which sits a hair off the mark the holding is valued at — so "You hold 0.0876 NVDAx, so this sells all of
+   * it" sat over a button selling 0.0874 and leaving 0.0002 behind. An amount at or past the holding sells the holding.
+   */
+  const sellingAll = cappedToHolding || (side === 'sell' && heldUsd > 0 && quoted >= heldUsd - 0.01);
+  const sellUnits = side === 'sell' && quote.data ? (sellingAll ? heldUnits : Math.min(quote.data.pay, heldUnits)) : 0;
 
   async function sell() {
     if (selling || !(sellUnits > 0)) return;

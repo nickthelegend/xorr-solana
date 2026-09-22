@@ -77,10 +77,16 @@ export async function prepareUserSell(
   const usdcProg = tokenProgramForMint(usdcMint);
 
   const xScale = await readMintScale(xMint, conn, xProg);
-  const units = fromUiAmount(params.units, xScale);
+  const asked = fromUiAmount(params.units, xScale);
   const ownerX = ataFor(owner, xMint, xProg);
   const held = await getAccount(conn, ownerX, 'confirmed', xProg).catch(() => null);
   if (!held || held.amount === 0n) throw new SellRefused('nothing_to_sell', `You hold no ${stock.symbol} to sell.`);
+  /*
+   * "All of it" arrives as the holding rounded to eight places, which can come back a raw unit or two past the balance
+   * once the multiplier is undone (2026-09-23). Within that rounding it IS the holding, and is sold as the holding.
+   */
+  const rounding = 10n ** BigInt(Math.max(0, xScale.decimals - 8)) * 2n + 2n;
+  const units = asked > held.amount && asked - held.amount <= rounding ? held.amount : asked;
   if (units > held.amount) {
     throw new SellRefused('over_balance', `You hold ${toUiAmount(held.amount, xScale)} ${stock.symbol}, fewer than that.`);
   }

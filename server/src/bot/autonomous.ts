@@ -738,7 +738,7 @@ export async function runAutonomousCycle(
     return {
       executed: false,
       reason: 'delegation_revoked',
-      detail: 'There is no live SPL delegation to this bot on the chain.',
+      detail: 'Trading is stopped: the permission is revoked on the chain, so no agent can buy. Resume it in Safety.',
     };
   }
 
