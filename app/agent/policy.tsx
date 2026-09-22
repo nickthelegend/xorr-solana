@@ -67,6 +67,8 @@ export default function AgentPolicyScreen() {
   if (agent && !seeded) {
     setSeeded(true);
     setPolicy((agent.riskLimits ?? {}) as AgentPolicy);
+    // What is stored is what is shown: nothing to save until something changes.
+    setSaved(true);
   }
 
   /*
