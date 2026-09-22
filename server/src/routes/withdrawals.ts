@@ -44,7 +44,7 @@ import { waitForTx } from '../evm/delegation.js';
 import { readChain } from '../http/chain-read.js';
 import { canonicalSymbol } from '../venues/oneinch.js';
 import { snapshotWallet } from '../portfolio/snapshots.js';
-import { XSTOCKS } from '../venues/xstocks.js';
+import { tradableTokens } from '../venues/tradable-token.js';
 import { functioningHere } from './market.js';
 import { isSolanaCluster, getClusterConfig } from '../solana/clusters.js';
 import { getConnection, explorerTx as solanaExplorerTx } from '../solana/connection.js';
@@ -363,7 +363,7 @@ export async function recordSolanaWithdrawal(w: WalletRow, signature: string): P
     transferredAmount = Number(moved.units) / 10 ** moved.decimals;
     destination = moved.to ?? '';
     tokenMint = moved.mint;
-    tokenSymbol = moved.mint === usdcMint ? 'USDC' : (xStockSymbolFor(moved.mint) ?? `${moved.mint.slice(0, 4)}…`);
+    tokenSymbol = moved.mint === usdcMint ? 'USDC' : (tokenSymbolFor(moved.mint) ?? `${moved.mint.slice(0, 4)}…`);
   }
 
   if (transferredUnits === 0n && txData.meta?.preBalances && txData.meta?.postBalances) {
@@ -616,6 +616,12 @@ export function tokenMovement(
   return null;
 }
 
-function xStockSymbolFor(mint: string): string | null {
-  return Object.values(XSTOCKS).find((x) => x.address === mint)?.symbol ?? null;
+/**
+ * The symbol for a mint, whichever registry issued it.
+ *
+ * Both classes: this asked `XSTOCKS`, so a withdrawal of a T-Token fell through to the truncated
+ * mint (`oPAi…`) in the receipt, for a token the app names everywhere else.
+ */
+function tokenSymbolFor(mint: string): string | null {
+  return tradableTokens().find((t) => t.address === mint)?.symbol ?? null;
 }

@@ -18,7 +18,7 @@ import { connection as defaultConnection } from './connection.js';
 import { DEFAULT_MINTS } from './clusters.js';
 import { delegateKeypair } from './keys.js';
 import { mintsOnCluster } from './settleable.js';
-import { XSTOCKS } from '../venues/xstocks.js';
+import { tradableTokens } from '../venues/tradable-token.js';
 import { readDelegation, usdToBaseUnits, baseUnitsToUsd } from './delegation.js';
 
 /** Where the grant lets the bot trade. Jupiter is the only venue this build routes through. */
@@ -175,13 +175,19 @@ export async function recordSolanaRevoke(
 }
 
 /**
- * What the app needs to build the grant: whom to delegate to, the token and program it applies to, and the xStocks the
+ * What the app needs to build the grant: whom to delegate to, the token and program it applies to, and the tokens the
  * grant also lets the bot SELL (2026-09-19) — those whose mint is on this cluster. An agent's stop-loss fires with nobody
  * present to sign, so the one grant transaction approves the delegate on each of those accounts too; revoking drops
  * them all.
+ *
+ * Both classes this executor can buy belong here, not the xStocks alone. A Tessera T-Token left out was still
+ * buyable — the spend is USDC, which the cap already approves — and then unsellable forever: the stop-loss, the
+ * take-profit and the panic close all pull the held token, and the chain has no delegate on that account to pull it
+ * with. The list that decides what may be bought (`tradableTokens`) is therefore the list that decides what may be
+ * approved.
  */
 export async function solanaGrantParams() {
-  const all = Object.values(XSTOCKS);
+  const all = tradableTokens();
   const here = await mintsOnCluster(all.map((x) => x.address));
   return {
     chain: 'solana' as const,

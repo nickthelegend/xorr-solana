@@ -69,6 +69,20 @@ export async function priceOf(symbol: string, deadlineMs?: number): Promise<numb
     throw new Error(`No route for ${symbol} right now, so it has no price to trade against.`);
   }
 
+  /*
+   * A private company has no route to price it against, so its mark is the issuer's.
+   *
+   * Unlike the two branches around it, a missing answer here is not "nothing will route right now"
+   * — there is no route either way. It is "Tessera did not answer", and the caller is still about
+   * to size or cap-check against the number, so it stays an error rather than a zero.
+   */
+  if (feed === 'pre-ipo') {
+    const { tesseraPriceUsd } = await import('../venues/tessera.js');
+    const px = await beforeDeadline(tesseraPriceUsd(symbol), deadlineMs, late);
+    if (px && px > 0) return px;
+    throw new Error(`Tessera has no mark for ${symbol} right now, so it has no price to trade against.`);
+  }
+
   if (feed === 'equity') {
     const px = await beforeDeadline(stockPriceUsd(symbol), deadlineMs, late);
     if (px && px > 0) return px;

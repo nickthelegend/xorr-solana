@@ -148,6 +148,37 @@ export async function broadcastSigned(conn: Connection, signedRaw: Uint8Array, p
  * The cure is to notice this one error and go round again with a fresh blockhash, which costs a
  * second signature and saves the flow.
  */
+/**
+ * How many signatures one action may cost before it gives up.
+ *
+ * Each attempt is another wallet sheet, so this is a small number; the point is that a person who
+ * loses the first blockhash to reading the screen is not then required to be quick, which is what
+ * a single retry asked of them. The second sheet is fast because they have already read it.
+ */
+export const SIGN_ATTEMPTS = 3;
+
+/**
+ * Run `attempt`, and run it again with a fresh blockhash for as long as the cluster refuses the
+ * signature for having aged out.
+ *
+ * `worthRetrying` is the caller's, because only it knows what must never be signed twice: a
+ * transaction the executor prepared and co-signed cannot be re-stamped without voiding its
+ * signature, and a cancel is the person's answer rather than a fault.
+ */
+export async function untilFresh<T>(
+  attempt: () => Promise<T>,
+  worthRetrying: (e: unknown) => boolean,
+  attempts: number = SIGN_ATTEMPTS,
+): Promise<T> {
+  for (let n = 1; ; n++) {
+    try {
+      return await attempt();
+    } catch (e) {
+      if (n >= attempts || !worthRetrying(e)) throw e;
+    }
+  }
+}
+
 export function isStaleBlockhash(err: unknown): boolean {
   const text = err instanceof Error ? `${err.name} ${err.message}` : String(err);
   return /blockhash not found|block ?height exceeded|BlockhashNotFound|TransactionExpired/i.test(text);

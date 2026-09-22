@@ -371,9 +371,12 @@ routes.get('/wallet/balance', async (c) => {
 
   if (isSolanaCluster(process.env.XORR_CHAIN ?? '') || !w.address.startsWith('0x')) {
     /*
-     * Everything held, valued (2026-09-19): USDC and every xStock at its live price. This counted USDC alone, so a wallet
-     * that had just bought NVDAx showed less than it held — and it reported the whole on-chain allowance as the daily
-     * cap and as today's remainder. The cap and the remainder are the recorded permission's.
+     * Everything held, valued (2026-09-19): USDC and every tradable token at its live price. This counted USDC alone,
+     * so a wallet that had just bought NVDAx showed less than it held — and it reported the whole on-chain allowance as
+     * the daily cap and as today's remainder. The cap and the remainder are the recorded permission's.
+     *
+     * `.tokens` is both classes (2026-09-22). While this read `.xstocks`, a wallet holding a T-Token showed a total
+     * short by exactly that holding's value, next to a positions list that did include it.
      */
     const [h, policy] = await Promise.all([
       readChain('your balance', () => solanaHoldings(w.address)),
@@ -384,7 +387,7 @@ routes.get('/wallet/balance', async (c) => {
       cashUsd: h.usdc,
       holdings: [
         { symbol: 'USDC', units: h.usdc, usd: h.usdc },
-        ...h.xstocks.map((x) => ({ symbol: x.symbol, units: x.units, usd: x.usd })),
+        ...h.tokens.map((x) => ({ symbol: x.symbol, units: x.units, usd: x.usd })),
         { symbol: 'SOL', units: h.sol, usd: 0 },
       ],
       suppliedUsd: 0,

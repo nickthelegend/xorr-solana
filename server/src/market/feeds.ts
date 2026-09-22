@@ -19,6 +19,7 @@
  */
 import { canonicalSymbol } from '../venues/oneinch.js';
 import { isStock } from '../venues/stocks.js';
+import { isTessera } from '../venues/tessera.js';
 import { isXStock } from '../venues/xstocks.js';
 import { COINGECKO_IDS } from './ids.js';
 
@@ -28,11 +29,14 @@ import { COINGECKO_IDS } from './ids.js';
  *   crypto — CoinGecko's table, the market-data feed.
  *   equity — a tokenized equity on an EVM chain, priced by the venue that would fill it.
  *   xstock — a tokenized equity on Solana, priced by the Jupiter route that would fill it.
+ *   pre-ipo — a Tessera T-Token, a private company, priced by its issuer's mark.
  *
- * The last two are not one case: they are different chains, different venues and different
- * registries, and a symbol that is an equity here is not necessarily one there.
+ * The equity cases are not one case: they are different chains, different venues and different
+ * registries, and a symbol that is an equity here is not necessarily one there. `pre-ipo` is
+ * further apart still — a private company has no exchange to route against, so its mark comes from
+ * the issuer rather than from a venue that would fill it.
  */
-export type Feed = 'crypto' | 'equity' | 'xstock';
+export type Feed = 'crypto' | 'equity' | 'xstock' | 'pre-ipo';
 
 /**
  * The feed that can price `symbol`, or null when nothing can.
@@ -52,6 +56,19 @@ export function feedFor(raw: string): Feed | null {
    * registry owns the spelling rather than relying on the other one staying incomplete.
    */
   if (isXStock(symbol)) return 'xstock';
+  /*
+   * A T-Token is priced, and until now this file said it was not (2026-09-22).
+   *
+   * `tesseraPriceUsd` has answered for these all along; nothing routed to it. So `feedFor` returned
+   * null for `T-OpenAI`, `priceOf` threw `No price feed for T-OpenAI`, and every holding of the one
+   * asset class XORR is built around came back `feed: 'unavailable'` with `mark: 0`. That is not a
+   * cosmetic gap: `notional` is `units * mark`, and the Portfolio screen drops anything under
+   * `DUST_USD`, so a real position the wallet actually held disappeared from the book entirely —
+   * measured on the hosted build as an $18.75 T-OpenAI holding that rendered nowhere at all.
+   *
+   * It also refused a price alert on any T-Token, for a reason that was not true.
+   */
+  if (isTessera(symbol)) return 'pre-ipo';
   if (isStock(symbol)) return 'equity';
   if (COINGECKO_IDS[symbol]) return 'crypto';
   return null;

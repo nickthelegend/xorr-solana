@@ -272,10 +272,12 @@ export default function Home() {
    * silently lands you on the tab you were already looking at is worse than one that fails.
    */
   const wantedTab = isSheetTab(params.tab) ? params.tab : undefined;
-  useEffect(() => {
+  /* Adjusted while rendering, not in an effect: the new tab paints on the same pass, not one after. */
+  const [linkedTab, setLinkedTab] = useState(wantedTab);
+  if (wantedTab !== linkedTab) {
+    setLinkedTab(wantedTab);
     if (wantedTab) openTab(wantedTab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantedTab]);
+  }
   // The row of tabs scrolls sideways on a narrow phone, so the one opened — by a swipe too — is brought into view.
   useEffect(() => {
     if (TABS.findIndex((t) => t.key === tab) >= TABS.length / 2) tabsRef.current?.scrollToEnd({ animated: false });

@@ -68,6 +68,30 @@ export function humanWalletError(e: unknown): string {
   if (/timed out|timeout/i.test(raw)) {
     return 'The network did not answer in time. Nothing was sent.';
   }
+  /*
+   * The signature outlived its blockhash (2026-09-22).
+   *
+   * A Solana signature covers the blockhash stamped before the wallet's sheet opens, and that
+   * blockhash lives about a minute — measured at 64s on this cluster. Reading the permission
+   * screen is enough to lose it, which is what the app asks the user to do. The app signs again
+   * with a fresh one and mostly this is never seen; when every attempt ages out, the user needs
+   * the two things web3.js does not say: nothing moved, and pressing again works.
+   *
+   * What it said instead was five lines — "Simulation failed", the cluster's reason, an empty log
+   * array, and an instruction to catch SendTransactionError and call getLogs() on it. That is a
+   * note to a developer, and it was going on screen under the kill switch.
+   */
+  if (/blockhash not found|block ?height exceeded|TransactionExpired/i.test(raw)) {
+    return 'That took longer than the network allows, so nothing was sent. Nothing changed — try once more.';
+  }
+  /*
+   * Any other failed simulation: the cluster's own reason, without the developer's errand.
+   *
+   * `SendTransactionError.message` is a paragraph whose only useful part is the `Message:` line;
+   * the rest tells a developer which method to call on an object the user does not have.
+   */
+  const simulation = /^\s*Message:\s*(.+)$/m.exec(raw)?.[1]?.trim();
+  if (simulation) return simulation.replace(/\s+$/, '');
 
   // Unrecognised: the first line only. Never the URL, the request body or the viem version.
   const firstLine = detail.split('\n')[0]!.trim();

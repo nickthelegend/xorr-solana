@@ -9,9 +9,12 @@
  * So each row carries BOTH numbers and the distance between them, which on the day this shipped ran
  * from 8% to 34%. One number would be choosing which of two true things to tell somebody who is
  * about to spend money, and the choice that flatters the app is the pool price.
+ *
+ * Each row opens its ticket since 2026-09-23; before that the executor could buy one and nothing on screen could.
  */
 import React from 'react';
 import { ScrollView, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   AssetMark,
@@ -75,6 +78,7 @@ function MarkLine({ row }: { row: PreIpoRow }) {
 
 export default function PreStocks() {
   const goBack = useGoBack();
+  const router = useRouter();
   const { data, loading, error, reload } = useAsync(() => preIpo.list(), []);
   const rows = data?.rows ?? [];
   const feeBps = rows[0]?.transferFeeBps ?? null;
@@ -107,6 +111,8 @@ export default function PreStocks() {
                 secondary={<MarkLine row={r} />}
                 value={<PoolPrice row={r} />}
                 figure="market"
+                onPress={() => router.push(`/xstock/${r.symbol}`)}
+                testID={`pre-ipo-${r.symbol}`}
               />
             ))}
 

@@ -22,10 +22,19 @@ const { feedFor, priceable } = await import('./feeds.js');
 const { COINGECKO_IDS } = await import('./ids.js');
 const { STOCKS } = await import('../venues/stocks.js');
 const { XSTOCKS } = await import('../venues/xstocks.js');
+const { TESSERA } = await import('../venues/tessera.js');
 
 describe('which feed answers for a symbol', () => {
   it('sends a tokenized equity on Solana to the Jupiter route', () => {
     for (const symbol of Object.keys(XSTOCKS)) expect(feedFor(symbol), symbol).toBe('xstock');
+  });
+
+  it('sends a T-Token to its issuer’s mark', () => {
+    /*
+     * This returned null for every one of them, so `priceOf` threw and every pre-IPO holding read
+     * `feed: 'unavailable'` with a mark of 0 — which the Portfolio screen then dropped as dust.
+     */
+    for (const symbol of Object.keys(TESSERA)) expect(feedFor(symbol), symbol).toBe('pre-ipo');
   });
 
   it('sends a tokenized equity on an EVM chain to the venue that would fill it', () => {
@@ -81,7 +90,13 @@ describe('the alert route and the price feed agree', () => {
 
   it('accepts every symbol something can price', async () => {
     // An alert refused for a symbol that HAS a feed is a user told a falsehood about their own app.
-    for (const symbol of [...Object.keys(XSTOCKS), ...Object.keys(STOCKS), 'WETH', 'BTC']) {
+    for (const symbol of [
+      ...Object.keys(XSTOCKS),
+      ...Object.keys(STOCKS),
+      ...Object.keys(TESSERA),
+      'WETH',
+      'BTC',
+    ]) {
       expect(await refusalFor(symbol), symbol).toBeUndefined();
     }
   });
@@ -125,7 +140,7 @@ describe('the alert route and the price feed agree', () => {
     const source = await import('node:fs').then((fs) =>
       fs.readFileSync(new URL('./prices.ts', import.meta.url), 'utf8'),
     );
-    for (const feed of ['xstock', 'equity'] as const) {
+    for (const feed of ['xstock', 'equity', 'pre-ipo'] as const) {
       expect(source, feed).toContain(`feed === '${feed}'`);
     }
     // `crypto` is the fall-through: it is what the rest of the function does.

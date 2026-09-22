@@ -355,7 +355,8 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
      * shares it had just been paid for.
      */
     if (!stock) {
-      return { placed: false, status: 'blocked', reason: 'not_tradable', detail: `${intent.symbol} is not an xStock this can sell.` };
+      // `stock` is `tradableToken`, which is both classes, so "not an xStock" stopped being the reason (2026-09-22).
+      return { placed: false, status: 'blocked', reason: 'not_tradable', detail: `${intent.symbol} is not a token this can sell.` };
     }
     const inMint = stock.address;
     const held = await readDelegation(intent.ownerPubkey, inMint);

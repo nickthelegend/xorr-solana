@@ -21,6 +21,8 @@ describe('the Solana build hides the Base-only screens', () => {
     expect(solanaRedirect('/swap')).toBe('/xstocks');
     expect(solanaRedirect('/oracle/NVDAx')).toBe('/xstock/NVDAx');
     expect(solanaRedirect('/asset/TSLAx')).toBe('/xstock/TSLAx');
+    expect(solanaRedirect('/asset/T-OpenAI')).toBe('/xstock/T-OpenAI');
+    expect(solanaRedirect('/chart/T-OpenAI')).toBeNull();
     expect(solanaRedirect('/asset/SOL')).toBeNull();
     expect(solanaRedirect('/futures')).toBe('/not-here?from=%2Ffutures');
     expect(solanaRedirect('/xstocks')).toBeNull();
