@@ -13,6 +13,7 @@
  * These two routes are deliberately public: a spot price is not user data, and gating it behind a
  * session would mean an unauthenticated visitor sees a market list of dashes.
  */
+import { xStockCatalog } from '../venues/xstocks-catalog.js';
 import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import { ON_SOLANA, DEFAULT_MINTS } from '../solana/clusters.js';
@@ -688,11 +689,18 @@ const STOCK_STALE_MS = 5 * 60_000;
 market.get('/market/stocks', async (c) => {
   // Solana: the xStocks, priced by Jupiter — the tokenized equities this build actually trades (2026-09-19).
   if (ON_SOLANA) {
+    /*
+     * The 24h change from the feed that gives the price (2026-09-23). This measured our own readings a day apart, and
+     * the readings from before the mark moved to Jupiter's market price were $1,000-buy prices — so MSTRx read −9.8% on
+     * a day it moved about 1%, the price impact of the old probe showing up as a fall. Jupiter reports its own change
+     * alongside its price; absent there, it is absent here.
+     */
+    const catalog = await xStockCatalog().catch(() => []);
+    const changeOf = new Map(catalog.map((r) => [r.symbol, r.change24hPct] as const));
     const rows = await Promise.all(
       Object.values(XSTOCKS).map(async (x) => {
         const price = await xStockPriceUsd(x.symbol).catch(() => null);
-        // A 24h change only once the recorded series reaches back a day; absent until then, never a short-window guess.
-        const change24h = dayChangePct(await observedDay(x.symbol).catch(() => []));
+        const change24h = changeOf.get(x.symbol) ?? undefined;
         return {
           ...(change24h === undefined ? {} : { change24h }),
           symbol: x.symbol,
