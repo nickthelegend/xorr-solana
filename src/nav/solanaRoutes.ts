@@ -103,6 +103,11 @@ export function solanaRedirect(path: string): string | null {
 export function hiddenOn(path: string, solana: boolean = isSolana): boolean {
   if (!solana) return false;
   const bare = path.split('?')[0] ?? path;
+  /*
+   * An agent's backtest, by URL (2026-09-23). Nothing links to it on Solana, and it replayed WETH on CoinGecko's daily
+   * closes — "+42.0%" for Momentum Scout — an asset the agent cannot buy on this build. Same reason as `/backtest`.
+   */
+  if (/^\/bot\/[^/]+\/backtest$/.test(bare)) return true;
   return HIDDEN_ON_SOLANA.some((p) => bare === p || bare.startsWith(`${p}/`));
 }
 

@@ -109,7 +109,12 @@ export async function armExits(
    * type or lied about the shape it had.
    */
   w: Pick<WalletRow, 'id' | 'address' | 'agents_stopped'>,
-  p: { symbol: string; entryPrice: number; stopPrice: number; targetPrice: number },
+  /*
+   * `armedBy` names the agent whose entry this exit protects (2026-09-23). Kept in the params, not in `agent_id`:
+   * firing an agent pauses the strategies it owns, and a stop-loss guarding shares it already bought must outlive it.
+   * Without it an agent's profile read "Nothing running yet" while every exit it had armed was live.
+   */
+  p: { symbol: string; entryPrice: number; stopPrice: number; targetPrice: number; armedBy?: string },
 ): Promise<{ strategyId: string | null; sentence: string }> {
   if (!(p.stopPrice > 0) || !(p.targetPrice > 0)) {
     return { strategyId: null, sentence: 'It came with no stop or target, so none is set.' };
@@ -156,7 +161,7 @@ export async function armExits(
       w.id,
       `Exit ${p.symbol} at +${takeProfitPct.toFixed(1)}% / -${stopLossPct.toFixed(1)}%`,
       p.symbol,
-      JSON.stringify({ entryPrice: p.entryPrice, takeProfitPct, stopLossPct }),
+      JSON.stringify({ entryPrice: p.entryPrice, takeProfitPct, stopLossPct, ...(p.armedBy ? { armedBy: p.armedBy } : {}) }),
       nextRuns('daily', 1)[0],
     ],
   );

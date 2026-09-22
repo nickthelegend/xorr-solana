@@ -14,6 +14,7 @@
  * schedules forever and fills never is refused at creation), and anything with a level a person should draw themselves.
  */
 import { useEffect } from 'react';
+import { isSolana } from '@/chain';
 import { create } from 'zustand';
 import { repos } from '@/data';
 import { system } from '@/data/system';
@@ -43,8 +44,13 @@ export type Replay = { ret: number; trades: number } | { failed: string };
 
 /** The one window every replay covers, so the returns can be read against each other. */
 export const LOOKBACK = '90d' as const;
-/** The assets priced for ranges and stops. A module constant, so the price hook is asked the same question each draw. */
-export const PRICED: string[] = ['WETH', 'CBBTC'];
+/**
+ * The assets priced for ranges and stops. A module constant, so the price hook is asked the same question each draw.
+ *
+ * None on Solana (2026-09-23): the Solana templates are recurring buys, which need no mark, and the agent screens there
+ * still asked the executor for WETH and cbBTC quotes — two Base tokens this build cannot trade — on every visit.
+ */
+export const PRICED: string[] = isSolana ? [] : ['WETH', 'CBBTC'];
 
 const NAMES: Record<PricedSymbol, string> = { WETH: 'ETH', CBBTC: 'Bitcoin' };
 /** What a replay spends a run: returns are percentages, so the size only has to be real. */

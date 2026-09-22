@@ -128,6 +128,21 @@ extra.get('/agents/:id/backtest', async (c) => {
    * The wallet read is not caught. It was `.catch(() => null)`, so a read that failed became "no wallet": an unknown
    * agent here, and a chart scaled to the default cap below.
    */
+  /*
+   * Not on Solana (2026-09-23). The one agent with a replay rides breakouts in WETH on CoinGecko's closes, which a
+   * Solana deployment cannot buy; its agent trades xStocks, whose history here is weeks of our own readings. Answering
+   * with the WETH replay put "+42.0%" beside an agent that could never have made that trade.
+   */
+  if (ON_SOLANA) {
+    return c.json(
+      {
+        error: 'not_backtestable',
+        agent: agentId,
+        message: 'Agent backtests replay Base assets; this deployment trades xStocks, which have no history long enough to replay.',
+      },
+      422,
+    );
+  }
   const w = await currentWallet(c);
   const persona = await personaOf(agentId, w?.id);
   const reason = persona !== undefined && Object.hasOwn(NOT_BACKTESTABLE, persona) ? NOT_BACKTESTABLE[persona] : undefined;

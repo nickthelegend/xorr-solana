@@ -91,6 +91,18 @@ export function when(ms: number, now: number = Date.now()): string {
   });
 }
 
+/**
+ * When something on a trail happened: "8:30 PM" today, "Sep 21, 6:35 AM" on any other day.
+ *
+ * Activity printed a bare time for every row, so three days of trades read as one afternoon, and the audit screens
+ * printed the executor's own clock ("03:00 PM", in UTC) beside it for the same entry (2026-09-23). One zone — the
+ * device's — and a day whenever the day is not today.
+ */
+export function stamp(ms: number, now: number = Date.now()): string {
+  if (!Number.isFinite(ms)) return '—';
+  return new Date(ms).toDateString() === new Date(now).toDateString() ? clock(ms) : when(ms, now);
+}
+
 /** A time of day as a person reads one: "7:08 AM". No seconds, no leading zero. */
 export function clock(ms: number): string {
   if (!Number.isFinite(ms)) return '—';

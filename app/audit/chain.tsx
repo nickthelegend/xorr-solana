@@ -13,6 +13,8 @@
  * repair. A chain you can mend is a chain that proves nothing.
  */
 import React from 'react';
+import { stamp } from '@/format';
+import { isSolana } from '@/chain';
 import { useGoBack } from '@/nav/useGoBack';
 import { ScrollView } from 'react-native';
 import {
@@ -114,18 +116,24 @@ export default function AuditChain() {
               sceptic has no reason to accept. The anchor screen shows the head hash sitting in a
               contract at a named block, readable without our cooperation.
             */}
-            <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
-              {/* No network named here (PLAN.md O3): which chain holds the anchor is the anchor screen's to say. */}
-              <Text variant="secondary" color={colors.ink65}>
-                That check is ours. The latest hash is also on chain, where anyone can read it.
-              </Text>
-              <Button
-                label="See it on chain"
-                variant="ghost"
-                onPress={() => router.push('/audit/anchor')}
-                style={{ marginTop: space.s12 }}
-              />
-            </SheetCard>
+            {/*
+              Not on Solana (2026-09-23): nothing anchors the trail there — `/audit/anchor` is a Base screen and the
+              Solana build hides it — so "the latest hash is also on chain" was a claim with a dead link behind it.
+            */}
+            {isSolana ? null : (
+              <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
+                {/* No network named here (PLAN.md O3): which chain holds the anchor is the anchor screen's to say. */}
+                <Text variant="secondary" color={colors.ink65}>
+                  That check is ours. The latest hash is also on chain, where anyone can read it.
+                </Text>
+                <Button
+                  label="See it on chain"
+                  variant="ghost"
+                  onPress={() => router.push('/audit/anchor')}
+                  style={{ marginTop: space.s12 }}
+                />
+              </SheetCard>
+            )}
 
             <Button
               label="The full trail"
@@ -139,7 +147,7 @@ export default function AuditChain() {
                 height={size.rowLg}
                 onPress={() => router.push(`/audit/${e.id}`)}
                 title={e.action}
-                secondary={`${e.agent} · ${e.t}`}
+                secondary={`${e.agent} · ${e.at ? stamp(e.at) : e.t}`}
                 value={
                   e.amount ? (
                     <Text variant="rowPrimary">{e.amount}</Text>

@@ -18,6 +18,7 @@
  * That is the difference between an agent that trades rarely and one that trades confidently on
  * numbers nobody produced.
  */
+import { ordinal } from './ordinal.js';
 import { randomUUID } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
 import { one, query, tx } from '../db/index.js';
@@ -496,7 +497,6 @@ export async function evaluateBestSetup(
      * a symbol this deployment has not watched long enough: the agent needs a day of its own readings before it will
      * call anything a breakout, and saying so is better than silence.
      */
-    const pct = position === null ? null : Math.round(position * 100);
     if (!range || position === null) {
       looks?.push({
         symbol: stock.symbol,
@@ -508,14 +508,14 @@ export async function evaluateBestSetup(
       looks?.push({
         symbol: stock.symbol,
         verdict: 'between_bands',
-        detail: `${stock.symbol} sits at the ${pct}th percentile of its $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band; this profile buys a breakout at the ${Math.round(settings.momentumEntryAt * 100)}th or a dip below the ${Math.round(settings.dcaEntryBelow * 100)}th.`,
+        detail: `${stock.symbol} sits at the ${ordinal(Math.round(position * 100))} percentile of its $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band; this profile buys a breakout at the ${ordinal(Math.round(settings.momentumEntryAt * 100))} or a dip below the ${ordinal(Math.round(settings.dcaEntryBelow * 100))}.`,
         position,
       });
     } else {
       looks?.push({
         symbol: stock.symbol,
         verdict: 'candidate',
-        detail: `${stock.symbol} is at the ${pct}th percentile of its $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band — inside this profile's entry.`,
+        detail: `${stock.symbol} is at the ${ordinal(Math.round(position * 100))} percentile of its $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band — inside this profile's entry.`,
         position,
       });
     }
@@ -534,8 +534,8 @@ export async function evaluateBestSetup(
         currentPrice: price,
         stopPrice: stop,
         targetPrice: target,
-        reason: `${stock.symbol} is trading at the ${(position * 100).toFixed(0)}th percentile of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded since ${day(range.since)}.`,
-        marketCondition: `Upper band, ${(position * 100).toFixed(0)}th percentile of observed range`,
+        reason: `${stock.symbol} is trading at the ${ordinal(Math.round(position * 100))} percentile of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded since ${day(range.since)}.`,
+        marketCondition: `Upper band, ${ordinal(Math.round(position * 100))} percentile of observed range`,
         corporateAction,
         offHoursGuard,
         suggestedSlippageBps: slippageBps,
@@ -555,7 +555,7 @@ export async function evaluateBestSetup(
         stopPrice: price * 0.92,
         targetPrice: price * 1.1,
         reason: `${stock.symbol} is in the lower part of the $${range.low.toFixed(2)}-$${range.high.toFixed(2)} band this app has recorded since ${day(range.since)}. Accumulating.`,
-        marketCondition: `Lower band, ${(position * 100).toFixed(0)}th percentile of observed range`,
+        marketCondition: `Lower band, ${ordinal(Math.round(position * 100))} percentile of observed range`,
         corporateAction,
         offHoursGuard,
         suggestedSlippageBps: slippageBps,
@@ -783,6 +783,7 @@ export async function runAutonomousCycle(
       entryPrice: receipt.fillPrice,
       stopPrice: bestSetup.stopPrice,
       targetPrice: bestSetup.targetPrice,
+      armedBy: bestSetup.personaName,
     });
     exitStrategyId = exits.strategyId;
   } catch (e) {

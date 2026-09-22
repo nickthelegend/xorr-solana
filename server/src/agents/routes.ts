@@ -13,6 +13,7 @@
  * Everything is scoped to the caller's wallet. An agent id from another user must read as missing,
  * never as forbidden — the second answer confirms it exists.
  */
+import { ordinal } from '../bot/ordinal.js';
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -427,7 +428,7 @@ agents.post('/agents/risk-profile', async (c) => {
       walletId: w.id,
       agent: 'xorr',
       action: `Agent risk set to ${profile}`,
-      detail: `Entries up to $${s.maxTradeUsd}, a breakout counted from the ${Math.round(s.momentumEntryAt * 100)}th percentile, ${s.corporateActionWindowHours} hours clear of any scheduled split or dividend, and ${s.cooldownMinutes} minutes between entries.`,
+      detail: `Entries up to $${s.maxTradeUsd}, a breakout counted from the ${ordinal(Math.round(s.momentumEntryAt * 100))} percentile, ${s.corporateActionWindowHours} hours clear of any scheduled split or dividend, and ${s.cooldownMinutes} minutes between entries.`,
       kind: 'risk',
       payload: { previous, profile, settings: s },
     }).catch(() => undefined);

@@ -92,9 +92,17 @@ export default function AgentDetail() {
   const kinds = mandateOf ? (MANDATE_KINDS[mandateOf] ?? []) : [];
   // Plain: the React Compiler memoizes this itself, and could not preserve a hand-written memo keyed
   // on a joined string.
-  const mine = (strategies.data ?? []).filter(
-    (s) => s.state !== 'ended' && (agent?.custom ? s.agentId === agent.id : kinds.includes(s.kind)),
-  );
+  /*
+   * An exit an agent armed on its own entry is that agent's, whatever the kind mandate says (2026-09-23): Momentum
+   * Scout read "Nothing running yet" beside ten trades and five live exits, which were drawn under Drawdown Guard — an
+   * agent nobody had hired. `params.armedBy` is the executor's record of who armed it; the kind mapping decides the rest.
+   */
+  const mine = (strategies.data ?? []).filter((s) => {
+    if (s.state === 'ended') return false;
+    if (agent?.custom) return s.agentId === agent.id;
+    const armedBy = typeof s.params?.armedBy === 'string' ? s.params.armedBy : undefined;
+    return armedBy ? armedBy === agent?.name : kinds.includes(s.kind);
+  });
   const setup = setupFor(kinds);
 
   const hire = async () => {
