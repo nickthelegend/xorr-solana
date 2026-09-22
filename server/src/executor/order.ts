@@ -153,6 +153,29 @@ export async function armExits(
     return { strategyId: null, sentence: `Your existing exit on ${p.symbol} stays as it is.` };
   }
 
+  /*
+   * One agent exit per holding (2026-09-23). An exit sells the whole holding, so every entry arming a new one left two
+   * or three live on one stock at different levels — whichever triggered first sold everything, and the rest stayed
+   * "live" to fire later on shares bought after, at levels written for an entry that was gone. An agent's new exit
+   * replaces the agent exits before it. An exit the owner set themselves is theirs: it stays, and none is added over it.
+   */
+  if (p.armedBy) {
+    const own = await one<{ id: string }>(
+      `SELECT id FROM strategies
+        WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live'
+          AND chain = ${THIS_CHAIN} AND NOT (params ? 'armedBy')
+        LIMIT 1`,
+      [w.id, p.symbol],
+    );
+    if (own) return { strategyId: null, sentence: `Your own exit on ${p.symbol} stays as you set it.` };
+    await query(
+      `UPDATE strategies SET state = 'ended'
+        WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live'
+          AND chain = ${THIS_CHAIN} AND params ? 'armedBy'`,
+      [w.id, p.symbol],
+    );
+  }
+
   const row = await one<{ id: string }>(
     `INSERT INTO strategies (id, wallet_id, kind, state, label, symbol, params, cadence, next_run_at, daily_allocation_usd)
      VALUES ($1,$2,'exit-rules','live',$3,$4,$5,'daily',$6,0) RETURNING id`,

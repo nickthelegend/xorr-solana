@@ -161,6 +161,15 @@ async function fireExit(row: ExitRow, symbol: string, price: number, trigger: No
       usd: outcome.usd,
       attribution: { source: 'strategy', id: row.id, label: row.label },
     });
+    /*
+     * The holding this exit guarded is sold, all of it, so every other exit on it is done too (2026-09-23). Left live,
+     * one would fire later on shares bought after, at levels written for an entry that no longer exists.
+     */
+    await client.query(
+      `UPDATE strategies SET state = 'ended'
+        WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live' AND id <> $3`,
+      [row.wallet_id, symbol, row.id],
+    );
     await append(
       {
         walletId: row.wallet_id,

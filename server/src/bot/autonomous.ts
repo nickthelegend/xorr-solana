@@ -134,6 +134,11 @@ export type DecisionRecord = {
   nasdaqSession: string;
   /** Null when no independent price was available to measure drift against. */
   spreadBps: number | null;
+  /**
+   * What the drift was measured against — Pyth's print or the issuer's own mark (2026-09-23). Without it "Why this
+   * trade" had to name the reference itself, and named "the Base listing" on a Solana deployment.
+   */
+  referenceSource: 'pyth' | 'issuer' | null;
   slippageBps: number;
   /**
    * Which risk profile was active when this was decided.
@@ -178,6 +183,7 @@ function decisionRecord(p: {
     nasdaqSession: setup.offHoursGuard.session,
     /* Null rather than 0: nothing measured is not the same as measured at zero. */
     spreadBps: setup.offHoursGuard.spreadBps,
+    referenceSource: setup.offHoursGuard.referenceSource,
     slippageBps: setup.suggestedSlippageBps,
     riskProfile: p.riskProfile,
     exitStrategyId: p.exitStrategyId,
@@ -568,8 +574,8 @@ export async function evaluateBestSetup(
   );
   /*
    * A symbol that WAS a setup and was held back by pacing says so, replacing its candidate line: "it qualified and I am
-   * holding off" is a different fact from "it did not qualify", and the pacing rules (one entry per symbol a day, an
-   * hour between entries) are the ones an owner is most likely to think is a bug.
+   * holding off" is a different fact from "it did not qualify", and the pacing rules (one entry per symbol a day, a
+   * quarter of the grant per stock) are the ones an owner is most likely to think is a bug.
    */
   if (looks) {
     for (const c of candidates) {
@@ -577,10 +583,18 @@ export async function evaluateBestSetup(
       const pacedOut = exclude?.has(`${c.persona}:${c.symbol}`) || exclude?.has(`*:${c.symbol}`);
       if (!pacedOut) continue;
       const at = looks.findIndex((l) => l.symbol === c.symbol);
+      /*
+       * Which of the two rules held it, not both at once (2026-09-23). This said "already entered it today or is inside
+       * the hour it waits between entries" — but the wait between entries is the profile's (90 minutes on Balanced) and
+       * is reported by its own line before a sweep ever gets here. What rules a symbol out HERE is one of two things.
+       */
+      const full = exclude?.has(`*:${c.symbol}`);
       const line: SymbolLook = {
         symbol: c.symbol,
         verdict: 'paced',
-        detail: `${c.symbol} reads as a setup, but this wallet has already entered it today or is inside the hour it waits between entries.`,
+        detail: full
+          ? `${c.symbol} reads as a setup, but this wallet already holds a quarter of its grant in it.`
+          : `${c.symbol} reads as a setup, but ${c.personaName} already bought it today, and it takes one entry per stock a day.`,
       };
       if (at >= 0) looks[at] = line;
       else looks.push(line);

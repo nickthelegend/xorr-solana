@@ -56,15 +56,15 @@ function recommend(s: StrategyDetail): { style: PersonaId; why: string } {
   if (ret !== null && dd !== null && dd > Math.abs(ret)) {
     return {
       style: 'drawdown-guard',
-      why: `Out of sample it drew down ${dd.toFixed(2)}% against a ${ret.toFixed(2)}% return — it fell further than it made, so Drawdown Guard, whose job is cutting risk when the book bleeds.`,
+      why: `Out of sample it drew down ${dd.toFixed(2)}% against a ${ret.toFixed(2)}% return — it fell further than it made, so it goes to Drawdown Guard, whose job is cutting risk when the book bleeds.`,
     };
   }
   return {
     style: 'momentum-scout',
     why:
       ret === null || dd === null
-        ? 'The book did not record enough of this one to argue for a particular persona, so Momentum Scout — the only one of the four that enters on its own read of price.'
-        : `It returned ${ret.toFixed(2)}% out of sample against a ${dd.toFixed(2)}% drawdown, so Momentum Scout, the one of the four that enters on its own read of price.`,
+        ? 'The book did not record enough of this one to argue for a particular persona, so it goes to Momentum Scout — the only one of the four that enters on its own read of price.'
+        : `It returned ${ret.toFixed(2)}% out of sample against a ${dd.toFixed(2)}% drawdown, so it goes to Momentum Scout, the one of the four that enters on its own read of price.`,
   };
 }
 

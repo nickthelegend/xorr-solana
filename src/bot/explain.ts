@@ -15,6 +15,13 @@
  * A row with no record gets no narration at all. See `explainLines` returning an empty list.
  */
 import { MINUS } from '@/format';
+import { isSolana } from '@/chain';
+
+/**
+ * Whose price the pool was measured against. A record from before the source was stored says "the reference price",
+ * which is true of both; it said "the Base listing", which on Solana is true of neither.
+ */
+const REFERENCE_LABEL: Record<string, string> = { pyth: "Pyth's price", issuer: "the issuer's mark" };
 
 export type DecisionRecord = {
   symbol: string;
@@ -37,6 +44,8 @@ export type DecisionRecord = {
   pendingEffectiveAtMs: number | null;
   nasdaqSession: string;
   spreadBps: number | null;
+  /** Absent on a record written before 2026-09-23, which did not say. */
+  referenceSource?: 'pyth' | 'issuer' | null;
   slippageBps: number;
   /**
    * The risk profile that was active when this was decided.
@@ -140,7 +149,7 @@ export function explainLines(record: DecisionRecord): ExplainLine[] {
     value:
       record.spreadBps === null
         ? `${session}, and no second venue answered, so the drift was unmeasured`
-        : `${session}, and the pool was within ${record.spreadBps} bps of the Base listing`,
+        : `${session}, and the pool was within ${record.spreadBps} bps of ${REFERENCE_LABEL[record.referenceSource ?? ''] ?? 'the reference price'}`,
   });
 
   lines.push({
@@ -164,7 +173,7 @@ export function explainLines(record: DecisionRecord): ExplainLine[] {
   lines.push({
     label: 'Exit',
     value: record.exitStrategyId
-      ? 'Armed on the fill price, checked daily'
+      ? `Armed on the fill price, checked ${isSolana ? 'every 30 seconds' : 'daily'}`
       : 'Not armed — set one in Auto Close',
   });
 

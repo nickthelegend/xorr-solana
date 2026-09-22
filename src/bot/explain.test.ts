@@ -50,7 +50,16 @@ describe('explainLines', () => {
 
   it('states the drift it measured, against the session it measured it in', () => {
     expect(lineFor(RECORD, 'Where it was priced')).toBe(
-      'Nasdaq was open, and the pool was within 12 bps of the Base listing',
+      'Nasdaq was open, and the pool was within 12 bps of the reference price',
+    );
+  });
+
+  it('names whose price the drift was measured against, when the record says', () => {
+    expect(lineFor({ ...RECORD, referenceSource: 'pyth' }, 'Where it was priced')).toBe(
+      "Nasdaq was open, and the pool was within 12 bps of Pyth's price",
+    );
+    expect(lineFor({ ...RECORD, referenceSource: 'issuer' }, 'Where it was priced')).toBe(
+      "Nasdaq was open, and the pool was within 12 bps of the issuer's mark",
     );
   });
 

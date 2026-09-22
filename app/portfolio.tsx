@@ -324,9 +324,15 @@ export default function Portfolio() {
                 <Text variant="footnote" color={colors.ink55}>
                   {firstAt !== undefined ? historyCaption(firstAt) : 'Every reading recorded so far'}
                 </Text>
+                {/*
+                  What the wallet was worth then and now, not a return (2026-09-23). The readings include every deposit,
+                  so this drew "+$502.06 · +100.4%" in profit green for a wallet that had been sent 1,000 test USDC and
+                  made $3 on it. The history carries no flows to take out, so the line says what it knows; open and
+                  realised P&L are the returns, and they are on this screen.
+                */}
                 {graphChange ? (
-                  <Price variant="footnote" tone={pnlTone(graphChange.delta)}>
-                    {`${signedMoney(graphChange.delta)} · ${percent(graphChange.pct)}`}
+                  <Price variant="footnote" color={colors.ink55}>
+                    {`${money(points[0]!)} → ${money(points[points.length - 1]!)}, deposits included`}
                   </Price>
                 ) : null}
               </View>

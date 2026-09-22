@@ -485,7 +485,14 @@ market.get('/market/symbols', (c) =>
    */
   c.json(
     ON_SOLANA
-      ? [...Object.keys(COINGECKO_IDS), ...tradableTokens().map((t) => t.symbol)]
+      ? [
+          /*
+           * Not WETH or cbBTC (2026-09-23): they are Base's wrappers of ETH and BTC, which are listed in their own
+           * right, and Coverage on Solana drew both as "priced here" beside the coins they wrap.
+           */
+          ...Object.keys(COINGECKO_IDS).filter((s) => s !== 'WETH' && s !== 'CBBTC'),
+          ...tradableTokens().map((t) => t.symbol),
+        ]
       : Object.keys(COINGECKO_IDS),
   ),
 );

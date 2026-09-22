@@ -22,17 +22,7 @@ import React from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
-import {
-  Button,
-  Fill,
-  HeaderBar,
-  Screen,
-  SheetCard,
-  Text,
-  colors,
-  radius,
-  space,
-} from '@/ui';
+import { Button, Fill, HeaderBar, Screen, SheetCard, Text, colors, radius, space } from '@/ui';
 import { NotSignedIn } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import { system } from '@/data/system';
@@ -102,13 +92,19 @@ const SOLANA_SOURCES: Source[] = [
 const SOURCES: Source[] = [
   {
     name: 'The chain',
-    owns: 'Balances, the permission, approvals, names and every transaction',
+    // No names on Solana: a Basename is Base's (2026-09-23).
+    owns: isSolana
+      ? 'Balances, the permission, approvals and every transaction'
+      : 'Balances, the permission, approvals, names and every transaction',
     how: 'Read directly over RPC.',
   },
   {
     name: 'xorr',
     owns: 'Positions and their cost, realised profit, runs, alerts, stock readings and the audit trail',
-    how: 'The executor’s own database. The audit trail in it is hash-chained and anchored on the chain.',
+    // Anchored on Base only; nothing anchors the trail on Solana, so saying so there was untrue (2026-09-23).
+    how: isSolana
+      ? 'The executor’s own database. The audit trail in it is hash-chained, so a changed row shows.'
+      : 'The executor’s own database. The audit trail in it is hash-chained and anchored on the chain.',
   },
   ...(isSolana ? SOLANA_SOURCES : BASE_SOURCES),
   {
@@ -138,7 +134,9 @@ export default function Sources() {
 
   /* Undefined until `/health` answers: a probe nobody has read is not a dependency that is down. */
   const up = (name: string): boolean | undefined =>
-    health.data ? health.data.dependencies.find((d) => d.name === name)?.status === 'up' : undefined;
+    health.data
+      ? health.data.dependencies.find((d) => d.name === name)?.status === 'up'
+      : undefined;
 
   /*
    * The index needs a session to ask about. Signed out it was never asked, which is no label at all —

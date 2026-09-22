@@ -19,6 +19,7 @@
  * a router address identifies nothing.
  */
 import React from 'react';
+import { isSolana } from '@/chain';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -83,11 +84,21 @@ export default function Venues() {
             }}
           >
             <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
+              {/*
+                On Solana there is no contract (2026-09-23): the permission is an SPL approval on the owner's own token
+                accounts, and this card read "CONTRACT —" over a dash, as if one should exist and could not be found.
+              */}
               <Text variant="footnote" color={colors.ink55}>
-                CONTRACT
+                {isSolana ? 'PERMISSION' : 'CONTRACT'}
               </Text>
               <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
-                {params.data ? shortAddress(params.data.contract) : params.error ? '—' : '· · ·'}
+                {isSolana
+                  ? 'An SPL approval on your USDC, xStock and pre-IPO accounts'
+                  : params.data
+                    ? shortAddress(params.data.contract)
+                    : params.error
+                      ? '—'
+                      : '· · ·'}
               </Text>
               <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s6 }}>
                 {/* The key the grant names, which is not always the key the executor signs with today. */}

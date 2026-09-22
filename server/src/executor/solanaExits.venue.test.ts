@@ -46,4 +46,11 @@ describe('the run an exit records', () => {
     expect(insert!.text).toMatch(/'sell'/);
     expect(insert!.text).toMatch(/'equity'/);
   });
+
+  it('ends every other exit on the holding it sold, so none fires later on shares bought after', async () => {
+    await solanaExitSweep(new Date());
+    const siblings = captured.find((q) => /UPDATE strategies SET state = 'ended'/.test(q.text) && /id <> \$3/.test(q.text));
+    expect(siblings, 'the sibling exits are ended').toBeTruthy();
+    expect(siblings!.params).toEqual(['w1', 'NVDAx', 's1']);
+  });
 });

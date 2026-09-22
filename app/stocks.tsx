@@ -13,6 +13,7 @@
  * Distilled 2026-09-14 (PLAN.md O3): no venue on the rows and no network in the notes — How it works names them.
  */
 import React, { useMemo } from 'react';
+import { isSolana } from '@/chain';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -52,7 +53,8 @@ export default function Stocks() {
       <View style={{ paddingHorizontal: space.gutter }}>
         <HeaderBar onBack={goBack} title={<Text variant="screenTitle">Stocks</Text>} />
         <Text variant="secondary" color={colors.ink55} style={{ marginTop: space.s8 }}>
-          Priced by what a real buy would cost.
+          {/* On Solana the mark is Jupiter's market price, not a buy divided out (see `xStockPriceUsd`, 2026-09-23). */}
+          {isSolana ? 'Priced at Jupiter’s market price for each token.' : 'Priced by what a real buy would cost.'}
         </Text>
       </View>
 

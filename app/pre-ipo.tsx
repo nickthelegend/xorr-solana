@@ -68,7 +68,8 @@ function MarkLine({ row }: { row: PreIpoRow }) {
       {row.spreadPct === null ? null : (
         <Text variant="bodySm" color={wide ? colors.warn : colors.ink55}>
           {'  '}
-          {percent(row.spreadPct, { digits: 1 })} vs pool
+          {/* The pool against the mark, as `spreadPct` is measured — "mark $423 +33.5% vs pool" read the other way round. */}
+          pool {percent(row.spreadPct, { digits: 1 })} vs mark
         </Text>
       )}
       {row.markStale ? ' · last known' : ''}

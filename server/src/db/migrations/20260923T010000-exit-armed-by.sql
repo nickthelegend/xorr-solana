@@ -11,3 +11,23 @@ UPDATE strategies s
  WHERE s.kind = 'exit-rules'
    AND NOT (s.params ? 'armedBy')
    AND p.payload->>'exitStrategyId' = s.id;
+
+-- And one agent exit per holding. An exit sells the whole holding, so two agent exits on one stock is one too many:
+-- whichever triggered first sold it all, and the other stayed live to fire on shares bought later, at levels written
+-- for an entry that was gone. The newest agent exit on each holding stays; the older ones end. An exit the owner set by
+-- hand has no `armedBy` and is not touched.
+UPDATE strategies s
+   SET state = 'ended'
+ WHERE s.kind = 'exit-rules'
+   AND s.state = 'live'
+   AND s.params ? 'armedBy'
+   AND EXISTS (
+     SELECT 1 FROM strategies n
+      WHERE n.wallet_id = s.wallet_id
+        AND n.symbol = s.symbol
+        AND n.chain = s.chain
+        AND n.kind = 'exit-rules'
+        AND n.state = 'live'
+        AND n.params ? 'armedBy'
+        AND (n.created_at > s.created_at OR (n.created_at = s.created_at AND n.id > s.id))
+   );
