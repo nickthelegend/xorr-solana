@@ -7,6 +7,7 @@
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
+import bs58 from 'bs58';
 import { one, query } from '../db/index.js';
 import { append } from '../audit/log.js';
 import { requireWallet } from '../routes/wallet-context.js';
@@ -81,8 +82,14 @@ agentWalletRoutes.post('/agents/:id/wallet/record', async (c) => {
   if (!row) return c.json({ error: 'not_hired', message: 'Hire this agent to give it a wallet.' }, 404);
   const { signature } = RecordInput.parse(await c.req.json());
 
+  // A signature is 64 bytes in base58; anything else is the caller's to fix, not a fault to report as one.
+  if (!/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(signature) || bs58.decode(signature).length !== 64) {
+    return c.json({ error: 'invalid_signature', message: 'That is not a Solana transaction signature.' }, 400);
+  }
   const wallet = await readAgentWallet(w.address, row.id);
-  const tx = await connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+  const tx = await connection
+    .getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })
+    .catch(() => null);
   if (!tx || tx.meta?.err) {
     return c.json({ error: 'not_confirmed', message: 'That transaction is not confirmed on this chain, so nothing was recorded.' }, 409);
   }
