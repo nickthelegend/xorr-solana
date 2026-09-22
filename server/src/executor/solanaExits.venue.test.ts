@@ -53,4 +53,12 @@ describe('the run an exit records', () => {
     expect(siblings, 'the sibling exits are ended').toBeTruthy();
     expect(siblings!.params).toEqual(['w1', 'NVDAx', 's1']);
   });
+
+  it('ends an exit whose holding is gone, without pricing or selling anything', async () => {
+    const { readDelegation } = await import('../solana/delegation.js');
+    vi.mocked(readDelegation).mockResolvedValueOnce({ balanceAmount: 0n } as never);
+    guard.mockClear();
+    expect(await solanaExitSweep(new Date())).toBe(0);
+    expect(guard).not.toHaveBeenCalled();
+  });
 });
