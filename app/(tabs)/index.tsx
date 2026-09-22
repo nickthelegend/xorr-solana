@@ -420,6 +420,9 @@ export default function Home() {
    */
   const lastLook = usePoll(() => system.agentLastLook(), TICKER_EVERY_MS);
   const signedOut = useSignedOut();
+  /* What each agent holds in its own wallet (2026-09-23), so a funded agent reads as one on the roster. */
+  const agentFunds = useAsync(() => (isSolana && !signedOut ? system.agentWallets() : Promise.resolve([])), [signedOut]);
+  const fundsOf = (id: string) => agentFunds.data?.find((w) => w.agentId === id && w.exists);
   const now = useNow();
 
   /*
@@ -781,7 +784,7 @@ export default function Home() {
                           </Text>
                           {/* Grey, never green: hired is a fact about the roster, not a profit. */}
                           <Text variant="orbStatus" color={a.hired ? colors.ink55 : colors.ink30}>
-                            {a.hired ? 'Hired' : 'Not hired'}
+                            {a.hired ? (fundsOf(a.id) ? `Hired · ${money(fundsOf(a.id)!.usdc)}` : 'Hired') : 'Not hired'}
                           </Text>
                         </Press>
                       </Rise>

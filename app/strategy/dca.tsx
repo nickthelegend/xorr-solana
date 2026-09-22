@@ -24,6 +24,8 @@ import {
   Price,
   Screen,
   Segmented,
+  Pill,
+  PillRow,
   Text,
   colors,
   money,
@@ -129,13 +131,15 @@ export default function DcaSetup() {
         <CloseButton onPress={() => goBack()} light />
       </View>
 
-      <Segmented
-        options={options}
-        value={symbol}
-        onChange={setSymbol}
-        light
-        style={{ marginTop: space.s16 }}
-      />
+      {/*
+        A row that scrolls, not a segmented control (2026-09-23): eight symbols in one segmented bar truncated every
+        label to "NVD…" and "T-O…", so nobody could read which stock they were about to buy every week.
+      */}
+      <PillRow style={{ marginTop: space.s16 }} testID="dca-symbols">
+        {options.map((o) => (
+          <Pill key={o.value} label={o.label} light selected={o.value === symbol} onPress={() => setSymbol(o.value)} testID={`dca-symbol-${o.value}`} />
+        ))}
+      </PillRow>
 
       <View style={{ alignItems: 'center', marginTop: space.s22, gap: space.s6 }}>
         {/*

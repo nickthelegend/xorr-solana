@@ -9,6 +9,7 @@
  * chain over the last week (PLAN.md 2.10) — and its caption says how far back that line actually reaches.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { isSolana } from '@/chain';
 import { shownHere } from '@/nav/solanaRoutes';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -489,7 +490,28 @@ export default function Portfolio() {
               <Price variant="rowPrimary">—</Price>
             )}
           </View>
-          {/* Savings are Aave on Base; the Solana build has no yield (`src/nav/solanaRoutes.ts`). */}
+          {/*
+            On Solana: what sits in the agents' own wallets (2026-09-23) — the owner's money, counted in the total above,
+            in accounts only the agents trade from. Savings are Aave on Base; the Solana build has no yield.
+          */}
+          {isSolana ? (
+            <Press
+              onPress={() => router.push('/bot/roster')}
+              accessibilityRole="button"
+              accessibilityLabel="With your agents. Opens the agents."
+              style={{ flex: 1, gap: space.s4 }}
+              testID="portfolio-agents-cash"
+            >
+              <Text variant="eyebrowSm">With your agents</Text>
+              {balance.data ? (
+                <Price variant="rowPrimary">{money(balance.data.agents)}</Price>
+              ) : balance.loading ? (
+                <Placeholder width={70} height={18} />
+              ) : (
+                <Price variant="rowPrimary">—</Price>
+              )}
+            </Press>
+          ) : null}
           {shownHere('/yield') ? (
           <Press
             onPress={() => router.push('/yield')}

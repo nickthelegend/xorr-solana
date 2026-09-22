@@ -171,6 +171,8 @@ export interface PortfolioRepository {
     total: number;
     cash: number;
     supplied: number;
+    /** USDC in the owner's agent wallets — theirs, in accounts of their own (2026-09-23). */
+    agents: number;
     holdings: { symbol: string; units: number; usd: number }[];
   } | null>;
   /**

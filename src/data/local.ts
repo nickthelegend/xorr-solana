@@ -499,12 +499,14 @@ export const LocalRepositories: Repositories = {
         usd: number;
         cashUsd: number;
         suppliedUsd?: number;
+        agentsUsd?: number;
         holdings?: { symbol: string; units: number; usd: number }[];
       }>('/wallet/balance');
       return {
         total: b.usd,
         cash: b.cashUsd,
         supplied: b.suppliedUsd ?? 0,
+        agents: b.agentsUsd ?? 0,
         // Was dropped here. See the note on the interface — it cost two screens their agreement.
         holdings: b.holdings ?? [],
       };

@@ -69,7 +69,11 @@ export default function AgentPolicyScreen() {
     setPolicy((agent.riskLimits ?? {}) as AgentPolicy);
   }
 
-  const symbols = (tradable.data ?? []).map((t) => t.symbol).filter((s) => s !== 'USDC');
+  /*
+   * The stocks an agent can actually enter: the xStocks. A pre-IPO token is bought by its owner, never by an agent —
+   * a private company has no share price to check the pool against, and the agents do not trade what they cannot check.
+   */
+  const symbols = (tradable.data ?? []).map((t) => t.symbol).filter((s) => s !== 'USDC' && !s.startsWith('T-'));
   const chosen = policy.symbols ?? [];
   const every = chosen.length === 0;
   const change = (next: AgentPolicy) => {
@@ -178,7 +182,7 @@ export default function AgentPolicyScreen() {
             <SheetCard bordered borderRadius={radius.panel} padding={space.s16}>
               <Text variant="rowPrimary">Stocks it may buy</Text>
               <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s2 }}>
-                {every ? 'Every one this network can settle.' : `Only ${chosen.join(', ')}.`}
+                {every ? 'Every xStock this network can settle.' : `Only ${chosen.join(', ')}.`}
               </Text>
               <PillWrap style={{ marginTop: space.s12 }}>
                 <ChoiceChip label="All" selected={every} onPress={() => change({ ...policy, symbols: undefined })} />
@@ -186,6 +190,9 @@ export default function AgentPolicyScreen() {
                   <ChoiceChip key={s} label={s} selected={chosen.includes(s)} onPress={() => toggleSymbol(s)} testID={`policy-symbol-${s}`} />
                 ))}
               </PillWrap>
+              <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
+                Pre-IPO tokens are yours to buy, not an agent&apos;s: a private company has no share price to check the pool against.
+              </Text>
             </SheetCard>
 
             <SheetCard bordered borderRadius={radius.panel} padding={space.s6}>
