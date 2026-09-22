@@ -70,7 +70,7 @@ const SOLANA_SOURCES: Source[] = [
   {
     name: 'Jupiter',
     owns: 'Swap routes, fill prices and every xStock price',
-    how: 'Its quote and swap API. An xStock has no market-data feed, so its price is a real route for a real size.',
+    how: 'Its price, quote and swap APIs. An xStock is marked at Jupiter’s market price for the token, and every fill is a real route for its real size.',
   },
   {
     name: 'Backed',

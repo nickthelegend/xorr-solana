@@ -69,6 +69,8 @@ export type JupiterQuoteResponse = {
    * than quietly omitting the line, which reads the same as not having checked.
    */
   platformFee?: { amount: string; feeBps: number } | null;
+  /** `0` when Jupiter quoted a v0 transaction; absent for a quote asked for as legacy. */
+  transactionVersion?: number | null;
   routePlan?: Array<{
     swapInfo: { label: string; inAmount: string; outAmount: string };
     /** How much of the input this hop carries. A split route has several, summing to 100. */
@@ -177,8 +179,20 @@ export async function quote(params: {
    * pin has nothing. The fill then settles through the venue vault and is labelled `venue-vault`,
    * which is honest: a real price, and no claim that a route ran.
    */
+  /*
+   * And Meteora DLMM next, for the class it fills (2026-09-23). Every T-Token pair routes only through Meteora, so the
+   * Whirlpool pin found nothing and the unpinned quote came back as a v0 transaction — which the swap builder was then
+   * asked to make legacy, and Jupiter refused ("asLegacyTransaction cannot be used with quoteResponse.
+   * transactionVersion"). Every pre-IPO buy fell to the venue vault, which holds no T-Tokens, and failed. A direct
+   * Meteora route fits a legacy transaction (842 bytes, measured), so it is pinned the same way the Whirlpool one is.
+   */
   const attempts = pinnedDex
-    ? [`&dexes=${encodeURIComponent(pinnedDex)}&onlyDirectRoutes=true&asLegacyTransaction=true`, '']
+    ? [
+        ...[...new Set([pinnedDex, 'Meteora DLMM'])].map(
+          (dex) => `&dexes=${encodeURIComponent(dex)}&onlyDirectRoutes=true&asLegacyTransaction=true`,
+        ),
+        '',
+      ]
     : [''];
 
   let lastError: Error | null = null;
@@ -287,7 +301,12 @@ async function routeThroughJupiter(params: {
            * accounts were cloned, and the trade. On the hosted fork a buy failed with "loads an address table account
            * that doesn't exist" half an hour after boot. A direct single-pool route fits a legacy transaction easily.
            */
-          ...(CLUSTER_KEY === 'solana-mainnet' ? {} : { asLegacyTransaction: true }),
+          /*
+           * As the quote was made: a quote asked for as legacy is built as legacy, and an unpinned one — `transaction
+           * Version: 0` — is built as the v0 it was quoted as (2026-09-23). Asking for legacy against a v0 quote is a
+           * 400 from the builder, not a legacy transaction.
+           */
+          ...(CLUSTER_KEY !== 'solana-mainnet' && quoteResponse.transactionVersion !== 0 ? { asLegacyTransaction: true } : {}),
           ...(destinationTokenAccount
             ? { destinationTokenAccount: destinationTokenAccount.toBase58() }
             : {}),

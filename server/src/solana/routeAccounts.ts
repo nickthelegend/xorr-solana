@@ -37,7 +37,15 @@ type Pair = { inputMint: string; outputMint: string; amount: bigint };
  * The route the executor will actually ask for on a fork: the pinned venue, direct, legacy (`venues/jupiter.ts`), and
  * Jupiter's unconstrained route beside it, so both are cloned.
  */
-const ROUTE_SHAPES = ['&dexes=Whirlpool&onlyDirectRoutes=true&asLegacyTransaction=true', ''];
+/*
+ * The same shapes the executor quotes, in the same order (`venues/jupiter.ts`): a direct Whirlpool route, then a direct
+ * Meteora DLMM route, both legacy, then whatever Jupiter picks. What the fork clones is what the executor will ask for.
+ */
+const ROUTE_SHAPES = [
+  '&dexes=Whirlpool&onlyDirectRoutes=true&asLegacyTransaction=true',
+  '&dexes=Meteora%20DLMM&onlyDirectRoutes=true&asLegacyTransaction=true',
+  '',
+];
 
 /** Between calls to Jupiter's public tier, which answers a burst with 400s and 429s. */
 const SPACING_MS = Number(process.env.FORK_ROUTE_SPACING_MS ?? 900);

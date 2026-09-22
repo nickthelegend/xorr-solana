@@ -16,6 +16,7 @@
  * the card's own header: this page is how people reach it.
  */
 import React, { useState } from 'react';
+import { isSolana } from '@/chain';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -251,7 +252,8 @@ export default function AgentDetail() {
                   onPress={() => router.push(`/strategy/${s.id}`)}
                   title={s.label}
                   titleFigure={labelFigure(s.kind)}
-                  secondary={`${s.symbol} · ${spendPhrase(money(s.dailyAllocationUsd), s.cadence)}`}
+                  // An exit spends nothing: "$0.00 a day" read as a strategy with no budget (2026-09-23), as on Strategies.
+                  secondary={`${s.symbol} · ${s.kind === 'exit-rules' ? (isSolana ? 'checked every 30 seconds' : 'checked daily') : spendPhrase(money(s.dailyAllocationUsd), s.cadence)}`}
                   value={
                     <Text variant="secondarySm" color={s.state === 'live' ? colors.ink : colors.ink40}>
                       {STATE_LABEL[s.state] ?? s.state}

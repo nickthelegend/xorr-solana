@@ -11,9 +11,10 @@
  * 4. Real mark from live Jupiter quote / venues/stocks
  * 5. spendAsDelegate() (SPL Transfer signed by delegate) -> venue ATA, followed by Jupiter swap fill.
  */
+import { plainFailure } from '../solana/failure.js';
 import { PublicKey } from '@solana/web3.js';
 import { readDelegation, spendAsDelegate, returnToOwner, usdToBaseUnits, baseUnitsToUsd } from '../solana/delegation.js';
-import { markBroadcast } from '../http/request-id.js';
+import { log, markBroadcast } from '../http/request-id.js';
 import { delegateKeypair, payerKeypair, venueVaultKeypair } from '../solana/keys.js';
 import { connection } from '../solana/connection.js';
 import { getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
@@ -299,7 +300,8 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
         vaultKeypair: vault,
       });
     } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
+      log.error('[place] fill failed:', e instanceof Error ? e.message : e);
+      const why = plainFailure(e);
       const refund = await returnToOwner({
         owner: intent.ownerPubkey,
         mint: DEFAULT_MINTS.USDC,
@@ -406,7 +408,8 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     try {
       swapRes = await swap({ quoteResponse: quoteRes, userPublicKey: intent.ownerPubkey, vaultKeypair: vault });
     } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
+      log.error('[place] fill failed:', e instanceof Error ? e.message : e);
+      const why = plainFailure(e);
       const back = await returnToOwner({ owner: intent.ownerPubkey, mint: inMint, amountUnits: inUnits, fromKeypair: vault }).then(
         () => 'Your shares were returned.',
         (err: unknown) => `Returning your shares ALSO failed (${err instanceof Error ? err.message : String(err)}); they are held in the venue vault.`,
