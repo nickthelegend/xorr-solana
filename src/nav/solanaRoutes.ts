@@ -88,6 +88,13 @@ export function solanaRedirect(path: string): string | null {
   // An xStock's asset page is its ticket; other assets (SOL, BTC) keep their chart.
   const asset = path.match(/^\/(?:asset|chart)\/([A-Z0-9]+x)(?:[/?]|$)/);
   if (asset) return `/xstock/${asset[1]}`;
+  /*
+   * A pre-IPO token's asset page is its ticket too (2026-09-23). `/asset/T-OpenAI` fell through to the Base asset
+   * screen, which showed the holding and then "Not tradable here" — for a token the executor buys, sells and closes.
+   * Only the asset page: a T-Token's chart stays its chart.
+   */
+  const preIpoAsset = path.match(/^\/asset\/(T-[A-Za-z0-9]+)(?:[/?]|$)/);
+  if (preIpoAsset) return `/xstock/${preIpoAsset[1]}`;
   if (hiddenOn(path, true)) return `/not-here?from=${encodeURIComponent(path)}`;
   return null;
 }

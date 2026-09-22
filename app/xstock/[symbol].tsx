@@ -19,6 +19,13 @@
  * Selling is here since 2026-09-19, signed by the owner: the executor builds one transaction — the owner's shares into
  * the venue vault, the vault's USDC to the owner at Jupiter's live quote — and co-signs its leg; the owner signs theirs
  * in Privy and it is broadcast; the executor reads it back from the chain before booking it.
+ *
+ * Pre-IPO tokens trade here too since 2026-09-23. The executor already bought, sold, closed and swept Tessera's
+ * T-Tokens through the same spend path, and nothing on screen could open one: `/pre-ipo` was a catalogue of rows that
+ * went nowhere. They get this ticket rather than a second one because the money path is identical; what differs is
+ * what the person needs to read first. An xStock has an attestation, issuer gates and a dividend to show. A T-Token has
+ * none of those — it has a pool price, the issuer's own mark, the gap between them and a fee on the mint — so that is
+ * what its ticket shows in their place.
  */
 import React, { useMemo, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
@@ -65,6 +72,8 @@ import { fetchBackingDetail } from '@/data/backingDetail';
 import { fetchReservesHistory } from '@/data/reservesHistory';
 import { fetchYield } from '@/data/dividendYield';
 import { fetchEligibility, mayBuy } from '@/data/eligibility';
+import { preIpo, type PreIpoRow } from '@/data/preIpo';
+import { percent } from '@/format';
 
 const SIDES = [
   { value: 'buy', label: 'Buy' },
@@ -74,6 +83,40 @@ const SIDES = [
 const QUICK = ['$100', '$250', '$500'] as const;
 
 const FORMAT = { money, quantity, price: fmtPrice };
+
+/**
+ * What somebody needs before buying a private company's token, in place of the xStock's backing panels.
+ *
+ * Both prices and the gap, because neither is "the" price: the pool is what a buy fills at, the mark is what the
+ * issuer says the company is worth, and nothing independent sits between them. Then the fee, which the mint charges on
+ * every transfer — this buy and the sale after it — whatever the route.
+ */
+function PreIpoFacts({ row }: { row: PreIpoRow }) {
+  const gap =
+    row.spreadPct === null
+      ? null
+      : `The pool is ${percent(Math.abs(row.spreadPct), { digits: 1, explicitSign: false })} ${row.spreadPct >= 0 ? 'above' : 'below'} the issuer's mark.`;
+  return (
+    <View style={{ marginTop: space.s8, gap: space.s4 }} testID="preipo-facts">
+      <Text variant="footnote" color={colors.sheet.muted}>
+        {`${row.name} · ${row.sector} · private, tokenised by Tessera`}
+      </Text>
+      <Text variant="footnote" color={colors.sheet.ink} figure="market">
+        {row.markUsd === null
+          ? `Pool ${row.poolUsd === null ? 'has no route' : fmtPrice(row.poolUsd)} · Tessera publishes no mark right now`
+          : `Pool ${row.poolUsd === null ? 'has no route' : fmtPrice(row.poolUsd)} · Tessera mark ${fmtPrice(row.markUsd)}${row.markStale ? ' (last known)' : ''}`}
+      </Text>
+      {gap ? (
+        <Text variant="footnote" color={Math.abs(row.spreadPct ?? 0) >= 10 ? colors.warn : colors.sheet.muted}>
+          {gap}
+        </Text>
+      ) : null}
+      <Text variant="footnote" color={colors.sheet.muted}>
+        {`The mint charges ${row.transferFeeBps} bps on every transfer, in and out. No route avoids it.`}
+      </Text>
+    </View>
+  );
+}
 
 export default function XStockTicket() {
   const { symbol = '' } = useLocalSearchParams<{ symbol: string }>();
@@ -111,20 +154,37 @@ export default function XStockTicket() {
    * build does not list. Undefined while the catalogue is still answering, so a listed symbol waits only for one
    * cached read before its own reads start.
    */
-  const listed = catalog.data ? catalog.data.rows.some((r) => r.symbol === symbol) : undefined;
+  const isXStock = catalog.data ? catalog.data.rows.some((r) => r.symbol === symbol) : undefined;
+  /*
+   * A T-Token is named `T-<Company>` by its issuer; only such a symbol waits on the pre-IPO catalogue, so an xStock
+   * ticket asks nothing extra. Nothing is read for either class until its own catalogue has said the symbol exists.
+   */
+  const maybePreIpo = symbol.startsWith('T-');
+  const preIpoCatalog = useAsync(() => (maybePreIpo ? preIpo.list() : Promise.resolve(null)), [maybePreIpo]);
+  const preIpoRow: PreIpoRow | undefined = preIpoCatalog.data?.rows.find((r) => r.symbol === symbol);
+  const isPreIpo = !!preIpoRow;
+  const listed: boolean | undefined = isPreIpo
+    ? true
+    : maybePreIpo
+      ? preIpoCatalog.data || preIpoCatalog.error
+        ? false
+        : undefined
+      : isXStock;
+  /** The issuer-specific panels — attestation, reserves, dividends, holder gates — exist for xStocks only. */
+  const hasBacking = listed === true && !isPreIpo;
   const canSettle = !!tradable.data?.some((t) => t.symbol === symbol);
   const [buying, setBuying] = useState(false);
 
   // What backs the token, and whether the issuer's own gates let this wallet hold it — each read from its route, each
   // saying so in words when it could not be read.
   const { address } = useAuth();
-  const backing = useAsync(() => (listed ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol, listed]);
-  const detail = useAsync(() => (listed ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol, listed]);
-  const history = useAsync(() => (listed ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol, listed]);
-  const income = useAsync(() => (listed ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol, listed]);
+  const backing = useAsync(() => (hasBacking ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol, hasBacking]);
+  const detail = useAsync(() => (hasBacking ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol, hasBacking]);
+  const history = useAsync(() => (hasBacking ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol, hasBacking]);
+  const income = useAsync(() => (hasBacking ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol, hasBacking]);
   const eligibility = useAsync(
-    () => (listed && address ? fetchEligibility(symbol, address) : Promise.resolve(undefined)),
-    [symbol, address, listed],
+    () => (hasBacking && address ? fetchEligibility(symbol, address) : Promise.resolve(undefined)),
+    [symbol, address, hasBacking],
   );
   const [showBacking, setShowBacking] = useState(false);
 
@@ -192,7 +252,7 @@ export default function XStockTicket() {
    * not-found, and it says so once the catalogue has answered. A LISTED xStock whose mint this cluster lacks keeps its
    * ticket and its own "cannot settle here" line; the two are different facts.
    */
-  if (catalog.data && !catalog.data.rows.some((r) => r.symbol === symbol)) {
+  if (listed === false) {
     return (
       <Screen light gutter="sheet">
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -203,9 +263,13 @@ export default function XStockTicket() {
         </View>
         <Fill style={{ justifyContent: 'center', gap: space.s12 }}>
           <Text variant="body" color={colors.sheet.muted} align="center">
-            {`There is no xStock called ${symbol} here.`}
+            {maybePreIpo ? `There is no pre-IPO token called ${symbol} here.` : `There is no xStock called ${symbol} here.`}
           </Text>
-          <Button label="See the xStocks" onPress={() => router.replace('/xstocks')} testID="xstock-not-listed" />
+          <Button
+            label={maybePreIpo ? 'See the pre-IPO tokens' : 'See the xStocks'}
+            onPress={() => router.replace(maybePreIpo ? '/pre-ipo' : '/xstocks')}
+            testID="xstock-not-listed"
+          />
         </Fill>
       </Screen>
     );
@@ -223,16 +287,22 @@ export default function XStockTicket() {
         <CloseButton onPress={() => goBack()} light />
       </View>
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8, marginTop: space.s8, flexWrap: 'wrap' }}>
-        <BackingBadge backing={backing.data ?? undefined} testID="xstock-backing" />
-        <Pill
-          label={showBacking ? 'Hide backing' : 'What backs it'}
-          light
-          onPress={() => setShowBacking((v) => !v)}
-          testID="xstock-backing-toggle"
-        />
-      </View>
-      {address ? (
+      {maybePreIpo ? (
+        preIpoRow ? (
+          <PreIpoFacts row={preIpoRow} />
+        ) : null
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8, marginTop: space.s8, flexWrap: 'wrap' }}>
+          <BackingBadge backing={backing.data ?? undefined} testID="xstock-backing" />
+          <Pill
+            label={showBacking ? 'Hide backing' : 'What backs it'}
+            light
+            onPress={() => setShowBacking((v) => !v)}
+            testID="xstock-backing-toggle"
+          />
+        </View>
+      )}
+      {address && !maybePreIpo ? (
         <EligibilityNotice eligibility={eligibility.data ?? undefined} style={{ marginTop: space.s8 }} testID="xstock-eligibility" />
       ) : null}
 
