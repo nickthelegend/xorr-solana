@@ -353,6 +353,11 @@ export async function swap(params: {
   conn?: Connection;
   feePayer?: Keypair;
   vaultKeypair?: Keypair;
+  /**
+   * Deliver the output here instead of the user's associated account: an agent's own USDC wallet, which a sale made
+   * for that agent pays back into (2026-09-23). It exists already and belongs to the user, so nothing is created.
+   */
+  destination?: PublicKey | string;
   /** Refuse to settle through the vault if the route cannot execute. */
   requireRoute?: boolean;
 }): Promise<JupiterSwapResult> {
@@ -364,7 +369,9 @@ export async function swap(params: {
     feePayer = payerKeypair(),
     vaultKeypair = venueVaultKeypair(),
     requireRoute = false,
+    destination,
   } = params;
+  const destinationPk = destination ? (typeof destination === 'string' ? new PublicKey(destination) : destination) : null;
 
   const userPk = typeof userPublicKey === 'string' ? new PublicKey(userPublicKey) : userPublicKey;
   const inputMintPk = new PublicKey(quoteResponse.inputMint);
@@ -388,7 +395,7 @@ export async function swap(params: {
    * output straight to the user's own token account.
    */
   const routeSigner = userSigner ?? vaultKeypair;
-  const userOutAtaForRoute = ataFor(userPk, outputMintPk, outputProg);
+  const userOutAtaForRoute = destinationPk ?? ataFor(userPk, outputMintPk, outputProg);
   try {
     /*
      * The account the route delivers into has to exist first (2026-09-19). Jupiter sends the output straight to the
@@ -396,7 +403,7 @@ export async function swap(params: {
      * to the vault — every new user's first xStock was a vault fill, and the proof only passed because its wallet was
      * pre-funded with NVDAx. Created idempotently by the executor's fee payer, owned by the user.
      */
-    if (!(await conn.getAccountInfo(userOutAtaForRoute, 'confirmed'))) {
+    if (!destinationPk && !(await conn.getAccountInfo(userOutAtaForRoute, 'confirmed'))) {
       await sendAndConfirmTransaction(
         conn,
         new Transaction().add(
@@ -453,21 +460,24 @@ export async function swap(params: {
 
   const userInAta = ataFor(userPk, inputMintPk, inputProg);
   const vaultInAta = ataFor(vaultKeypair.publicKey, inputMintPk, inputProg);
-  const userOutAta = ataFor(userPk, outputMintPk, outputProg);
+  const userOutAta = destinationPk ?? ataFor(userPk, outputMintPk, outputProg);
   const vaultOutAta = ataFor(vaultKeypair.publicKey, outputMintPk, outputProg);
 
   const tx = new Transaction();
 
   // Ensure vault output ATA and user output ATA exist
-  tx.add(
-    createAssociatedTokenAccountIdempotentInstruction(
-      feePayer.publicKey,
-      userOutAta,
-      userPk,
-      outputMintPk,
-      outputProg,
-    ),
-  );
+  // An agent's wallet already exists and is not an associated account, so it is not created here.
+  if (!destinationPk) {
+    tx.add(
+      createAssociatedTokenAccountIdempotentInstruction(
+        feePayer.publicKey,
+        userOutAta,
+        userPk,
+        outputMintPk,
+        outputProg,
+      ),
+    );
+  }
   tx.add(
     createAssociatedTokenAccountIdempotentInstruction(
       feePayer.publicKey,

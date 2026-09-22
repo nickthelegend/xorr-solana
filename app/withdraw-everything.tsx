@@ -42,6 +42,7 @@ import {
 import { useSignedOut } from '@/auth/useSignedOut';
 import { shortAddress } from '@/format';
 import { repos } from '@/data';
+import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import { withdrawals, type AavePosition, type SellPreview } from '@/data/withdrawals';
@@ -102,6 +103,9 @@ export default function WithdrawEverything() {
    * with something to sell needs the permission — and a preview not read yet might have something.
    */
   const permission = useAsync(() => repos.wallet.delegation(), []);
+  // Every agent's own wallet, which "everything" includes (2026-09-23).
+  const agentFunds = useAsync(() => (isSolana ? system.agentWallets() : Promise.resolve([])), []);
+  const agentHeld = (agentFunds.data ?? []).filter((w) => w.exists && w.usdc > 0);
   /*
    * The cached permission ONLY when it belongs to the address in use.
    *
@@ -246,11 +250,25 @@ export default function WithdrawEverything() {
               </Eyebrow>
               <SheetCard borderRadius={radius.note} padding={space.s16} style={{ marginTop: space.s10, gap: space.s12 }}>
                 <PlanLine n={1} title="Sell every position" detail={sells} figure={sellsFigure} />
-                {isSolana ? null : (
+                {isSolana ? (
+                  <PlanLine
+                    n={2}
+                    title="Bring your agents’ USDC home"
+                    detail={
+                      agentFunds.error
+                        ? 'Could not read your agents’ wallets.'
+                        : agentFunds.data === undefined
+                          ? 'Reading your agents’ wallets…'
+                          : agentHeld.length === 0
+                            ? 'No agent holds any USDC.'
+                            : `${agentHeld.map((w) => `${money(w.usdc)} from ${w.name}`).join(', ')}. You sign each.`
+                    }
+                  />
+                ) : (
                   <PlanLine n={2} title="Take your USDC out of savings" detail={exits} figure={exitsFigure} />
                 )}
                 <PlanLine
-                  n={isSolana ? 2 : 3}
+                  n={3}
                   title="Send your USDC"
                   detail={`All of it, to ${destination ? destination.label : 'the address you choose'}. You sign it.`}
                 />

@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`an agent's wallet address > fits the 32-character seed limit and is stable for an agent 1`] = `"FBedr8Y4XAcLgaKHztJg98BkXhrPm7hekVrAmZSJCW88"`;

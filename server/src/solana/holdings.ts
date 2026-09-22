@@ -26,6 +26,7 @@ import { ataFor, readMintScale, readSolanaBalances, toUiAmount } from './balance
 import { xStockPriceUsd } from '../venues/xstocks.js';
 import { tesseraPriceUsd } from '../venues/tessera.js';
 import { tradableTokens } from '../venues/tradable-token.js';
+import { DEFAULT_MINTS } from './clusters.js';
 
 export type SolanaHolding = {
   symbol: string;
@@ -44,6 +45,11 @@ export type SolanaHoldings = {
   sol: number;
   /** Every tradable token held, both classes. */
   tokens: SolanaHolding[];
+  /**
+   * USDC held in the owner's agent wallets (`agents/wallet.ts`): the owner's money, in accounts other than the main one,
+   * found on the chain as every other USDC account the owner owns (2026-09-23).
+   */
+  agentsUsdc: number;
   /** USDC plus every priced holding. SOL is the fee balance and is not counted as money here. */
   totalUsd: number;
   /** Something is held that nothing could price, so `totalUsd` leaves it out. */
@@ -79,11 +85,26 @@ export async function solanaHoldings(owner: string): Promise<SolanaHoldings> {
     });
   }
 
+  const agentsUsdc = await otherUsdcAccounts(owner);
   return {
     usdc: base.usdc.amount,
     sol: base.sol.amount,
     tokens: held,
-    totalUsd: base.usdc.amount + held.reduce((sum, h) => sum + (h.usd ?? 0), 0),
+    agentsUsdc,
+    totalUsd: base.usdc.amount + agentsUsdc + held.reduce((sum, h) => sum + (h.usd ?? 0), 0),
     partial: held.some((h) => h.usd === null),
   };
+}
+
+/** USDC in every account the owner owns other than the associated one — the agent wallets — read from the chain. */
+async function otherUsdcAccounts(owner: string): Promise<number> {
+  const main = ataFor(owner, new PublicKey(DEFAULT_MINTS.USDC)).toBase58();
+  const res = await connection.getParsedTokenAccountsByOwner(new PublicKey(owner), { mint: new PublicKey(DEFAULT_MINTS.USDC) }, 'confirmed');
+  let total = 0;
+  for (const { pubkey, account } of res.value) {
+    if (pubkey.toBase58() === main) continue;
+    const amount = (account.data as { parsed?: { info?: { tokenAmount?: { uiAmount?: number | null } } } }).parsed?.info?.tokenAmount?.uiAmount;
+    total += typeof amount === 'number' ? amount : 0;
+  }
+  return total;
 }

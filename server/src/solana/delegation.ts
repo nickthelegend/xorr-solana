@@ -59,11 +59,13 @@ export async function readDelegation(
   owner: PublicKey | string,
   mint: PublicKey | string = DEFAULT_MINTS.USDC,
   conn: Connection = defaultConnection,
+  /** An account of the owner's other than the associated one — an agent's own wallet (`agents/wallet.ts`). */
+  account?: PublicKey | string,
 ): Promise<DelegationState> {
   const ownerPk = typeof owner === 'string' ? new PublicKey(owner) : owner;
   const mintPk = typeof mint === 'string' ? new PublicKey(mint) : mint;
   const prog = tokenProgramForMint(mintPk);
-  const ownerAta = ataFor(ownerPk, mintPk, prog);
+  const ownerAta = account ? new PublicKey(account) : ataFor(ownerPk, mintPk, prog);
 
   try {
     const acc = await getAccount(conn, ownerAta, 'confirmed', prog);
@@ -210,6 +212,8 @@ export async function spendAsDelegate(params: {
   conn?: Connection;
   feePayer?: Keypair;
   delegate?: Keypair;
+  /** Spend from this account of the owner's instead of the associated one: an agent's own wallet. */
+  sourceAccount?: PublicKey | string;
 }): Promise<{ signature: string; slot: number; amount: bigint }> {
   const {
     owner,
@@ -219,16 +223,17 @@ export async function spendAsDelegate(params: {
     conn = defaultConnection,
     feePayer = payerKeypair(),
     delegate = delegateKeypair(),
+    sourceAccount,
   } = params;
 
   const ownerPk = typeof owner === 'string' ? new PublicKey(owner) : owner;
   const destPk = typeof destinationAta === 'string' ? new PublicKey(destinationAta) : destinationAta;
   const mintPk = typeof mint === 'string' ? new PublicKey(mint) : mint;
   const prog = tokenProgramForMint(mintPk);
-  const ownerAta = ataFor(ownerPk, mintPk, prog);
+  const ownerAta = sourceAccount ? new PublicKey(sourceAccount) : ataFor(ownerPk, mintPk, prog);
 
   // Read current on-chain delegation state
-  const state = await readDelegation(ownerPk, mintPk, conn);
+  const state = await readDelegation(ownerPk, mintPk, conn, sourceAccount);
   if (state.isRevoked) {
     throw new Error('PolicyRevoked: Trading permission revoked on-chain');
   }
@@ -286,6 +291,8 @@ export async function returnToOwner(params: {
   fromKeypair: Keypair;
   conn?: Connection;
   feePayer?: Keypair;
+  /** Pay into this account of the owner's instead of the associated one: an agent's own wallet, which already exists. */
+  destination?: PublicKey | string;
 }): Promise<{ signature: string; slot: number; amount: bigint }> {
   const {
     owner,
@@ -294,25 +301,28 @@ export async function returnToOwner(params: {
     fromKeypair,
     conn = defaultConnection,
     feePayer = payerKeypair(),
+    destination,
   } = params;
 
   const ownerPk = typeof owner === 'string' ? new PublicKey(owner) : owner;
   const mintPk = typeof mint === 'string' ? new PublicKey(mint) : mint;
   const prog = tokenProgramForMint(mintPk);
-  const ownerAta = ataFor(ownerPk, mintPk, prog);
+  const ownerAta = destination ? new PublicKey(destination) : ataFor(ownerPk, mintPk, prog);
   const sourceAta = ataFor(fromKeypair.publicKey, mintPk, prog);
 
   const tx = new Transaction();
-  // Ensure recipient ATA exists
-  tx.add(
-    createAssociatedTokenAccountIdempotentInstruction(
-      feePayer.publicKey,
-      ownerAta,
-      ownerPk,
-      mintPk,
-      prog,
-    ),
-  );
+  // Ensure recipient ATA exists — an agent's wallet is not an associated account, and exists already.
+  if (!destination) {
+    tx.add(
+      createAssociatedTokenAccountIdempotentInstruction(
+        feePayer.publicKey,
+        ownerAta,
+        ownerPk,
+        mintPk,
+        prog,
+      ),
+    );
+  }
   tx.add(
     createTransferCheckedInstruction(
       sourceAta,

@@ -722,7 +722,49 @@ function refusal(e: unknown): Blocked | null {
     : null;
 }
 
+/** What an agent may do, as the executor enforces it (`server/src/agents/policy.ts`). Every field only narrows. */
+export type AgentPolicy = {
+  maxUsdPerTrade?: number;
+  maxUsdPerDay?: number;
+  symbols?: string[];
+  allowOffHours?: boolean;
+  maxLossPct?: number;
+};
+
+/** What an agent did when asked to look now: a fill, or why it took nothing, symbol by symbol. */
+export type AgentLookOutcome =
+  | { executed: true; symbol: string; usd: number; units: number; price: number; venue: string; signature: string; explorer: string; reason: string }
+  | { executed: false; reason: string; detail: string; looks: { symbol: string; verdict: string; detail: string }[] };
+
+/** An agent's own wallet: a USDC account the owner owns, read from the chain (`server/src/agents/wallet.ts`). */
+export type AgentWalletView = {
+  agentId: string;
+  name: string;
+  address: string;
+  explorer: string;
+  exists: boolean;
+  usdc: number;
+  /** Whether the bot's delegate may spend it right now. */
+  approved: boolean;
+  /** Whether the agent trades from it — once it has been funded through xorr. */
+  inUse: boolean;
+  delegate: string;
+  mint: string;
+  policy: AgentPolicy;
+  delta?: number;
+  signature?: string;
+  explorerTx?: string;
+};
+
 export const system = {
+  /* An agent's own wallet (2026-09-23). */
+  agentWallet: (id: string) => api.get<AgentWalletView>(`/agents/${encodeURIComponent(id)}/wallet`),
+  agentWallets: () => api.get<AgentWalletView[]>('/agents/wallets'),
+  /** Ask one hired agent to look now: the sweep's own gates, for that agent alone. */
+  agentLook: (id: string) => api.post<AgentLookOutcome>(`/agents/${encodeURIComponent(id)}/look`, {}),
+  agentWalletRecord: (id: string, signature: string) =>
+    api.post<AgentWalletView>(`/agents/${encodeURIComponent(id)}/wallet/record`, { signature }),
+
   /* trust */
   verifyReport: (owner?: string) =>
     api.get<VerifyReport>(`/verify${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`),

@@ -18,6 +18,8 @@
  * That is the difference between an agent that trades rarely and one that trades confidently on
  * numbers nobody produced.
  */
+import { allowsSymbol, policyOf, policySize, policyStop } from '../agents/policy.js';
+import { readAgentWallet } from '../agents/wallet.js';
 import { ordinal } from './ordinal.js';
 import { randomUUID } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
@@ -392,6 +394,7 @@ export type SymbolLook = {
     | 'no_band'
     | 'between_bands'
     | 'paced'
+    | 'policy'
     | 'candidate';
   /** One sentence a person can read, naming the number that decided it. */
   detail: string;
@@ -407,6 +410,8 @@ export async function evaluateBestSetup(
   exclude?: ReadonlySet<string>,
   /** Filled with one entry per symbol looked at, so the caller can say what the agent saw. */
   looks?: SymbolLook[],
+  /** `persona:symbol` pairs the owner's policy for that agent does not allow, with the sentence that says so. */
+  forbidden?: ReadonlyMap<string, string>,
 ): Promise<CandidateSetup | null> {
   const candidates: CandidateSetup[] = [];
   // Only what can settle here: a symbol with a price and no mint on this cluster is not a setup, it is a refund.
@@ -570,7 +575,11 @@ export async function evaluateBestSetup(
   }
 
   const eligible = candidates.filter(
-    (c) => (!personas || personas.has(c.persona)) && !exclude?.has(`${c.persona}:${c.symbol}`) && !exclude?.has(`*:${c.symbol}`),
+    (c) =>
+      (!personas || personas.has(c.persona)) &&
+      !exclude?.has(`${c.persona}:${c.symbol}`) &&
+      !exclude?.has(`*:${c.symbol}`) &&
+      !forbidden?.has(`${c.persona}:${c.symbol}`),
   );
   /*
    * A symbol that WAS a setup and was held back by pacing says so, replacing its candidate line: "it qualified and I am
@@ -596,6 +605,15 @@ export async function evaluateBestSetup(
           ? `${c.symbol} reads as a setup, but this wallet already holds a quarter of its grant in it.`
           : `${c.symbol} reads as a setup, but ${c.personaName} already bought it today, and it takes one entry per stock a day.`,
       };
+      if (at >= 0) looks[at] = line;
+      else looks.push(line);
+    }
+    // A setup the owner's policy rules out says so in the policy's words — not as pacing, and not as no setup.
+    for (const c of candidates) {
+      const why = forbidden?.get(`${c.persona}:${c.symbol}`);
+      if (!why || eligible.includes(c)) continue;
+      const at = looks.findIndex((l) => l.symbol === c.symbol);
+      const line: SymbolLook = { symbol: c.symbol, verdict: 'policy', detail: why };
       if (at >= 0) looks[at] = line;
       else looks.push(line);
     }
@@ -652,6 +670,8 @@ export async function runAutonomousCycle(
      * more importantly should not get a DIFFERENT setup than the one it showed somebody.
      */
     setup?: CandidateSetup;
+    /** Only this persona looks — the owner asked one agent to look now (`lookNow`). */
+    only?: string;
   } = {},
 ): Promise<AutonomousTradeResult> {
   // 1. The wallet, and whether its owner has stopped everything.
@@ -677,11 +697,21 @@ export async function runAutonomousCycle(
    * had hired no one, while the app said "Not hired" and "No agent is trading" — the agent's name on a trade its owner
    * never asked for. A persona trades only once hired, and only its own kind of setup.
    */
-  const hiredRows = await query<{ persona_id: string }>(
-    `SELECT persona_id FROM agents WHERE wallet_id = $1 AND hired AND fired_at IS NULL`,
+  const hiredRows = await query<{
+    id: string;
+    persona_id: string;
+    name: string;
+    risk_limits: Record<string, unknown> | null;
+    wallet_account: string | null;
+  }>(
+    `SELECT id, persona_id, name, risk_limits, wallet_account FROM agents WHERE wallet_id = $1 AND hired AND fired_at IS NULL`,
     [walletId],
   );
-  const hired = new Set(hiredRows.map((r) => r.persona_id));
+  const allHired = new Set(hiredRows.map((r) => r.persona_id));
+  if (options.only && !allHired.has(options.only)) {
+    return { executed: false, reason: 'agent_not_hired', detail: 'That agent is not hired on this wallet.' };
+  }
+  const hired = options.only ? new Set([options.only]) : allHired;
   if (hired.size === 0) {
     return { executed: false, reason: 'no_agent_hired', detail: 'No agent is hired on this wallet.' };
   }
@@ -728,7 +758,20 @@ export async function runAutonomousCycle(
   // 4. The setup the caller brought, or the best one a hired agent would take — paced (D3, 2026-09-19).
   const exclude = await pacingExclusions(walletId, policy);
   const looks: SymbolLook[] = [];
-  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired, exclude, looks));
+  /*
+   * Each hired agent's own policy (`agents/policy.ts`, 2026-09-23): a stock outside its allowlist is not a setup for it.
+   * Only the four personas run this sweep; an agent someone made runs its own strategies, held by `agentLimitRefusal`.
+   */
+  const rowFor = new Map(hiredRows.map((r) => [r.persona_id, r] as const));
+  const forbidden = new Map<string, string>();
+  for (const r of hiredRows) {
+    const p = policyOf(r.risk_limits);
+    if (!p.symbols?.length) continue;
+    for (const sym of Object.keys(XSTOCKS)) {
+      if (!allowsSymbol(p, sym)) forbidden.set(`${r.persona_id}:${sym}`, `${sym} reads as a setup, but ${r.name}'s policy allows only ${p.symbols.join(', ')}.`);
+    }
+  }
+  const bestSetup = options.setup ?? (await evaluateBestSetup(settings, hired, exclude, looks, forbidden));
   if (!bestSetup) {
     return {
       executed: false,
@@ -751,7 +794,7 @@ export async function runAutonomousCycle(
     return { executed: false, reason: verdict.reason, detail: verdict.detail };
   }
 
-  const sizeUsd = Math.min(
+  let sizeUsd = Math.min(
     options.fixedUsd ?? settings.maxTradeUsd,
     Math.max(settings.minTradeUsd, Math.floor(verdict.remainingUsd * settings.allowanceShare)),
   );
@@ -761,6 +804,61 @@ export async function runAutonomousCycle(
       reason: 'insufficient_budget',
       detail: `What is left of today's allowance is under the $${settings.minTradeUsd} minimum trade size.`,
     };
+  }
+
+  /*
+   * 5b. The agent's own policy and its own wallet (2026-09-23).
+   *
+   * The policy narrows: a per-trade and a per-day limit, entries only while Nasdaq is open if the owner said so. Then
+   * the money: an agent with a wallet spends from it and nothing else, so it can place at most what it holds — the
+   * chain enforces that, this only says so first, in words, instead of letting the transfer fail.
+   */
+  const agentRow = rowFor.get(bestSetup.persona);
+  const agentPolicy = policyOf(agentRow?.risk_limits);
+  const agentName = agentRow?.name ?? bestSetup.personaName;
+  if (agentPolicy.allowOffHours === false && bestSetup.offHoursGuard.session !== 'regular') {
+    return {
+      executed: false,
+      reason: 'agent_policy',
+      detail: `${bestSetup.symbol} reads as a setup, but ${agentName}'s policy enters only while Nasdaq is open.`,
+      looks,
+    };
+  }
+  if (agentPolicy.maxUsdPerTrade || agentPolicy.maxUsdPerDay) {
+    const spent = await one<{ usd: string | null }>(
+      `SELECT COALESCE(SUM((payload->>'usd')::numeric), 0) AS usd FROM proposals
+        WHERE wallet_id = $1 AND agent = $2 AND decision = $3
+          AND decided_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`,
+      [walletId, bestSetup.personaName, AGENT_DECISION],
+    ).catch(() => null);
+    const sized = policySize(agentPolicy, agentName, sizeUsd, Number(spent?.usd ?? 0));
+    if ('refused' in sized) return { executed: false, reason: 'agent_policy', detail: sized.refused, looks };
+    sizeUsd = sized.usd;
+  }
+  let agentWallet: { address: string; name: string } | undefined;
+  if (agentRow?.wallet_account) {
+    const held = await readAgentWallet(wallet.address, agentRow.id).catch(() => null);
+    if (!held || !held.exists || !held.approved) {
+      return {
+        executed: false,
+        reason: 'agent_wallet_unapproved',
+        detail: `${agentName} trades from its own wallet, and the bot is not approved on it right now — fund it again or resume in Safety.`,
+        looks,
+      };
+    }
+    sizeUsd = Math.min(sizeUsd, Math.floor(held.usdc * 100) / 100);
+    if (sizeUsd < settings.minTradeUsd) {
+      return {
+        executed: false,
+        reason: 'agent_wallet_empty',
+        detail: `${agentName}'s wallet holds $${held.usdc.toFixed(2)}, under the $${settings.minTradeUsd} smallest entry. Fund it to let it trade.`,
+        looks,
+      };
+    }
+    agentWallet = { address: held.address, name: agentName };
+  }
+  if (sizeUsd < settings.minTradeUsd) {
+    return { executed: false, reason: 'agent_policy', detail: `${agentName}'s policy leaves less than the $${settings.minTradeUsd} smallest entry.`, looks };
   }
 
   // 6. The sentence the user reads, in the persona's voice where the model is reachable.
@@ -783,6 +881,7 @@ export async function runAutonomousCycle(
     usd: sizeUsd,
     side: 'buy',
     slippageBps: bestSetup.suggestedSlippageBps,
+    agentWallet,
   });
   if (!outcome.placed) {
     return { executed: false, reason: outcome.reason, detail: outcome.detail };
@@ -795,9 +894,11 @@ export async function runAutonomousCycle(
     const exits = await armExits(wallet, {
       symbol: bestSetup.symbol,
       entryPrice: receipt.fillPrice,
-      stopPrice: bestSetup.stopPrice,
+      // The tighter of the agent's own stop and its policy's maximum loss, measured from the real fill.
+      stopPrice: policyStop(agentPolicy, receipt.fillPrice, bestSetup.stopPrice),
       targetPrice: bestSetup.targetPrice,
       armedBy: bestSetup.personaName,
+      proceedsTo: agentWallet?.address,
     });
     exitStrategyId = exits.strategyId;
   } catch (e) {
@@ -977,6 +1078,41 @@ export async function autonomousAgentSweep(_now: Date = new Date()): Promise<num
     }
   }
   return executedCount;
+}
+
+/**
+ * One agent looks now, because its owner asked (2026-09-23).
+ *
+ * The same cycle the sweep runs every thirty seconds, for one persona, behind every gate the sweep has: the wallet's
+ * cooldown first, as the sweep checks it, then pacing, the agent's policy, its wallet, the permission and the spend
+ * path. It trades only if the sweep would have. What it saw is recorded as the sweep records it, so Home says the same.
+ */
+export async function lookNow(walletId: string, personaId: string): Promise<AutonomousTradeResult> {
+  const w = await one<{ risk_profile: string | null }>(`SELECT risk_profile FROM wallets WHERE id = $1`, [walletId]);
+  const profile = w && isRiskProfile(w.risk_profile) ? w.risk_profile : DEFAULT_RISK_PROFILE;
+  const minutes = Math.max(MIN_COOLDOWN_MINUTES, settingsFor(profile).cooldownMinutes);
+  const recent = await one<{ decided_at: Date }>(
+    `SELECT decided_at FROM proposals
+      WHERE wallet_id = $1 AND decision = $2 AND decided_at > now() - ($3 || ' minutes')::interval
+      ORDER BY decided_at DESC LIMIT 1`,
+    [walletId, AGENT_DECISION, String(minutes)],
+  );
+  if (recent) {
+    const left = Math.max(1, Math.ceil((new Date(recent.decided_at).getTime() + minutes * 60_000 - Date.now()) / 60_000));
+    return {
+      executed: false,
+      reason: 'cooldown',
+      detail: `This wallet's agents traded recently and wait ${minutes} minutes between entries — ${left} more.`,
+    };
+  }
+  const res = await runAutonomousCycle(walletId, { only: personaId });
+  await recordLook(
+    walletId,
+    res.executed ? 'taken' : res.reason,
+    res.executed ? `${res.setup.personaName} bought ${res.setup.symbol}: ${res.setup.reason}` : res.detail,
+    res.executed ? [] : (res.looks ?? []),
+  );
+  return res;
 }
 
 /** An agent enters a symbol at most once a UTC day. */

@@ -29,6 +29,9 @@ export type ExitParams = {
   stopLossPct: number;
   /** When a refused exit may be tried again, epoch ms. */
   retryAfter?: number;
+  /** The agent that armed it, and that agent's wallet, which the sale pays into (2026-09-23). */
+  armedBy?: string;
+  proceedsTo?: string;
 };
 
 export type ExitTrigger = { kind: 'stop' | 'target'; level: number } | null;
@@ -121,6 +124,7 @@ async function fireExit(row: ExitRow, symbol: string, price: number, trigger: No
     units,
     side: 'sell',
     skipRulesEngine: true, // a close only reduces risk; the daily cap is a limit on spending
+    agentWallet: row.params.proceedsTo ? { address: row.params.proceedsTo, name: row.params.armedBy ?? 'The agent' } : undefined,
   });
 
   if (!outcome.placed) {

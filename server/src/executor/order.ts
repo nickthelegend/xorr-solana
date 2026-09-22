@@ -114,7 +114,11 @@ export async function armExits(
    * firing an agent pauses the strategies it owns, and a stop-loss guarding shares it already bought must outlive it.
    * Without it an agent's profile read "Nothing running yet" while every exit it had armed was live.
    */
-  p: { symbol: string; entryPrice: number; stopPrice: number; targetPrice: number; armedBy?: string },
+  /*
+   * `proceedsTo` is the agent's own wallet, when it has one: the exit sells into it, so an agent's stop-loss and
+   * take-profit return its money to it and not to the owner's main account (2026-09-23).
+   */
+  p: { symbol: string; entryPrice: number; stopPrice: number; targetPrice: number; armedBy?: string; proceedsTo?: string },
 ): Promise<{ strategyId: string | null; sentence: string }> {
   if (!(p.stopPrice > 0) || !(p.targetPrice > 0)) {
     return { strategyId: null, sentence: 'It came with no stop or target, so none is set.' };
@@ -184,7 +188,13 @@ export async function armExits(
       w.id,
       `Exit ${p.symbol} at +${takeProfitPct.toFixed(1)}% / -${stopLossPct.toFixed(1)}%`,
       p.symbol,
-      JSON.stringify({ entryPrice: p.entryPrice, takeProfitPct, stopLossPct, ...(p.armedBy ? { armedBy: p.armedBy } : {}) }),
+      JSON.stringify({
+        entryPrice: p.entryPrice,
+        takeProfitPct,
+        stopLossPct,
+        ...(p.armedBy ? { armedBy: p.armedBy } : {}),
+        ...(p.proceedsTo ? { proceedsTo: p.proceedsTo } : {}),
+      }),
       nextRuns('daily', 1)[0],
     ],
   );
