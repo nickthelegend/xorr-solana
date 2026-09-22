@@ -11,6 +11,7 @@
  * did not expect, and `String(value)` printed anything nested as `[object Object]`.
  */
 import React from 'react';
+import { isSolana } from '@/chain';
 import { ScrollView, View } from 'react-native';
 import { useGoBack } from '@/nav/useGoBack';
 import {
@@ -106,7 +107,9 @@ export default function Risk() {
                 The true line. This said the agent "can be wrong about" its own rules; the executor
                 enforces them on every run, and the contract enforces the cap on top.
               */}
-              The executor enforces these. The contract enforces the cap.
+              {isSolana
+                ? 'The bot enforces these on every trade. The chain enforces what each agent can spend at all.'
+                : 'The executor enforces these. The contract enforces the cap.'}
             </Text>
           </ScrollView>
         )}

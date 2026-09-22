@@ -1055,6 +1055,10 @@ const RECORD_FIELDS: Readonly<Record<string, { label: string; unit?: RecordUnit 
   // An agent's own limits — `RiskLimits` in server/src/agents/routes.ts.
   maxUsdPerTrade: { label: 'Most per trade', unit: 'money' },
   maxUsdPerDay: { label: 'Most per day', unit: 'money' },
+  // And the rest of an agent's rules (`server/src/agents/policy.ts`, 2026-09-23).
+  symbols: { label: 'Only these stocks' },
+  allowOffHours: { label: 'Trades while Nasdaq is shut' },
+  maxLossPct: { label: 'Most it may lose on a position', unit: 'percent' },
   // Recurring buy and idle cash.
   usd: { label: 'Per run', unit: 'money' },
   keepCashUsd: { label: 'Keep spendable', unit: 'money' },
