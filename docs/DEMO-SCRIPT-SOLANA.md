@@ -11,7 +11,7 @@ account, keep the Solana Explorer tab pointed at the fork (`?cluster=custom&cust
 | 0:00 | Welcome | "xStocks trade on Solana around the clock. Nobody can watch a market all night — so xorr lets an agent do it, without ever holding your money." |
 | 0:12 | Sign in with email → wallet created | "Sign in with email. Privy makes a Solana wallet that is yours; we never see its key." |
 | 0:22 | Deposit → Get 500 test USDC | "This runs on a mainnet fork, so the money is test USDC. Everything else is mainnet's own: USDC, the xStocks, Jupiter." |
-| 0:32 | Grant screen: the cards | "The permission is the product. One transaction: the bot may spend this much USDC, and sell the xStocks you hold so a stop-loss can fire. The chain enforces the total; we enforce the daily cap and the end date." |
+| 0:32 | Grant screen: the cards | "The permission is the product. One transaction: the bot may spend this much USDC, and sell the xStocks and pre-IPO tokens you hold so a stop-loss can fire. The chain enforces the total; we enforce the daily cap and the end date." |
 | 0:50 | Privy sheet → Approve → Home ARMED | "Signed. Armed." |
 | 0:55 | Trade tab → NVDAx ticket | "Any xStock, with the real Jupiter quote: price impact, slippage, the route, the least it can fill at — and what backs the token: the attestation, the issuer's controls, whether this wallet is eligible." |
 | 1:15 | Buy $25 → receipt with signature | "Bought, through Jupiter. That's the signature on the fork — open it." (Explorer tab: the Route instruction, the Whirlpool CPI.) |
