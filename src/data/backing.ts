@@ -9,6 +9,7 @@
  * from the attestor says so, because the alternative is a tokenized-equity app drawing a
  * confident "1:1" nobody measured.
  */
+import { NotSignedIn } from './apiError';
 import { sessionFetch } from './sessionFetch';
 
 export type Custodian = { provider: string; quantity: number; symbol: string };
@@ -39,7 +40,9 @@ export async function fetchBacking(symbol: string, signal?: AbortSignal): Promis
     if (body?.verified === true && Number.isFinite((body as { ratio: number }).ratio)) return body;
     if (body?.verified === false) return body;
     return { verified: false, symbol, reason: 'The executor sent an answer this build cannot read.' };
-  } catch {
+  } catch (e) {
+    // Signed out, nothing was sent: not an unreachable executor.
+    if (e instanceof NotSignedIn) return { verified: false, symbol, reason: 'Sign in to read the attestation.' };
     return { verified: false, symbol, reason: 'The executor could not be reached.' };
   }
 }

@@ -145,6 +145,8 @@ export function apiReason(e: unknown): string | undefined {
  * no prose, and leave non-HTTP errors alone — `TimedOut` and `NotSignedIn` write their own.
  */
 export function errorText(e: unknown): string {
+  // Nothing was asked, so there is no failure to describe — only the step that is missing (2026-09-23).
+  if (e instanceof NotSignedIn) return 'Sign in first.';
   const reason = apiReason(e);
   if (reason) return reason;
   if (e instanceof ApiError) {

@@ -275,7 +275,8 @@ export function classify(e: unknown): Failure {
    * INSTEAD of sending a request it knows will be refused, so nothing about it is a fault.
    */
   if (e instanceof NotSignedIn) {
-    return { kind: 'signed-out', message: e.message, retryable: false, outcomeUnknown: false };
+    // The error's own message names the path it did not send, which is for a developer; the reader gets the step.
+    return { kind: 'signed-out', message: 'Sign in to see this.', retryable: false, outcomeUnknown: false };
   }
 
   /*

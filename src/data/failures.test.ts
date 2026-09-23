@@ -192,6 +192,8 @@ describe('signed out is not a failure', () => {
   it('says nothing was asked', () => {
     const f = classify(new NotSignedIn('/positions'));
     expect(f).toMatchObject({ kind: 'signed-out', retryable: false, outcomeUnknown: false });
+    // Never the internal path the request would have gone to.
+    expect(f.message).toBe('Sign in to see this.');
   });
 
   it('reads a 401 the same way', () => {
