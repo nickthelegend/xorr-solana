@@ -9,6 +9,8 @@ describe('the Solana build hides the Base-only screens', () => {
     expect(hiddenOn('/yield', true)).toBe(true);
     expect(hiddenOn('/approvals?x=1', true)).toBe(true);
     expect(hiddenOn('/perp/BTC', false)).toBe(false);
+    expect(hiddenOn('/bot/momentum-scout/backtest', true)).toBe(true);
+    expect(hiddenOn('/bot/momentum-scout/intro', true)).toBe(false);
   });
 
   it('keeps the Solana screens', () => {

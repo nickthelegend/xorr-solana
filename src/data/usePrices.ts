@@ -17,7 +17,8 @@ export type LivePrice = { price: number; change24h?: number; warming?: boolean }
 export function usePrices(symbols: string[]) {
   const key = symbols.join(',');
   const { data, loading, error, reload } = useAsync(
-    () => repos.markets.quotes(key ? key.split(',') : []),
+    // Nothing asked is nothing fetched: an empty list is not a question for the price feed.
+    () => (key ? repos.markets.quotes(key.split(',')) : Promise.resolve<Record<string, LivePrice>>({})),
     [key],
   );
   return { quotes: data ?? {}, loading, error, reload };

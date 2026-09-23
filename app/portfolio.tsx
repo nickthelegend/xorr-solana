@@ -9,6 +9,7 @@
  * chain over the last week (PLAN.md 2.10) — and its caption says how far back that line actually reaches.
  */
 import React, { useEffect, useMemo, useState } from 'react';
+import { isSolana } from '@/chain';
 import { shownHere } from '@/nav/solanaRoutes';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -324,9 +325,15 @@ export default function Portfolio() {
                 <Text variant="footnote" color={colors.ink55}>
                   {firstAt !== undefined ? historyCaption(firstAt) : 'Every reading recorded so far'}
                 </Text>
+                {/*
+                  What the wallet was worth then and now, not a return (2026-09-23). The readings include every deposit,
+                  so this drew "+$502.06 · +100.4%" in profit green for a wallet that had been sent 1,000 test USDC and
+                  made $3 on it. The history carries no flows to take out, so the line says what it knows; open and
+                  realised P&L are the returns, and they are on this screen.
+                */}
                 {graphChange ? (
-                  <Price variant="footnote" tone={pnlTone(graphChange.delta)}>
-                    {`${signedMoney(graphChange.delta)} · ${percent(graphChange.pct)}`}
+                  <Price variant="footnote" color={colors.ink55}>
+                    {`${money(points[0]!)} → ${money(points[points.length - 1]!)}, deposits included`}
                   </Price>
                 ) : null}
               </View>
@@ -483,7 +490,28 @@ export default function Portfolio() {
               <Price variant="rowPrimary">—</Price>
             )}
           </View>
-          {/* Savings are Aave on Base; the Solana build has no yield (`src/nav/solanaRoutes.ts`). */}
+          {/*
+            On Solana: what sits in the agents' own wallets (2026-09-23) — the owner's money, counted in the total above,
+            in accounts only the agents trade from. Savings are Aave on Base; the Solana build has no yield.
+          */}
+          {isSolana ? (
+            <Press
+              onPress={() => router.push('/bot/roster')}
+              accessibilityRole="button"
+              accessibilityLabel="With your agents. Opens the agents."
+              style={{ flex: 1, gap: space.s4 }}
+              testID="portfolio-agents-cash"
+            >
+              <Text variant="eyebrowSm">With your agents</Text>
+              {balance.data ? (
+                <Price variant="rowPrimary">{money(balance.data.agents)}</Price>
+              ) : balance.loading ? (
+                <Placeholder width={70} height={18} />
+              ) : (
+                <Price variant="rowPrimary">—</Price>
+              )}
+            </Press>
+          ) : null}
           {shownHere('/yield') ? (
           <Press
             onPress={() => router.push('/yield')}

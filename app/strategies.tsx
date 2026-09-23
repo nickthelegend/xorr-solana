@@ -11,6 +11,7 @@
  * Built from Row / Segmented / SheetCard on `src/ui`. No new visual language.
  */
 import React, { useCallback, useRef, useState } from 'react';
+import { isSolana } from '@/chain';
 import { ScrollView, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
@@ -299,13 +300,22 @@ function StrategyRow({ s, onChanged }: { s: Strategy; onChanged: () => void }) {
     }
   }
 
+  const sweptExit = isSolana && s.kind === 'exit-rules';
+
   return (
     <View>
       <Row
         title={s.label}
         titleFigure={labelFigure(s.kind)}
-        secondary={`${s.state === 'watch' ? 'Watching · ' : ''}Next run ${next}`}
-        value={<Price>{money(s.dailyAllocationUsd, { decimals: 0 })}</Price>}
+        /*
+         * An exit on Solana is not scheduled, it is swept every 30 seconds (2026-09-23): its stored next run is a date
+         * nothing reads, and the list showed "Next run Mon, Sep 21" — in the past — over exits that were being checked
+         * all along. It spends nothing either, so it has no amount to show; "$0" read as a strategy with no budget.
+         */
+        secondary={
+          sweptExit ? 'Checked every 30 seconds' : `${s.state === 'watch' ? 'Watching · ' : ''}Next run ${next}`
+        }
+        value={sweptExit ? undefined : <Price>{money(s.dailyAllocationUsd, { decimals: 0 })}</Price>}
         // A paused row says what a resume will make it, since that is not always what it was.
         delta={stateBadge(s.state, s.pausedFrom)}
         // `Watch` and `Paused` are not losses — the P&L colours are reserved.

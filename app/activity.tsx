@@ -49,7 +49,7 @@ import { useStore } from '@/state/store';
 import { useGoBack } from '@/nav/useGoBack';
 import { errorText } from '@/data/apiError';
 import { plainAction, plainDetail } from '@/format/activity';
-import { clock } from '@/format';
+import { stamp } from '@/format';
 
 const DOT = 8;
 
@@ -339,7 +339,7 @@ export default function Activity() {
                     <Text variant="rowPrimary">{plainAction(r.action)}</Text>
                     <Text variant="secondarySm">{plainDetail(r.detail)}</Text>
                     <Text variant="footnote" color={colors.ink55}>
-                      {r.agent} · {r.at ? clock(r.at) : r.t}
+                      {r.agent} · {r.at ? stamp(r.at) : r.t}
                     </Text>
                     {/*
                       The receipt, where there is one. A tappable link on a public chain; a

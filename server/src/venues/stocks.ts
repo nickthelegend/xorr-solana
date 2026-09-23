@@ -189,8 +189,8 @@ export async function observedHistory(
   symbol: string,
   hours = 24 * 30,
 ): Promise<{ at: number; usd: number }[]> {
-  const key = stockKey(symbol);
-  if (!key) return [];
+  // The caller has already resolved the symbol for this deployment (`equityKey`): a Base key or an xStock key.
+  const key = stockKey(symbol) ?? symbol;
   const rows = await query<{ at: Date; usd: string }>(
     `SELECT at, usd FROM price_observations
       WHERE symbol = $1 AND at > now() - ($2 || ' hours')::interval

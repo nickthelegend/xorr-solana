@@ -8,6 +8,7 @@
  * Safety comes from runStrategy's period claim, not from this loop: two schedulers, a restart
  * mid-run, or a manual trigger racing the tick all converge on one run per period.
  */
+import { reconcileForkReset } from '../fork/solanaReset.js';
 import { solanaExitSweep } from './solanaExits.js';
 import { ON_SOLANA } from '../solana/clusters.js';
 import { query } from '../db/index.js';
@@ -104,6 +105,12 @@ export async function tick(now: Date = new Date()): Promise<number> {
    * Exits on Solana, every tick (2026-09-19): a stop-loss checked once a day is not a stop. `solanaExits.ts`.
    */
   if (ON_SOLANA) {
+    // A fork rebuilt since the last tick takes the old ledger's holdings out of the book first (`fork/solanaReset.ts`).
+    try {
+      await reconcileForkReset();
+    } catch (e) {
+      log.error('[scheduler] fork reset check failed:', e instanceof Error ? e.message : e);
+    }
     try {
       ran += await solanaExitSweep(now);
     } catch (e) {

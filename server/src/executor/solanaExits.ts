@@ -29,6 +29,9 @@ export type ExitParams = {
   stopLossPct: number;
   /** When a refused exit may be tried again, epoch ms. */
   retryAfter?: number;
+  /** The agent that armed it, and that agent's wallet, which the sale pays into (2026-09-23). */
+  armedBy?: string;
+  proceedsTo?: string;
 };
 
 export type ExitTrigger = { kind: 'stop' | 'target'; level: number } | null;
@@ -72,6 +75,33 @@ export async function solanaExitSweep(now: Date = new Date(), priceOf = tradable
     const token = tradableToken(row.symbol);
     if (!token) continue;
     const key = token.symbol;
+    /*
+     * An exit with nothing to guard ends now, and says so (2026-09-23). It used to wait for its level: Strategies listed
+     * "live" stops on SPYx, TSLAx and AAPLx for a wallet that held none of them — sold, or gone with a rebuilt fork —
+     * each promising to sell something that was not there.
+     */
+    const holding = await readDelegation(row.address, token.address).catch(() => null);
+    if (holding && holding.balanceAmount === 0n) {
+      const ended = await one<{ id: string }>(
+        `UPDATE strategies SET state = 'ended' WHERE id = $1 AND state = 'live' RETURNING id`,
+        [row.id],
+      );
+      if (ended) {
+        try {
+          await append({
+            walletId: row.wallet_id,
+            agent: 'xorr',
+            action: `Exit on ${key} ended`,
+            detail: `You no longer hold any ${key}, so there is nothing for "${row.label}" to sell.`,
+            kind: 'risk',
+            payload: { strategyId: row.id },
+          });
+        } catch (e) {
+          log.error('[exits] could not write the ended exit to the trail:', e instanceof Error ? e.message : e);
+        }
+      }
+      continue;
+    }
     if (!prices.has(key)) prices.set(key, await priceOf(key).catch(() => null));
     const price = prices.get(key);
     if (!price) continue;
@@ -121,6 +151,7 @@ async function fireExit(row: ExitRow, symbol: string, price: number, trigger: No
     units,
     side: 'sell',
     skipRulesEngine: true, // a close only reduces risk; the daily cap is a limit on spending
+    agentWallet: row.params.proceedsTo ? { address: row.params.proceedsTo, name: row.params.armedBy ?? 'The agent' } : undefined,
   });
 
   if (!outcome.placed) {
@@ -161,6 +192,15 @@ async function fireExit(row: ExitRow, symbol: string, price: number, trigger: No
       usd: outcome.usd,
       attribution: { source: 'strategy', id: row.id, label: row.label },
     });
+    /*
+     * The holding this exit guarded is sold, all of it, so every other exit on it is done too (2026-09-23). Left live,
+     * one would fire later on shares bought after, at levels written for an entry that no longer exists.
+     */
+    await client.query(
+      `UPDATE strategies SET state = 'ended'
+        WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live' AND id <> $3`,
+      [row.wallet_id, symbol, row.id],
+    );
     await append(
       {
         walletId: row.wallet_id,

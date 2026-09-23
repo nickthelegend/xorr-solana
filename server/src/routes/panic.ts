@@ -486,6 +486,12 @@ async function closeHoldingOnSolana(params: {
         action: `Sold ${symbol}`,
         detail: `${actor === 'You' ? 'You closed' : `${actor} closed`} ${(fraction * 100).toFixed(0)}% of your ${symbol}: ${outcome.filledUnits.toFixed(8)} units at $${outcome.fillPrice.toFixed(2)} through ${outcome.venue === 'jupiter-route' ? 'Jupiter' : 'the venue vault'}.`,
         kind: 'trade',
+        /*
+         * The receipt, where every other sale puts it (2026-09-23). The signature sat only in the payload, so a close was
+         * the one trade in Activity with no "View transaction" and no amount — a sale the trail described and could not show.
+         */
+        amount: `$${(outcome.filledUnits * outcome.fillPrice).toFixed(2)}`,
+        signature: outcome.signature,
         payload: { symbol, units: outcome.filledUnits, usd: outcome.usd, side: 'sell', venue: outcome.venue, signature: outcome.signature, slot: outcome.slot },
       },
       client,

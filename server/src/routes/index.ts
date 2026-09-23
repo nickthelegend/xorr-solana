@@ -385,6 +385,8 @@ routes.get('/wallet/balance', async (c) => {
     return c.json({
       usd: h.totalUsd,
       cashUsd: h.usdc,
+      /* What the agents hold in their own wallets, so the total above is explained by the rows below it (2026-09-23). */
+      agentsUsd: h.agentsUsdc,
       holdings: [
         { symbol: 'USDC', units: h.usdc, usd: h.usdc },
         ...h.tokens.map((x) => ({ symbol: x.symbol, units: x.units, usd: x.usd })),

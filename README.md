@@ -21,14 +21,25 @@ on Solana; nobody can watch a market all night. xorr lets an agent do it for you
    the end date and enforces them on every trade; the chain enforces the total.
 4. **Hire an agent.** It watches [Backed's xStocks](https://xstocks.com) (NVDAx, TSLAx, AAPLx, MSFTx, SPYx on the fork),
    buys through **Jupiter** when a setup appears, says why in Activity, and arms a stop-loss and take-profit that sell
-   unattended. It is paced: one entry per stock per day, a quarter of the grant per stock, an hour between entries.
-5. **Trade yourself.** The Trade tab buys and sells any xStock with a live Jupiter quote breakdown (price impact,
-   slippage, route, minimum received) and the token's backing, issuer controls and eligibility for your wallet.
-6. **See it straight.** Holdings and P&L use each token's Token-2022 *Scaled UI* multiplier, so dividends and splits move
+   unattended. It is paced: one entry per stock per day, a quarter of the grant per stock, and the risk profile's wait
+   between entries (90 minutes on Balanced). **Ask it to look now** and it runs the same cycle on the spot, behind every
+   gate — it either trades and shows the receipt, or says in words why it took nothing.
+5. **Give each agent its own wallet, and its own rules.** An agent's wallet is a USDC token account *you* own, at an
+   address derived from your key and the agent's id (`createWithSeed`). You fund it in one signature — create, transfer,
+   approve the bot on it — and from then on that agent trades from it alone: the chain stops it at what the account
+   holds, its sales and stop-losses pay back into it, and you can take the money back at any time. Its rules are
+   yours to set and the executor enforces them on every entry: the most per trade and per day, the only stocks it may
+   buy, whether it may enter while Nasdaq is shut, and the most its stop may sit under the fill.
+6. **Trade yourself.** The Trade tab buys and sells any xStock with a live Jupiter quote breakdown (price impact,
+   slippage, route, minimum received) and the token's backing, issuer controls and eligibility for your wallet — and
+   **Tessera's pre-IPO tokens** (OpenAI, SpaceX, Kalshi), routed through Meteora, with the pool price, the issuer's mark
+   and the gap between them shown before you buy.
+7. **See it straight.** Holdings and P&L use each token's Token-2022 *Scaled UI* multiplier, so dividends and splits move
    the numbers the way the issuer meant. Every action, and every refusal, is on an audit trail with explorer links.
-7. **Stop everything in one tap.** Safety signs an SPL `Revoke` on every account that names the bot — nothing can trade
-   from that block on, stop-losses included — and it works with our server down. Resume re-signs the same grant.
-8. **Withdraw** to an address on your allowlist, which unlocks 24 hours after you add it.
+8. **Stop everything in one tap.** Safety signs an SPL `Revoke` on every account that names the bot — the agents' wallets
+   included, so nothing can trade from that block on, stop-losses included — and it works with our server down. Resume
+   re-signs the same grant and re-approves every agent wallet.
+9. **Withdraw** to an address on your allowlist, which unlocks 24 hours after you add it.
 
 ## Why it is built this way
 
@@ -313,6 +324,10 @@ above, not the executor's. That is the non-custodial property, read straight off
   the fork faucet works.
 - **Agent reasoning is deterministic without an `OPENROUTER_API_KEY`.** Each trade still names the setup and the
   numbers behind it; with a key the sentence is written by a model.
+- **An agent's rules are enforced by the executor**, like the daily cap; what an agent can spend at all is enforced by
+  the chain, because it is what its own wallet holds.
+- **Agents trade xStocks, not pre-IPO tokens.** A private company has no share price to check the pool against, and the
+  agent does not enter what it cannot check. Pre-IPO tokens are bought and sold by the owner.
 - **The daily cap is enforced by the executor**, as SPL has no notion of a day; the chain enforces the total you
   approved. Stopping is always the chain's own `Revoke`.
 

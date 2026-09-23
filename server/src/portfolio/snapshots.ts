@@ -54,7 +54,7 @@ export async function snapshotWallet(
     await query(
       `INSERT INTO portfolio_snapshots (wallet_id, total_usd, cash_usd, holdings_usd, supplied_usd, reason)
        VALUES ($1, $2, $3, $4, 0, $5)`,
-      [wallet.id, h.totalUsd, h.usdc, h.totalUsd - h.usdc, reason],
+      [wallet.id, h.totalUsd, h.usdc + h.agentsUsdc, h.totalUsd - h.usdc - h.agentsUsdc, reason],
     );
     return true;
   }

@@ -56,7 +56,7 @@ export const AAVE_V3_POOL: Address = '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
 
 const POOL_ABI = parseAbi(['function withdraw(address asset, uint256 amount, address to) returns (uint256)']);
 
-export type StepKey = 'sell' | 'aave' | 'send';
+export type StepKey = 'sell' | 'aave' | 'agents' | 'send';
 export type StepStatus = 'waiting' | 'running' | 'done' | 'failed';
 /** One thing a step did: a sale, an exit, a transfer — or a position it left, and why. */
 export type StepLine = { tone: 'done' | 'left' | 'failed'; text: string; txHash?: string };
@@ -66,9 +66,10 @@ export type Step = { key: StepKey; title: string; status: StepStatus; detail?: s
 const TITLES: Readonly<Record<StepKey, string>> = {
   sell: 'Sell every position',
   aave: 'Take your USDC out of savings',
+  agents: 'Bring your agents’ USDC home',
   send: 'Send your USDC',
 };
-const ORDER: readonly StepKey[] = ['sell', 'aave', 'send'];
+const ORDER: readonly Exclude<StepKey, 'agents'>[] = ['sell', 'aave', 'send'];
 
 export function initialSteps(): Step[] {
   return ORDER.map((key) => ({ key, title: TITLES[key], status: 'waiting', lines: [] }));
@@ -253,7 +254,8 @@ async function send(deps: WithdrawEverythingDeps, note: Note): Promise<Outcome> 
   return { ok: true, detail: `At ${prepared.destination.label}, ${shortAddress(prepared.destination.address)}.` };
 }
 
-const RUN: Readonly<Record<StepKey, (deps: WithdrawEverythingDeps, note: Note) => Promise<Outcome>>> = {
+/* The Base runner has no agent wallets; `agents` is the Solana flow's step (`useWithdrawEverythingSolana`). */
+const RUN: Readonly<Record<Exclude<StepKey, 'agents'>, (deps: WithdrawEverythingDeps, note: Note) => Promise<Outcome>>> = {
   sell,
   aave: exitAave,
   send,

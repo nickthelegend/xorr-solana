@@ -22,6 +22,13 @@ bot your keys or your funds. Handing a bot your money is a trust problem, not a 
   transfer gates and a live quote before anything moves, and refunds you if a swap does not fill.
 - A hired agent watches xStocks and buys through Jupiter when a setup appears, states why, and arms a stop-loss and
   take-profit that sell unattended. It is paced: one entry per stock per day, a quarter of the grant per stock.
+- **Every agent has its own wallet and its own rules.** The wallet is a USDC token account the user owns, derived from
+  their key and the agent's id with `createWithSeed`: funded in one signature, approved to the bot, spent by that agent
+  alone and paid back into by its sales. The chain stops each agent at what its wallet holds — a per-agent budget
+  enforced by SPL itself, with no custody. On top, the user sets each agent's rules (most per trade and per day,
+  allowed stocks, whether it trades while Nasdaq is shut, maximum loss per position), enforced on every entry.
+- Pre-IPO: Tessera's T-Tokens (OpenAI, SpaceX, Kalshi) trade from the same ticket through Meteora, with the pool price,
+  Tessera's mark and the gap between them shown before anyone buys.
 - You can buy and sell any xStock yourself with the real Jupiter quote breakdown, the token's proof of reserves, issuer
   controls and eligibility for your wallet.
 - Holdings and P&L use Token-2022's Scaled UI multiplier, so dividends and splits show as the issuer meant.
@@ -32,7 +39,8 @@ bot your keys or your funds. Handing a bot your money is a trust problem, not a 
 routes them; an SPL delegation is a native, revocable, capped permission. xorr is built on all of these, and shows each
 one to the user.
 
-**Built with.** Solana (SPL Token, Token-2022), Backed xStocks, Jupiter v6, Privy (Solana embedded wallets), Expo,
+**Built with.** Solana (SPL Token, Token-2022, `createWithSeed` agent accounts), Backed xStocks, Tessera T-Tokens,
+Jupiter v6, Meteora DLMM, Pyth (Equity.US feeds read on-chain), Privy (Solana embedded wallets), Expo,
 Hono + Postgres, `solana-test-validator --clone` of mainnet, Railway, Vercel.
 
 **What is real.** Every transaction in the demo is signed and confirmed on a fork of Solana mainnet cloned at boot —

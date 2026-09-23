@@ -54,6 +54,11 @@ export function buildGrantTx(params: {
   grant: SolanaGrantParams;
   dailyCapUsd: number;
   durationMs: number;
+  /**
+   * The owner's agent wallets (2026-09-23): each is approved again at its whole balance, so Resume after a stop gives
+   * every agent back the money it was trading, as the stop took it away.
+   */
+  agentWallets?: PublicKey[];
 }): Transaction {
   const mint = new PublicKey(params.grant.token);
   const delegate = new PublicKey(params.grant.delegate);
@@ -80,6 +85,10 @@ export function buildGrantTx(params: {
         createApproveCheckedInstruction(xAta, xMint, delegate, params.owner, ANY_AMOUNT, x.decimals, [], TOKEN_2022_PROGRAM_ID),
       ];
     }),
+    // Each agent wallet, at whatever it holds: its contents are its budget, and the chain stops it there.
+    ...(params.agentWallets ?? []).map((account) =>
+      createApproveCheckedInstruction(account, mint, delegate, params.owner, ANY_AMOUNT, params.grant.decimals, [], TOKEN_PROGRAM_ID),
+    ),
   );
 }
 
@@ -126,8 +135,18 @@ export async function grantOnSolana(params: {
   const grant = await api.get<SolanaGrantParams>('/delegation/params');
   if (grant.chain !== 'solana') throw new Error('The executor is not on Solana, so this build cannot grant on it.');
   const expiresAt = Date.now() + params.durationMs;
+  // Agent wallets that exist on this chain, so a resume re-approves them too. None read is none approved, not a failure.
+  const agentWallets = await api
+    .get<{ address: string; exists: boolean }[]>('/agents/wallets')
+    .then((ws) => ws.filter((w) => w.exists).map((w) => new PublicKey(w.address)), () => []);
   const signature = await params.signAndSend(
-    buildGrantTx({ owner: new PublicKey(params.owner), grant, dailyCapUsd: params.dailyCapUsd, durationMs: params.durationMs }),
+    buildGrantTx({
+      owner: new PublicKey(params.owner),
+      grant,
+      dailyCapUsd: params.dailyCapUsd,
+      durationMs: params.durationMs,
+      agentWallets,
+    }),
   );
   await api.post('/delegation/record', { signature, dailyCapUsd: params.dailyCapUsd, expiresAt });
   return signature;

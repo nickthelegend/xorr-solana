@@ -6,6 +6,7 @@
  *
  * An agent with no trades gets zeros and says so, rather than borrowing a flattering number.
  */
+import { PERSONAS } from '../bot/personas.js';
 import { XSTOCKS, xStockKey, xStockPriceUsd } from '../venues/xstocks.js';
 import { query } from '../db/index.js';
 import { THIS_CHAIN } from '../db/chain-scope.js';
@@ -31,10 +32,10 @@ export type AgentRecord = Pick<LeaderboardRow, 'pnl30d' | 'win' | 'trades' | 'me
 export const NO_TRADES: AgentRecord = { pnl30d: 0, win: 0, trades: 0, metric: 'No trades yet' };
 
 const AGENTS = [
-  { id: 'momentum-scout', name: 'Momentum Scout', role: 'Rides breakouts on liquid majors', c1: '#5B93FF', c2: '#1B44CE' },
-  { id: 'earnings-desk', name: 'Earnings Desk', role: 'Trades tokenized equity earnings', c1: '#F0BE55', c2: '#C98518' },
-  { id: 'yield-keeper', name: 'Yield Keeper', role: 'Moves idle cash into best APY', c1: '#49E39B', c2: '#12A45F' },
-  { id: 'drawdown-guard', name: 'Drawdown Guard', role: 'Cuts risk when the book bleeds', c1: '#B58CFF', c2: '#7A45E0' },
+  { id: 'momentum-scout', name: 'Momentum Scout', role: PERSONAS['momentum-scout'].role, c1: '#5B93FF', c2: '#1B44CE' },
+  { id: 'earnings-desk', name: 'Earnings Desk', role: PERSONAS['earnings-desk'].role, c1: '#F0BE55', c2: '#C98518' },
+  { id: 'yield-keeper', name: 'Yield Keeper', role: PERSONAS['yield-keeper'].role, c1: '#49E39B', c2: '#12A45F' },
+  { id: 'drawdown-guard', name: 'Drawdown Guard', role: PERSONAS['drawdown-guard'].role, c1: '#B58CFF', c2: '#7A45E0' },
 ];
 
 type RunRow = { kind: string; persona_id: string | null; symbol: string; usd: string; units: string; price: string };

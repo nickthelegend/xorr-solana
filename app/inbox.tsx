@@ -9,6 +9,7 @@
  * `interruptionFor` keeps the rows a push went out with, by the executor's own wording.
  */
 import React, { useMemo } from 'react';
+import { stamp } from '@/format';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -95,7 +96,7 @@ export default function Inbox() {
                   />
                 }
                 title={plainAction(event.action)}
-                secondary={`${plainDetail(event.detail)} · ${event.t}`}
+                secondary={`${plainDetail(event.detail)} · ${event.at ? stamp(event.at) : event.t}`}
                 height={68}
                 onPress={() => router.push(route as never)}
               />

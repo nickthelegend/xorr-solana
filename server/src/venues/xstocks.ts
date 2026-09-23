@@ -134,7 +134,6 @@ export function isXStock(symbol: string): boolean {
   return xStockKey(symbol) !== undefined;
 }
 
-const PROBE_USD = 1_000;
 const cache = new Map<string, { at: number; price: number }>();
 const TTL_MS = 30_000;
 
@@ -143,7 +142,16 @@ export function clearXStockPriceCache(): void {
 }
 
 /**
- * Calculate tokenized equity price in USD from Jupiter quotes.
+ * What an xStock is worth right now: Jupiter's market price for the mint (2026-09-23).
+ *
+ * This divided a $1,000 USDC buy quote by the tokens it returned, so every mark carried the price impact of a
+ * thousand-dollar buy: 0.1% on NVDAx, 3.5% on MSFTx, 10% on MSTRx. Nothing in this app buys a thousand dollars at
+ * once, and nothing should value a holding at what that buy would pay — but everything did: Portfolio's marks and
+ * open P&L, the exit sweep, the agent's bands. Measured on the hosted fork, MSFTx marked at $517 while Jupiter's own
+ * price and Pyth's share both read about $500, so a stop at $501.65 sat under a price that had already crossed it
+ * and never fired.
+ *
+ * A price is still either observed or it is not: no entry for the mint is null, never a remembered number.
  */
 export async function xStockPriceUsd(symbol: string): Promise<number | null> {
   const key = xStockKey(symbol);
@@ -154,17 +162,10 @@ export async function xStockPriceUsd(symbol: string): Promise<number | null> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.price;
 
-  const { quote } = await import('./jupiter.js');
-  const q = await quote({
-    inSymbolOrMint: 'USDC',
-    outSymbolOrMint: token.address,
-    amountUnits: PROBE_USD * 1e6, // 1000 USDC
-  }).catch(() => null);
+  const { xStockMarks } = await import('./xstocks-catalog.js');
+  const price = (await xStockMarks().catch(() => null))?.get(token.address) ?? null;
+  if (price === null) return null;
 
-  if (!q || !(Number(q.outAmount) > 0)) return null;
-
-  const outTokens = Number(q.outAmount) / 10 ** token.decimals;
-  const price = PROBE_USD / outTokens;
   cache.set(key, { at: Date.now(), price });
   recordObservation(key, price);
   return price;

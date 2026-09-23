@@ -6,6 +6,7 @@
  * and no network or venue names — those live on How it works.
  */
 import React from 'react';
+import { isSolana } from '@/chain';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -49,7 +50,7 @@ const GROUPS: Group[] = [
       { route: '/limit-orders', title: 'Limit orders', detail: 'Take a signed price' },
       { route: '/crosschain', title: 'Cross-chain', detail: 'Quotes to other chains' },
       { route: '/movers', title: 'Movers', detail: 'Biggest moves today' },
-      { route: '/stocks', title: 'Stocks', detail: 'Priced by a real buy' },
+      { route: '/stocks', title: 'Stocks', detail: isSolana ? 'Priced at the market' : 'Priced by a real buy' },
       { route: '/xstocks', title: 'xStocks', detail: 'Tokenized shares on Solana' },
       { route: '/earnings', title: 'Earnings', detail: 'Filing dates' },
       { route: '/funding', title: 'Funding', detail: 'Perpetual funding rates' },

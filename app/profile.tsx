@@ -11,6 +11,7 @@
  * one. The address is shortened on screen and copied whole.
  */
 import React, { useState } from 'react';
+import { isSolana } from '@/chain';
 import { shownHere } from '@/nav/solanaRoutes';
 import { ScrollView, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
@@ -66,9 +67,13 @@ export default function Profile() {
   const { email } = usePrivyIdentity();
   const wallet = useAsync(() => repos.wallet.current(), []);
   const address = wallet.data?.address;
-  /* Only once there is an address to resolve; most addresses have no Basename and answer null. */
+  /*
+   * Only once there is an address to resolve; most addresses have no Basename and answer null. Never on Solana
+   * (2026-09-23): a Basename is an ENS name on Base, and asking the executor to reverse-resolve a base58 address was a
+   * 400 in the network tab of every Profile visit.
+   */
   const name = useAsync(
-    async () => (address ? (await system.basenameOf(address)).name : null),
+    async () => (address && !isSolana ? (await system.basenameOf(address)).name : null),
     [address],
   );
   const [copied, setCopied] = useState(false);

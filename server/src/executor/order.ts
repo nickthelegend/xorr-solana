@@ -109,7 +109,16 @@ export async function armExits(
    * type or lied about the shape it had.
    */
   w: Pick<WalletRow, 'id' | 'address' | 'agents_stopped'>,
-  p: { symbol: string; entryPrice: number; stopPrice: number; targetPrice: number },
+  /*
+   * `armedBy` names the agent whose entry this exit protects (2026-09-23). Kept in the params, not in `agent_id`:
+   * firing an agent pauses the strategies it owns, and a stop-loss guarding shares it already bought must outlive it.
+   * Without it an agent's profile read "Nothing running yet" while every exit it had armed was live.
+   */
+  /*
+   * `proceedsTo` is the agent's own wallet, when it has one: the exit sells into it, so an agent's stop-loss and
+   * take-profit return its money to it and not to the owner's main account (2026-09-23).
+   */
+  p: { symbol: string; entryPrice: number; stopPrice: number; targetPrice: number; armedBy?: string; proceedsTo?: string },
 ): Promise<{ strategyId: string | null; sentence: string }> {
   if (!(p.stopPrice > 0) || !(p.targetPrice > 0)) {
     return { strategyId: null, sentence: 'It came with no stop or target, so none is set.' };
@@ -148,6 +157,29 @@ export async function armExits(
     return { strategyId: null, sentence: `Your existing exit on ${p.symbol} stays as it is.` };
   }
 
+  /*
+   * One agent exit per holding (2026-09-23). An exit sells the whole holding, so every entry arming a new one left two
+   * or three live on one stock at different levels — whichever triggered first sold everything, and the rest stayed
+   * "live" to fire later on shares bought after, at levels written for an entry that was gone. An agent's new exit
+   * replaces the agent exits before it. An exit the owner set themselves is theirs: it stays, and none is added over it.
+   */
+  if (p.armedBy) {
+    const own = await one<{ id: string }>(
+      `SELECT id FROM strategies
+        WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live'
+          AND chain = ${THIS_CHAIN} AND NOT (params ? 'armedBy')
+        LIMIT 1`,
+      [w.id, p.symbol],
+    );
+    if (own) return { strategyId: null, sentence: `Your own exit on ${p.symbol} stays as you set it.` };
+    await query(
+      `UPDATE strategies SET state = 'ended'
+        WHERE wallet_id = $1 AND kind = 'exit-rules' AND symbol = $2 AND state = 'live'
+          AND chain = ${THIS_CHAIN} AND params ? 'armedBy'`,
+      [w.id, p.symbol],
+    );
+  }
+
   const row = await one<{ id: string }>(
     `INSERT INTO strategies (id, wallet_id, kind, state, label, symbol, params, cadence, next_run_at, daily_allocation_usd)
      VALUES ($1,$2,'exit-rules','live',$3,$4,$5,'daily',$6,0) RETURNING id`,
@@ -156,7 +188,13 @@ export async function armExits(
       w.id,
       `Exit ${p.symbol} at +${takeProfitPct.toFixed(1)}% / -${stopLossPct.toFixed(1)}%`,
       p.symbol,
-      JSON.stringify({ entryPrice: p.entryPrice, takeProfitPct, stopLossPct }),
+      JSON.stringify({
+        entryPrice: p.entryPrice,
+        takeProfitPct,
+        stopLossPct,
+        ...(p.armedBy ? { armedBy: p.armedBy } : {}),
+        ...(p.proceedsTo ? { proceedsTo: p.proceedsTo } : {}),
+      }),
       nextRuns('daily', 1)[0],
     ],
   );

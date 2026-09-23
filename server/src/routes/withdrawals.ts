@@ -20,6 +20,7 @@
  * Addresses travel in request bodies, never in paths. Every path goes into the access log, and a list of where someone
  * keeps their savings does not belong there.
  */
+import { ON_SOLANA } from '../solana/clusters.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
@@ -73,7 +74,8 @@ const blocked = (reason: string, detail: string, status = 409, extra: Record<str
 const NO_WALLET = blocked('no_wallet', 'No wallet is registered for this account yet.');
 
 const ADDRESS = z.string().trim().refine(isValidAddress, {
-  message: 'an address: 0x hex address or Solana base58 address',
+  // The format this network takes, not every format some network takes (2026-09-23).
+  message: ON_SOLANA ? 'a Solana address, 32 to 44 base58 characters' : 'a 0x address, 40 hex characters after the 0x',
 });
 export const AddInput = z.object({ label: z.string().trim().min(1).max(MAX_LABEL), address: ADDRESS });
 export const AddressInput = z.object({ address: ADDRESS });

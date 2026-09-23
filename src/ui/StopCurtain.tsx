@@ -210,7 +210,9 @@ export function StopCurtain({ state, onDone, detail, signature, testID }: StopCu
               variant="primary"
               height={size.buttonLg}
               onPress={onDone}
-              style={{ alignSelf: 'stretch', marginTop: space.s10 }}
+              // Stretched to the column, not to a desktop browser's window (2026-09-23): the curtain is full-screen, and on
+              // a wide screen "Done" ran edge to edge under a message 300 wide.
+              style={{ alignSelf: 'center', width: '100%', maxWidth: 420, marginTop: space.s10 }}
             />
           ) : null}
         </View>

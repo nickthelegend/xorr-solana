@@ -13,6 +13,7 @@
  * These two routes are deliberately public: a spot price is not user data, and gating it behind a
  * session would mean an unauthenticated visitor sees a market list of dashes.
  */
+import { xStockCatalog } from '../venues/xstocks-catalog.js';
 import { Hono } from 'hono';
 import { PublicKey } from '@solana/web3.js';
 import { ON_SOLANA, DEFAULT_MINTS } from '../solana/clusters.js';
@@ -27,6 +28,7 @@ import { COINGECKO_IDS, COINGECKO_PRICE_URL, type CoingeckoPrices } from '../mar
 import { CAN_SETTLE, TOKENS, canonicalSymbol, quote } from '../venues/oneinch.js';
 import { STOCKS, equitiesFunctional, isStock, observedHistory } from '../venues/stocks.js';
 import { classificationFor, earningsCalendar } from '../market/edgar.js';
+import { equityKey } from '../venues/equity-key.js';
 import { aavePoolIsDeployedHere, usdcSupplyYield, usdcReserve } from '../market/yield.js';
 import { logosFor, warmLogos } from '../market/logos.js';
 import { bucketFor, dayChangePct, hourlyCloses, observedDay, observedSince, ohlcRows } from '../market/observed.js';
@@ -345,9 +347,16 @@ function equityAsked(
   if (!asked) {
     return { status: 400, body: { error: 'missing_symbol', detail: 'Pass ?symbol=, for example ?symbol=NVDAc.' } };
   }
-  const symbol = canonicalSymbol(asked);
-  if (!isStock(symbol)) {
-    return { status: 404, body: { error: 'not_an_equity', detail: `${symbol} is not a tokenized equity.` } };
+  /* The family this deployment trades: xStocks on Solana, the Base equities on Base (see `equityKey`). */
+  const symbol = equityKey(ON_SOLANA ? asked : canonicalSymbol(asked), ON_SOLANA);
+  if (!symbol) {
+    return {
+      status: 404,
+      body: {
+        error: 'not_an_equity',
+        detail: `${asked} is not a tokenized equity ${ON_SOLANA ? 'this deployment lists' : 'on this network'}.`,
+      },
+    };
   }
   return { symbol };
 }
@@ -477,7 +486,14 @@ market.get('/market/symbols', (c) =>
    */
   c.json(
     ON_SOLANA
-      ? [...Object.keys(COINGECKO_IDS), ...tradableTokens().map((t) => t.symbol)]
+      ? [
+          /*
+           * Not WETH or cbBTC (2026-09-23): they are Base's wrappers of ETH and BTC, which are listed in their own
+           * right, and Coverage on Solana drew both as "priced here" beside the coins they wrap.
+           */
+          ...Object.keys(COINGECKO_IDS).filter((s) => s !== 'WETH' && s !== 'CBBTC'),
+          ...tradableTokens().map((t) => t.symbol),
+        ]
       : Object.keys(COINGECKO_IDS),
   ),
 );
@@ -673,11 +689,18 @@ const STOCK_STALE_MS = 5 * 60_000;
 market.get('/market/stocks', async (c) => {
   // Solana: the xStocks, priced by Jupiter — the tokenized equities this build actually trades (2026-09-19).
   if (ON_SOLANA) {
+    /*
+     * The 24h change from the feed that gives the price (2026-09-23). This measured our own readings a day apart, and
+     * the readings from before the mark moved to Jupiter's market price were $1,000-buy prices — so MSTRx read −9.8% on
+     * a day it moved about 1%, the price impact of the old probe showing up as a fall. Jupiter reports its own change
+     * alongside its price; absent there, it is absent here.
+     */
+    const catalog = await xStockCatalog().catch(() => []);
+    const changeOf = new Map(catalog.map((r) => [r.symbol, r.change24hPct] as const));
     const rows = await Promise.all(
       Object.values(XSTOCKS).map(async (x) => {
         const price = await xStockPriceUsd(x.symbol).catch(() => null);
-        // A 24h change only once the recorded series reaches back a day; absent until then, never a short-window guess.
-        const change24h = dayChangePct(await observedDay(x.symbol).catch(() => []));
+        const change24h = changeOf.get(x.symbol) ?? undefined;
         return {
           ...(change24h === undefined ? {} : { change24h }),
           symbol: x.symbol,

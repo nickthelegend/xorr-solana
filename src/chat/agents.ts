@@ -19,6 +19,7 @@
 import { useMemo } from 'react';
 import type { Href } from 'expo-router';
 import { create } from 'zustand';
+import { isSolana } from '@/chain';
 import type { Agent } from '@/data/types';
 
 /** A screen that already shows part of an agent's work from real records. */
@@ -54,7 +55,7 @@ export const CHAT_AGENTS: readonly ChatAgent[] = [
   {
     id: 'momentum-scout',
     name: 'Momentum Scout',
-    role: 'Rides breakouts on liquid majors',
+    role: isSolana ? 'Buys xStocks breaking out of their range' : 'Rides breakouts on liquid majors',
     openers: [
       'What are you watching right now',
       'Why did you skip today',
@@ -84,7 +85,8 @@ export const CHAT_AGENTS: readonly ChatAgent[] = [
   {
     id: 'yield-keeper',
     name: 'Yield Keeper',
-    role: 'Moves idle cash into the best rate',
+    // The executor's persona says why this differs on Solana (`server/src/bot/personas.ts`).
+    role: isSolana ? 'Accumulates xStocks low in their range' : 'Moves idle cash into the best rate',
     openers: [
       'Where is idle cash earning most',
       'When would you move it',

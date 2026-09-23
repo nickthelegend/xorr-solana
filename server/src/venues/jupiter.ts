@@ -69,6 +69,8 @@ export type JupiterQuoteResponse = {
    * than quietly omitting the line, which reads the same as not having checked.
    */
   platformFee?: { amount: string; feeBps: number } | null;
+  /** `0` when Jupiter quoted a v0 transaction; absent for a quote asked for as legacy. */
+  transactionVersion?: number | null;
   routePlan?: Array<{
     swapInfo: { label: string; inAmount: string; outAmount: string };
     /** How much of the input this hop carries. A split route has several, summing to 100. */
@@ -177,8 +179,20 @@ export async function quote(params: {
    * pin has nothing. The fill then settles through the venue vault and is labelled `venue-vault`,
    * which is honest: a real price, and no claim that a route ran.
    */
+  /*
+   * And Meteora DLMM next, for the class it fills (2026-09-23). Every T-Token pair routes only through Meteora, so the
+   * Whirlpool pin found nothing and the unpinned quote came back as a v0 transaction — which the swap builder was then
+   * asked to make legacy, and Jupiter refused ("asLegacyTransaction cannot be used with quoteResponse.
+   * transactionVersion"). Every pre-IPO buy fell to the venue vault, which holds no T-Tokens, and failed. A direct
+   * Meteora route fits a legacy transaction (842 bytes, measured), so it is pinned the same way the Whirlpool one is.
+   */
   const attempts = pinnedDex
-    ? [`&dexes=${encodeURIComponent(pinnedDex)}&onlyDirectRoutes=true&asLegacyTransaction=true`, '']
+    ? [
+        ...[...new Set([pinnedDex, 'Meteora DLMM'])].map(
+          (dex) => `&dexes=${encodeURIComponent(dex)}&onlyDirectRoutes=true&asLegacyTransaction=true`,
+        ),
+        '',
+      ]
     : [''];
 
   let lastError: Error | null = null;
@@ -287,7 +301,12 @@ async function routeThroughJupiter(params: {
            * accounts were cloned, and the trade. On the hosted fork a buy failed with "loads an address table account
            * that doesn't exist" half an hour after boot. A direct single-pool route fits a legacy transaction easily.
            */
-          ...(CLUSTER_KEY === 'solana-mainnet' ? {} : { asLegacyTransaction: true }),
+          /*
+           * As the quote was made: a quote asked for as legacy is built as legacy, and an unpinned one — `transaction
+           * Version: 0` — is built as the v0 it was quoted as (2026-09-23). Asking for legacy against a v0 quote is a
+           * 400 from the builder, not a legacy transaction.
+           */
+          ...(CLUSTER_KEY !== 'solana-mainnet' && quoteResponse.transactionVersion !== 0 ? { asLegacyTransaction: true } : {}),
           ...(destinationTokenAccount
             ? { destinationTokenAccount: destinationTokenAccount.toBase58() }
             : {}),
@@ -334,6 +353,11 @@ export async function swap(params: {
   conn?: Connection;
   feePayer?: Keypair;
   vaultKeypair?: Keypair;
+  /**
+   * Deliver the output here instead of the user's associated account: an agent's own USDC wallet, which a sale made
+   * for that agent pays back into (2026-09-23). It exists already and belongs to the user, so nothing is created.
+   */
+  destination?: PublicKey | string;
   /** Refuse to settle through the vault if the route cannot execute. */
   requireRoute?: boolean;
 }): Promise<JupiterSwapResult> {
@@ -345,7 +369,9 @@ export async function swap(params: {
     feePayer = payerKeypair(),
     vaultKeypair = venueVaultKeypair(),
     requireRoute = false,
+    destination,
   } = params;
+  const destinationPk = destination ? (typeof destination === 'string' ? new PublicKey(destination) : destination) : null;
 
   const userPk = typeof userPublicKey === 'string' ? new PublicKey(userPublicKey) : userPublicKey;
   const inputMintPk = new PublicKey(quoteResponse.inputMint);
@@ -369,7 +395,7 @@ export async function swap(params: {
    * output straight to the user's own token account.
    */
   const routeSigner = userSigner ?? vaultKeypair;
-  const userOutAtaForRoute = ataFor(userPk, outputMintPk, outputProg);
+  const userOutAtaForRoute = destinationPk ?? ataFor(userPk, outputMintPk, outputProg);
   try {
     /*
      * The account the route delivers into has to exist first (2026-09-19). Jupiter sends the output straight to the
@@ -377,7 +403,7 @@ export async function swap(params: {
      * to the vault — every new user's first xStock was a vault fill, and the proof only passed because its wallet was
      * pre-funded with NVDAx. Created idempotently by the executor's fee payer, owned by the user.
      */
-    if (!(await conn.getAccountInfo(userOutAtaForRoute, 'confirmed'))) {
+    if (!destinationPk && !(await conn.getAccountInfo(userOutAtaForRoute, 'confirmed'))) {
       await sendAndConfirmTransaction(
         conn,
         new Transaction().add(
@@ -434,21 +460,24 @@ export async function swap(params: {
 
   const userInAta = ataFor(userPk, inputMintPk, inputProg);
   const vaultInAta = ataFor(vaultKeypair.publicKey, inputMintPk, inputProg);
-  const userOutAta = ataFor(userPk, outputMintPk, outputProg);
+  const userOutAta = destinationPk ?? ataFor(userPk, outputMintPk, outputProg);
   const vaultOutAta = ataFor(vaultKeypair.publicKey, outputMintPk, outputProg);
 
   const tx = new Transaction();
 
   // Ensure vault output ATA and user output ATA exist
-  tx.add(
-    createAssociatedTokenAccountIdempotentInstruction(
-      feePayer.publicKey,
-      userOutAta,
-      userPk,
-      outputMintPk,
-      outputProg,
-    ),
-  );
+  // An agent's wallet already exists and is not an associated account, so it is not created here.
+  if (!destinationPk) {
+    tx.add(
+      createAssociatedTokenAccountIdempotentInstruction(
+        feePayer.publicKey,
+        userOutAta,
+        userPk,
+        outputMintPk,
+        outputProg,
+      ),
+    );
+  }
   tx.add(
     createAssociatedTokenAccountIdempotentInstruction(
       feePayer.publicKey,

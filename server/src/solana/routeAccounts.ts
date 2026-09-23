@@ -37,7 +37,15 @@ type Pair = { inputMint: string; outputMint: string; amount: bigint };
  * The route the executor will actually ask for on a fork: the pinned venue, direct, legacy (`venues/jupiter.ts`), and
  * Jupiter's unconstrained route beside it, so both are cloned.
  */
-const ROUTE_SHAPES = ['&dexes=Whirlpool&onlyDirectRoutes=true&asLegacyTransaction=true', ''];
+/*
+ * The same shapes the executor quotes, in the same order (`venues/jupiter.ts`): a direct Whirlpool route, then a direct
+ * Meteora DLMM route, both legacy, then whatever Jupiter picks. What the fork clones is what the executor will ask for.
+ */
+const ROUTE_SHAPES = [
+  '&dexes=Whirlpool&onlyDirectRoutes=true&asLegacyTransaction=true',
+  '&dexes=Meteora%20DLMM&onlyDirectRoutes=true&asLegacyTransaction=true',
+  '',
+];
 
 /** Between calls to Jupiter's public tier, which answers a burst with 400s and 429s. */
 const SPACING_MS = Number(process.env.FORK_ROUTE_SPACING_MS ?? 900);
@@ -63,7 +71,18 @@ async function jupiterFetch(url: string, init?: RequestInit): Promise<Response> 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     const res = await fetch(url, init);
     if (res.ok) return res;
-    last = `${res.status}`;
+    const body = await res.text().catch(() => '');
+    last = `${res.status} ${body.slice(0, 120)}`;
+    /*
+     * A 400 that says there is no route is final; any other 400 is the public tier refusing a burst (2026-09-23). All
+     * six Tessera pairs, last in the list, came back "quote 400" on a fresh fork and none was retried, so the fork
+     * booted unable to settle a single pre-IPO trade. Jupiter names the permanent case: `NO_ROUTES_FOUND`.
+     */
+    if (res.status === 400 && /NO_ROUTES_FOUND|COULD_NOT_FIND_ANY_ROUTE|TOKEN_NOT_TRADABLE/.test(body)) break;
+    if (res.status === 400) {
+      await wait(SPACING_MS * attempt * 2);
+      continue;
+    }
     /*
      * Only a rate limit or a server fault is worth asking again.
      *

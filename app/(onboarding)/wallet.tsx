@@ -48,7 +48,11 @@ const STEPS = [
   { label: 'Signed in', detail: 'A code, Google, X or your own wallet' },
   { label: 'Wallet created', detail: 'Only you can sign' },
   { label: 'Connected', detail: 'The app can read this wallet' },
-  { label: 'Ready to fund', detail: 'Nothing is deposited yet' },
+  /*
+   * Not "Nothing is deposited yet" (2026-09-23): this screen reads no balance, and a returning owner with $1,000 in the
+   * wallet was told there was nothing in it. What is true of every wallet reaching this step is where the money goes.
+   */
+  { label: 'Ready to fund', detail: 'Funds go to this wallet, never to xorr' },
 ] as const;
 
 /** The step marker. 26pt, 2pt ring — screens 8/9 draw it at this size on both. */

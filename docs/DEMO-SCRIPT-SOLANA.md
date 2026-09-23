@@ -15,7 +15,9 @@ account, keep the Solana Explorer tab pointed at the fork (`?cluster=custom&cust
 | 0:50 | Privy sheet → Approve → Home ARMED | "Signed. Armed." |
 | 0:55 | Trade tab → NVDAx ticket | "Any xStock, with the real Jupiter quote: price impact, slippage, the route, the least it can fill at — and what backs the token: the attestation, the issuer's controls, whether this wallet is eligible." |
 | 1:15 | Buy $25 → receipt with signature | "Bought, through Jupiter. That's the signature on the fork — open it." (Explorer tab: the Route instruction, the Whirlpool CPI.) |
-| 1:30 | Home → hire Momentum Scout | "Hire an agent. It watches the xStocks, and when a setup appears it buys — and says why." |
+| 1:30 | Home → Momentum Scout → Fund $100 → Privy | "Every agent gets its own wallet — an account I own, at its own address. I fund it once; the bot can spend what's in it and nothing more. The chain enforces that." |
+| 1:38 | Its rules: $20 a trade, NVDAx and TSLAx only, 3% max loss → Save | "And its own rules. Only these stocks, this much a trade, and its stop never further than 3% under the fill." |
+| 1:44 | Ask Momentum Scout to look now | "It looks now, through every gate — and it either trades from its own wallet with the receipt, or says exactly why not." |
 | 1:40 | Activity: the agent's buy + reason + "Exit set" | "It bought NVDAx, told me the setup and the numbers, and armed a stop and a target. Those fire on their own, through the sell approval I granted." |
 | 1:55 | Portfolio: holding with Scaled-UI units, P&L | "Holdings use the token's own multiplier, so a dividend or split moves the number the way the issuer meant." |
 | 2:05 | Ticket → Sell → Privy → receipt | "And I can sell myself — one transaction I sign." |

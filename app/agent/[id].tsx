@@ -16,10 +16,13 @@
  * the card's own header: this page is how people reach it.
  */
 import React, { useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { isSolana } from '@/chain';
+import { Linking, ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import { spendPhrase } from '@/strategies/spend';
+import { system, type AgentLookOutcome, type AgentPolicy } from '@/data/system';
+import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import {
   AgentOrb,
   BackButton,
@@ -33,6 +36,7 @@ import {
   Text,
   colors,
   money,
+  quantity,
   pnlTone,
   radius,
   size,
@@ -92,9 +96,17 @@ export default function AgentDetail() {
   const kinds = mandateOf ? (MANDATE_KINDS[mandateOf] ?? []) : [];
   // Plain: the React Compiler memoizes this itself, and could not preserve a hand-written memo keyed
   // on a joined string.
-  const mine = (strategies.data ?? []).filter(
-    (s) => s.state !== 'ended' && (agent?.custom ? s.agentId === agent.id : kinds.includes(s.kind)),
-  );
+  /*
+   * An exit an agent armed on its own entry is that agent's, whatever the kind mandate says (2026-09-23): Momentum
+   * Scout read "Nothing running yet" beside ten trades and five live exits, which were drawn under Drawdown Guard — an
+   * agent nobody had hired. `params.armedBy` is the executor's record of who armed it; the kind mapping decides the rest.
+   */
+  const mine = (strategies.data ?? []).filter((s) => {
+    if (s.state === 'ended') return false;
+    if (agent?.custom) return s.agentId === agent.id;
+    const armedBy = typeof s.params?.armedBy === 'string' ? s.params.armedBy : undefined;
+    return armedBy ? armedBy === agent?.name : kinds.includes(s.kind);
+  });
   const setup = setupFor(kinds);
 
   const hire = async () => {
@@ -195,14 +207,25 @@ export default function AgentDetail() {
             </Rise>
           ) : null}
 
-          <Rise index={1} style={{ flexDirection: 'row', gap: space.s10 }}>
-            <View style={{ flex: 1 }}>
-              <Button label="Add funds" variant={agent.hired ? 'primary' : 'ghost'} onPress={() => router.push('/deposit')} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Button label="Withdraw" variant="ghost" onPress={() => router.push('/send')} />
-            </View>
-          </Rise>
+          {/*
+            Its own wallet (2026-09-23). "Add funds" and "Withdraw" opened the owner's Deposit and Send screens — money
+            in and out of the owner's account, labelled as if it were the agent's. On Solana each hired agent has an
+            account of its own, owned by the owner, that it trades from alone.
+          */}
+          {isSolana && (agent.hired || agent.custom) ? (
+            <Rise index={1}>
+              <AgentWalletCard agentId={agent.id} name={agent.name} />
+            </Rise>
+          ) : !isSolana ? (
+            <Rise index={1} style={{ flexDirection: 'row', gap: space.s10 }}>
+              <View style={{ flex: 1 }}>
+                <Button label="Add funds" variant={agent.hired ? 'primary' : 'ghost'} onPress={() => router.push('/deposit')} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button label="Withdraw" variant="ghost" onPress={() => router.push('/send')} />
+              </View>
+            </Rise>
+          ) : null}
 
           <Rise index={2} style={{ flexDirection: 'row', gap: space.s10 }}>
             <Stat label="30 days" value={money(agent.pnl30d)} tone={pnlTone(agent.pnl30d)} />
@@ -210,6 +233,18 @@ export default function AgentDetail() {
             <Stat label="Win rate" value={winRate(agent)} />
             <Stat label="Trades" value={String(agent.trades)} />
           </Rise>
+
+          {isSolana && agent.hired && !agent.custom ? (
+            <Rise index={2}>
+              <LookNow agentId={agent.id} name={agent.name} />
+            </Rise>
+          ) : null}
+
+          {agent.hired || agent.custom ? (
+            <Rise index={3}>
+              <AgentRulesCard agentId={agent.id} name={agent.name} policy={(agent.riskLimits ?? {}) as AgentPolicy} />
+            </Rise>
+          ) : null}
 
           <Rise index={3} style={{ borderRadius: radius.panel, backgroundColor: colors.surfaceAlt, padding: space.s16 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -243,7 +278,8 @@ export default function AgentDetail() {
                   onPress={() => router.push(`/strategy/${s.id}`)}
                   title={s.label}
                   titleFigure={labelFigure(s.kind)}
-                  secondary={`${s.symbol} · ${spendPhrase(money(s.dailyAllocationUsd), s.cadence)}`}
+                  // An exit spends nothing: "$0.00 a day" read as a strategy with no budget (2026-09-23), as on Strategies.
+                  secondary={`${s.symbol} · ${s.kind === 'exit-rules' ? (isSolana ? 'checked every 30 seconds' : 'checked daily') : spendPhrase(money(s.dailyAllocationUsd), s.cadence)}`}
                   value={
                     <Text variant="secondarySm" color={s.state === 'live' ? colors.ink : colors.ink40}>
                       {STATE_LABEL[s.state] ?? s.state}
@@ -265,6 +301,147 @@ export default function AgentDetail() {
         </ScrollView>
       )}
     </Screen>
+  );
+}
+
+/** `FBed…CW88` */
+function shortAddress(a: string): string {
+  return `${a.slice(0, 4)}…${a.slice(-4)}`;
+}
+
+/** The agent's own wallet: what it holds, where, whether the bot may spend it, and the two ways money moves. */
+function AgentWalletCard({ agentId, name }: { agentId: string; name: string }) {
+  const router = useRouter();
+  const wallet = useAsync(() => system.agentWallet(agentId), [agentId]);
+  useFreshOnReturn(wallet);
+  const w = wallet.data;
+  return (
+    <View style={{ borderRadius: radius.panel, backgroundColor: colors.surfaceAlt, padding: space.s16 }} testID="agent-wallet-summary">
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text variant="cardTitle">Its wallet</Text>
+        {w ? (
+          <Text
+            variant="footnote"
+            color={colors.ink55}
+            onPress={() => void Linking.openURL(w.explorer)}
+            accessibilityRole="link"
+          >
+            {`${shortAddress(w.address)} ›`}
+          </Text>
+        ) : null}
+      </View>
+      {wallet.error ? (
+        <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s8 }}>
+          {errorText(wallet.error)}
+        </Text>
+      ) : !w ? (
+        <Placeholder height={40} style={{ marginTop: space.s10 }} />
+      ) : (
+        <>
+          <Price variant="cardTitleLg" figure="own" style={{ marginTop: space.s8 }}>
+            {money(w.usdc)}
+          </Price>
+          <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s4 }}>
+            {!w.exists || !w.inUse
+              ? `Give ${name} money of its own to trade. It stays in your wallet, at its own address.`
+              : w.approved
+                ? `${name} trades from this alone. The chain stops it at what is here.`
+                : 'The bot is not approved on it right now — fund it or resume in Safety.'}
+          </Text>
+        </>
+      )}
+      <View style={{ flexDirection: 'row', gap: space.s10, marginTop: space.s14 }}>
+        <View style={{ flex: 1 }}>
+          <Button label="Fund" onPress={() => router.push(`/agent/wallet?id=${encodeURIComponent(agentId)}&mode=fund`)} testID="agent-fund" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button
+            label="Withdraw"
+            variant="ghost"
+            disabled={!w || !(w.usdc > 0)}
+            onPress={() => router.push(`/agent/wallet?id=${encodeURIComponent(agentId)}&mode=withdraw`)}
+            testID="agent-withdraw"
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Ask it to look now (2026-09-23): the sweep's own cycle for this agent alone, through every gate. What comes back is
+ * either the fill — symbol, size, price, where it filled, the transaction — or the reason it took nothing.
+ */
+function LookNow({ agentId, name }: { agentId: string; name: string }) {
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<AgentLookOutcome>();
+  const [error, setError] = useState<string>();
+  async function look() {
+    setBusy(true);
+    setError(undefined);
+    setOut(undefined);
+    try {
+      setOut(await system.agentLook(agentId));
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <View style={{ gap: space.s8 }}>
+      <Button label={busy ? `${name} is looking` : `Ask ${name} to look now`} variant="ghost" loading={busy} onPress={() => void look()} testID="agent-look" />
+      {out?.executed ? (
+        <View style={{ borderRadius: radius.card, backgroundColor: colors.surfaceAlt, padding: space.s12, gap: space.s4 }} testID="agent-look-filled">
+          <Text variant="rowPrimary">{`Bought ${quantity(out.units)} ${out.symbol} for ${money(out.usd)}`}</Text>
+          <Text variant="secondarySm" color={colors.ink55}>
+            {out.reason}
+          </Text>
+          <Text variant="footnote" color={colors.ink65} onPress={() => void Linking.openURL(out.explorer)} accessibilityRole="link">
+            {`${out.venue === 'jupiter-route' ? 'Routed by Jupiter' : 'Filled from the venue vault'} · transaction ${out.signature.slice(0, 6)}… ›`}
+          </Text>
+        </View>
+      ) : out ? (
+        <Text variant="secondarySm" color={colors.ink55} align="center" testID="agent-look-held">
+          {out.detail}
+        </Text>
+      ) : error ? (
+        <Text variant="secondarySm" color={colors.down} align="center">
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** The agent's rules, in words, and the door to change them. */
+function AgentRulesCard({ agentId, name, policy }: { agentId: string; name: string; policy: AgentPolicy }) {
+  const router = useRouter();
+  const lines = [
+    policy.maxUsdPerTrade ? `Up to $${policy.maxUsdPerTrade} a trade` : null,
+    policy.maxUsdPerDay ? `Up to $${policy.maxUsdPerDay} a day` : null,
+    policy.symbols?.length ? `Only ${policy.symbols.join(', ')}` : null,
+    policy.allowOffHours === false ? 'Only while Nasdaq is open' : null,
+    policy.maxLossPct ? `Stop no more than ${policy.maxLossPct}% under the fill` : null,
+  ].filter((l): l is string => l !== null);
+  return (
+    <Press
+      onPress={() => router.push(`/agent/policy?id=${encodeURIComponent(agentId)}`)}
+      accessibilityRole="button"
+      accessibilityLabel={`${name}'s rules`}
+      style={{ borderRadius: radius.panel, backgroundColor: colors.surfaceAlt, padding: space.s16 }}
+      testID="agent-rules-summary"
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text variant="cardTitle">Its rules</Text>
+        <Text variant="control" color={colors.ink55}>
+          Edit
+        </Text>
+      </View>
+      <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>
+        {lines.length ? lines.join(' · ') : `No rules of its own yet — only your daily cap. Set what ${name} may trade, how much, and when.`}
+      </Text>
+    </Press>
   );
 }
 

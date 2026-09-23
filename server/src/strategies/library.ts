@@ -73,7 +73,24 @@ export type Provenance = {
 type Book = { provenance: Provenance; counts: { total: number; survivors: number; withDetail: number }; strategies: StrategyEntry[] };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const book: Book = JSON.parse(readFileSync(join(HERE, 'library.json'), 'utf8')) as Book;
+const raw: Book = JSON.parse(readFileSync(join(HERE, 'library.json'), 'utf8')) as Book;
+
+/**
+ * A description as prose, not as the research file's markdown (2026-09-23).
+ *
+ * The family notes were lifted from the engine's own docstrings, tables and code spans included, and the screen draws
+ * text — so a strategy's page read "`breadth100.py` covered…" and then "| family | dimension read | n | |--------|…" as
+ * a line of pipes. The prose before the first table is what describes the family; the table is the engine's index of
+ * its files. Emphasis and code marks are dropped, their words kept.
+ */
+export function plainAbout(text: string | null): string | null {
+  if (text === null) return null;
+  const beforeTable = text.split('|')[0] ?? '';
+  const plain = beforeTable.replace(/`([^`]*)`/g, '$1').replace(/\*\*?([^*]+)\*\*?/g, '$1').replace(/\s+/g, ' ').trim();
+  return plain === '' ? null : plain;
+}
+
+const book: Book = { ...raw, strategies: raw.strategies.map((s) => ({ ...s, about: plainAbout(s.about) })) };
 
 /** What a row draws, and nothing else. */
 export type StrategySummary = {

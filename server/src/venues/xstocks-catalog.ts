@@ -77,6 +77,25 @@ function positive(v: unknown): number | null {
 }
 
 /**
+ * What each xStock costs right now, by mint, from the same request the catalog makes (2026-09-23).
+ *
+ * The one URL for every mint, so this and `xStockCatalog` share `getJson`'s cache and a screen that draws both asks
+ * the upstream once. Jupiter's price for a token is its market price across routes — not a quote for a size, which
+ * is what `xStockPriceUsd` used to divide out of a $1,000 buy and which carried that buy's price impact.
+ */
+export async function xStockMarks(): Promise<Map<string, number>> {
+  const tokens = Object.values(XSTOCKS);
+  const url = `${PRICE_URL}?ids=${tokens.map((t) => t.address).join(',')}`;
+  const prices = await getJson<Record<string, PriceEntry>>(url, TTL_MS);
+  const out = new Map<string, number>();
+  for (const t of tokens) {
+    const price = positive(prices[t.address]?.usdPrice);
+    if (price !== null) out.set(t.address, price);
+  }
+  return out;
+}
+
+/**
  * The catalog, priced.
  *
  * One request for every mint rather than one per row: eleven probes behind a shared rate limit is

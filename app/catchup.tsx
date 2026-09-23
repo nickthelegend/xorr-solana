@@ -29,7 +29,7 @@ import {
   size,
   space,
 } from '@/ui';
-import { clock, when } from '@/format';
+import { stamp, when } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { errorText } from '@/data/apiError';
 import { system } from '@/data/system';
@@ -116,7 +116,7 @@ export default function Catchup() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
                   <Text variant="rowPrimary">{plainAction(e.action)}</Text>
                   <Text variant="footnote" color={colors.ink55}>
-                    {clock(new Date(e.at).getTime())}
+                    {stamp(new Date(e.at).getTime())}
                   </Text>
                 </View>
                 <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s6 }}>

@@ -28,7 +28,7 @@ import {
   size,
   space,
 } from '@/ui';
-import { clock, day, money, quantity } from '@/format';
+import { stamp, day, money, quantity } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { repos } from '@/data';
 import { system, type StrategyRunRow } from '@/data/system';
@@ -165,7 +165,7 @@ export default function StrategyDetail() {
                 height={size.rowLg}
                 onPress={() => router.push(`/runs/${r.id}`)}
                 title={day(new Date(r.at).getTime())}
-                secondary={r.error ?? clock(new Date(r.at).getTime())}
+                secondary={r.error ?? stamp(new Date(r.at).getTime())}
                 value={
                   <Text variant="rowPrimary" color={toneFor(r.status)} figure="units">
                     {r.status === 'filled' && r.units !== null ? quantity(r.units) : r.status}

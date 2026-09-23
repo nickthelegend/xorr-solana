@@ -403,7 +403,14 @@ export async function getPosition(
   if (!row) return null;
   const [marks, held] = await Promise.all([
     marksFor([row.symbol]),
-    readChain('your holdings', () => chainUnitsOf(wallet.address as Address, [row.symbol])),
+    /*
+     * The chain this deployment is on, as `listPositions` asks it (2026-09-23). This was still the EVM reader, so on
+     * Solana one position came back `chainUnits: null` — uncapped — while the list beside it was capped: the book said
+     * 0.2827 NVDAx, this said 0.7842, and Auto Close sized "make $5.30 / lose $5.30" on shares the wallet did not hold.
+     */
+    readChain('your holdings', () =>
+      ON_SOLANA ? solanaChainUnits(wallet.address, [row.symbol]) : chainUnitsOf(wallet.address as Address, [row.symbol]),
+    ),
   ]);
   return toPosition(row, marks.get(row.symbol), held.get(row.symbol) ?? null);
 }

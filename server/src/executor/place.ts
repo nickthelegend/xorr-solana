@@ -11,9 +11,10 @@
  * 4. Real mark from live Jupiter quote / venues/stocks
  * 5. spendAsDelegate() (SPL Transfer signed by delegate) -> venue ATA, followed by Jupiter swap fill.
  */
+import { plainFailure } from '../solana/failure.js';
 import { PublicKey } from '@solana/web3.js';
 import { readDelegation, spendAsDelegate, returnToOwner, usdToBaseUnits, baseUnitsToUsd } from '../solana/delegation.js';
-import { markBroadcast } from '../http/request-id.js';
+import { log, markBroadcast } from '../http/request-id.js';
 import { delegateKeypair, payerKeypair, venueVaultKeypair } from '../solana/keys.js';
 import { connection } from '../solana/connection.js';
 import { getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
@@ -50,6 +51,11 @@ export type SpendIntent = {
   skipRulesEngine?: boolean;
   /** For a sell: how many shares (as a holder sees them). Otherwise `usd` at the live mark decides. */
   units?: number;
+  /**
+   * An agent's own wallet (`agents/wallet.ts`, 2026-09-23): a buy spends from it instead of the owner's main USDC
+   * account, a failed buy refunds into it, and a sale pays into it. The chain caps the agent at what it holds.
+   */
+  agentWallet?: { address: string; name: string };
 };
 
 export type SpendReceipt = {
@@ -117,7 +123,7 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
   }
 
   // 1 & 3. On-chain check: readDelegation (SPL Token program is authoritative)
-  const onChainState = await readDelegation(intent.ownerPubkey, DEFAULT_MINTS.USDC);
+  const onChainState = await readDelegation(intent.ownerPubkey, DEFAULT_MINTS.USDC, undefined, intent.agentWallet?.address);
   if (side === 'buy') {
     if (onChainState.isRevoked) {
       /*
@@ -149,6 +155,14 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
   }
 
   const wantedUnits = usdToBaseUnits(intent.usd, 6);
+  if (side === 'buy' && intent.agentWallet && wantedUnits > onChainState.balanceAmount) {
+    return {
+      placed: false,
+      status: 'blocked',
+      reason: 'agent_wallet_empty',
+      detail: `${intent.agentWallet.name}'s wallet holds ${onChainState.balanceUsd.toFixed(2)} USDC, less than this ${intent.usd.toFixed(2)}. Fund it to let it trade this size.`,
+    };
+  }
   if (side === 'buy' && wantedUnits > onChainState.delegatedAmount) {
     return {
       placed: false,
@@ -288,6 +302,7 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
       owner: intent.ownerPubkey,
       destinationAta: vaultUsdcAta,
       amountUnits: wantedUnits,
+      sourceAccount: intent.agentWallet?.address,
     });
 
     // Step 5b: Jupiter swap fill. If it does not fill, the USDC goes straight back to its owner.
@@ -299,12 +314,14 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
         vaultKeypair: vault,
       });
     } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
+      log.error('[place] fill failed:', e instanceof Error ? e.message : e);
+      const why = plainFailure(e);
       const refund = await returnToOwner({
         owner: intent.ownerPubkey,
         mint: DEFAULT_MINTS.USDC,
         amountUnits: wantedUnits,
         fromKeypair: vault,
+        destination: intent.agentWallet?.address,
       }).then(
         (r) => r.signature,
         () => null,
@@ -404,9 +421,15 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
 
     let swapRes: Awaited<ReturnType<typeof swap>>;
     try {
-      swapRes = await swap({ quoteResponse: quoteRes, userPublicKey: intent.ownerPubkey, vaultKeypair: vault });
+      swapRes = await swap({
+        quoteResponse: quoteRes,
+        userPublicKey: intent.ownerPubkey,
+        vaultKeypair: vault,
+        destination: intent.agentWallet?.address,
+      });
     } catch (e) {
-      const why = e instanceof Error ? e.message : String(e);
+      log.error('[place] fill failed:', e instanceof Error ? e.message : e);
+      const why = plainFailure(e);
       const back = await returnToOwner({ owner: intent.ownerPubkey, mint: inMint, amountUnits: inUnits, fromKeypair: vault }).then(
         () => 'Your shares were returned.',
         (err: unknown) => `Returning your shares ALSO failed (${err instanceof Error ? err.message : String(err)}); they are held in the venue vault.`,

@@ -35,7 +35,7 @@ import {
   space,
 } from '@/ui';
 import { shortAddress } from '@/format';
-import { CHAIN_KEY } from '@/chain';
+import { CHAIN_KEY, isSolana } from '@/chain';
 import { API_BASE } from '@/data/apiBase';
 import { useAsync } from '@/data/useAsync';
 import { readNetwork } from '@/data/networks';
@@ -199,8 +199,12 @@ export default function Network() {
             ) : null}
 
             <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
+              {/*
+                On Solana the permission is an SPL approval to a key, not a contract (2026-09-23): "DELEGATION CONTRACT"
+                named a thing that does not exist on this network, over the address of the bot's delegate.
+              */}
               <Text variant="footnote" color={colors.ink55}>
-                DELEGATION CONTRACT
+                {isSolana ? 'DELEGATE KEY' : 'DELEGATION CONTRACT'}
               </Text>
               <Text variant="rowPrimary" style={{ marginTop: space.s4 }}>
                 {shortAddress(health.delegation)}

@@ -11,6 +11,7 @@
  * not being public.
  */
 import React from 'react';
+import { when } from '@/format';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -69,7 +70,7 @@ export default function AuditEntry() {
           >
             <SheetCard bordered borderRadius={radius.panel} padding={space.s18}>
               <Text variant="footnote" color={colors.ink55}>
-                {entry.agent.toUpperCase()} · {entry.t}
+                {entry.agent.toUpperCase()} · {entry.at ? when(entry.at) : entry.t}
               </Text>
               <Text variant="screenTitle" style={{ marginTop: space.s6 }}>
                 {entry.action}

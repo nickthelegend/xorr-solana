@@ -13,9 +13,11 @@
  * Everything is scoped to the caller's wallet. An agent id from another user must read as missing,
  * never as forbidden — the second answer confirms it exists.
  */
+import { ordinal } from '../bot/ordinal.js';
 import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
+import { AgentPolicySchema } from './policy.js';
 import { one, query } from '../db/index.js';
 import { append } from '../audit/log.js';
 import { currentWallet } from '../routes/wallet-context.js';
@@ -427,7 +429,7 @@ agents.post('/agents/risk-profile', async (c) => {
       walletId: w.id,
       agent: 'xorr',
       action: `Agent risk set to ${profile}`,
-      detail: `Entries up to $${s.maxTradeUsd}, a breakout counted from the ${Math.round(s.momentumEntryAt * 100)}th percentile, ${s.corporateActionWindowHours} hours clear of any scheduled split or dividend, and ${s.cooldownMinutes} minutes between entries.`,
+      detail: `Entries up to $${s.maxTradeUsd}, a breakout counted from the ${ordinal(Math.round(s.momentumEntryAt * 100))} percentile, ${s.corporateActionWindowHours} hours clear of any scheduled split or dividend, and ${s.cooldownMinutes} minutes between entries.`,
       kind: 'risk',
       payload: { previous, profile, settings: s },
     }).catch(() => undefined);
@@ -517,12 +519,8 @@ agents.post('/agents', async (c) => {
  * ignored. These two are enforced on every run (`agentLimitRefusal` in `executor/run.ts`); an unknown key is
  * refused rather than stored as a limit that does nothing.
  */
-const RiskLimits = z
-  .object({
-    maxUsdPerTrade: z.number().positive().optional(),
-    maxUsdPerDay: z.number().positive().optional(),
-  })
-  .strict();
+/* Every agent's policy, the same shape the sweep enforces (`agents/policy.ts`, 2026-09-23). */
+const RiskLimits = AgentPolicySchema;
 
 const PatchInput = z.object({
   tone: z.enum(['dry', 'sharp', 'flat']).optional(),
