@@ -3,7 +3,7 @@
     "name": "xorr",
     "slug": "xorr",
     "scheme": "xorr",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
@@ -19,8 +19,10 @@
       "supportsTablet": false,
       "userInterfaceStyle": "dark",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "xorr uses Face ID to authorise payouts and changes to what your bot is allowed to do."
-      }
+        "NSFaceIDUsageDescription": "xorr uses Face ID to authorise payouts and changes to what your bot is allowed to do.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "1"
     },
     "android": {
       "package": "finance.xorr.app",
@@ -28,7 +30,8 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
-      }
+      },
+      "versionCode": 1
     },
     "plugins": [
       [

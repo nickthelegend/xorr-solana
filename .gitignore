@@ -68,3 +68,4 @@ docs/demo/*.webm
 dist-base/
 dist/
 dist-web/
+/dist-mobile

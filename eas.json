@@ -1,0 +1,50 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "base": {
+      "env": {
+        "EXPO_PUBLIC_XORR_CHAIN": "solana-fork",
+        "EXPO_PUBLIC_API_URL": "https://executor-production-a672.up.railway.app",
+        "EXPO_PUBLIC_CHAIN_RPC": "https://solana-fork-production.up.railway.app",
+        "EXPO_PUBLIC_SOLANA_RPC": "https://solana-fork-production.up.railway.app"
+      }
+    },
+    "simulator": {
+      "extends": "base",
+      "ios": {
+        "simulator": true,
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "extends": "base",
+      "autoIncrement": true,
+      "ios": {
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}

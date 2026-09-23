@@ -22,9 +22,11 @@ import { useAuth } from '@/auth/useAuth';
 import { repos } from '@/data';
 import { useStore } from '@/state/store';
 import { setAuthKnowledge } from '@/auth/authState';
+import { isSolana } from '@/chain';
 
 export function useHydrateWallet(): void {
-  const { ready, authenticated, address } = useAuth();
+  const { ready, authenticated, address, createWallet } = useAuth();
+
   /*
    * READ through a ref, never a dependency.
    *
@@ -42,6 +44,24 @@ export function useHydrateWallet(): void {
   );
   const setWallet = useStore((s) => s.setWallet);
   const setWalletChecked = useStore((s) => s.setWalletChecked);
+
+  /*
+   * A signed-in person with no Solana wallet gets one (2026-09-23).
+   *
+   * Privy makes the embedded wallet at login, and only at login. A session restored from an older install — someone who
+   * signed in to the Base build — comes back with an Ethereum wallet and no Solana one, and nothing made it: Home showed
+   * the 0x address over a balance that could never be read ("Can't check"). Once per session, never while signed out.
+   */
+  const creating = useRef(false);
+  useEffect(() => {
+    if (!isSolana || !ready || !authenticated || address || creating.current) return;
+    creating.current = true;
+    void createWallet().catch(() => {
+      creating.current = false;
+      // It could not be made: let the entry gate decide, rather than hold a blank screen.
+      setWalletChecked(true);
+    });
+  }, [ready, authenticated, address, createWallet, setWalletChecked]);
 
   /*
    * Publish what Privy knows, so `api` can tell "signed out" from "not ready yet".
@@ -81,13 +101,22 @@ export function useHydrateWallet(): void {
      * before — and refresh behind it. The address is the part that must not flicker, and it is
      * the part that never changes.
      */
+    // A cached Base wallet from an older install is not this build's: drop it rather than show its 0x address.
+    if (isSolana && walletRef.current?.address?.startsWith('0x')) {
+      setWallet(null);
+      walletRef.current = null;
+    }
+    // Signed in without a Solana wallet yet: the effect above is making one. Hold the gate until it lands, so the person
+    // is not sent to the welcome screen for the second it takes.
+    if (isSolana && !address) return;
     const cached = Boolean(walletRef.current);
     if (cached) setWalletChecked(true);
 
     let alive = true;
     void repos.wallet
       .current()
-      .then(async (w) => {
+      .then(async (found) => {
+        let w = found;
         if (!alive) return;
 
         /*
@@ -109,6 +138,8 @@ export function useHydrateWallet(): void {
          * `connect` is an idempotent upsert, and this runs only when the two disagree, so it
          * settles after one call rather than looping.
          */
+        // On Solana, a wallet the executor knows by a 0x address is the Base one, never this build's (2026-09-23).
+        if (isSolana && w?.address?.startsWith('0x')) w = null;
         const known = w?.address?.toLowerCase();
         if (address && known !== address.toLowerCase()) {
           const reconciled = await repos.wallet.connect(address).catch(() => undefined);
