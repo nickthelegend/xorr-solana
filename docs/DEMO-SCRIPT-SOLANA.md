@@ -1,29 +1,42 @@
-# xorr on Solana — demo script (2:45)
+# xorr on Solana — the Loom (about 2:30)
 
-For the STOCKLANA video. Everything shown is the hosted build (https://xorr-solana.vercel.app) on the hosted mainnet
-fork: real mainnet programs and mints, test money, real signed transactions. Say "fork" once, early, and never "would".
+**The whole story in one line:** an AI agent trades tokenized stocks for you, from its own wallet, inside rules you set —
+and one tap takes every permission back.
 
-**Before recording:** redeploy the fork (fresh Jupiter routes: `railway up` of `infra/solana-fork`), sign in with a fresh
-account, keep the Solana Explorer tab pointed at the fork (`?cluster=custom&customUrl=<fork RPC>`).
+Keep it simple. Short sentences, one idea per scene, show don't explain. Everything on screen is real: the hosted app
+(https://xorr-solana.vercel.app) on a copy of Solana mainnet with test money. Say "test money" once, early.
 
-| t | On screen | Say |
-|---|---|---|
-| 0:00 | Welcome | "xStocks trade on Solana around the clock. Nobody can watch a market all night — so xorr lets an agent do it, without ever holding your money." |
-| 0:12 | Sign in with email → wallet created | "Sign in with email. Privy makes a Solana wallet that is yours; we never see its key." |
-| 0:22 | Deposit → Get 500 test USDC | "This runs on a mainnet fork, so the money is test USDC. Everything else is mainnet's own: USDC, the xStocks, Jupiter." |
-| 0:32 | Grant screen: the cards | "The permission is the product. One transaction: the bot may spend this much USDC, and sell the xStocks and pre-IPO tokens you hold so a stop-loss can fire. The chain enforces the total; we enforce the daily cap and the end date." |
-| 0:50 | Privy sheet → Approve → Home ARMED | "Signed. Armed." |
-| 0:55 | Trade tab → NVDAx ticket | "Any xStock, with the real Jupiter quote: price impact, slippage, the route, the least it can fill at — and what backs the token: the attestation, the issuer's controls, whether this wallet is eligible." |
-| 1:15 | Buy $25 → receipt with signature | "Bought, through Jupiter. That's the signature on the fork — open it." (Explorer tab: the Route instruction, the Whirlpool CPI.) |
-| 1:30 | Home → Momentum Scout → Fund $100 → Privy | "Every agent gets its own wallet — an account I own, at its own address. I fund it once; the bot can spend what's in it and nothing more. The chain enforces that." |
-| 1:38 | Its rules: $20 a trade, NVDAx and TSLAx only, 3% max loss → Save | "And its own rules. Only these stocks, this much a trade, and its stop never further than 3% under the fill." |
-| 1:44 | Ask Momentum Scout to look now | "It looks now, through every gate — and it either trades from its own wallet with the receipt, or says exactly why not." |
-| 1:40 | Activity: the agent's buy + reason + "Exit set" | "It bought NVDAx, told me the setup and the numbers, and armed a stop and a target. Those fire on their own, through the sell approval I granted." |
-| 1:55 | Portfolio: holding with Scaled-UI units, P&L | "Holdings use the token's own multiplier, so a dividend or split moves the number the way the issuer meant." |
-| 2:05 | Ticket → Sell → Privy → receipt | "And I can sell myself — one transaction I sign." |
-| 2:15 | Safety → Stop all trading → STOPPED, "confirmed on-chain" | "One tap stops everything: an SPL revoke on every account that names the bot. Stop-losses included. It works with our server down." |
-| 2:28 | Ticket → Buy → refused | "Try to buy now — refused, because the chain says so." |
-| 2:35 | Send → allowlisted address | "Withdrawals go only to addresses you saved a day ago." |
-| 2:42 | Closing card: repo + URL | "xorr. The permission is the product." |
+## Before you record (5 minutes)
 
-**Show one refusal** (0:28 over-cap or 2:28 after the stop). **Never** show a Base screen — the Solana build hides them.
+1. Redeploy the `solana-fork` service on Railway, so trade routes are fresh. (It resets every balance.)
+2. Open the app in a clean browser window and sign in with a **new** email.
+3. Hide bookmarks and other tabs. Zoom the browser to 110% so text reads on video.
+4. Do one practice run of scenes 3–5 so nothing surprises you — then start over with another new email.
+5. Have a second tab ready on Solana Explorer for the fork, to show one real transaction.
+
+## The six scenes
+
+| # | Time | Do this | Say this |
+|---|---|---|---|
+| 1 | 0:00 | Welcome screen | "Stocks now trade on Solana all day, every day. Nobody can watch that. xorr gives the job to an AI agent — without ever holding your money." |
+| 2 | 0:15 | Sign in with email → **Deposit** → **Get test USDC** | "I sign in with email and get my own Solana wallet. This runs on a copy of Solana mainnet, so this is test money." |
+| 3 | 0:35 | **Let the bot trade** → read the cards → **Sign this permission** → approve the popup | "Here is the key idea. I give the bot a permission, with a daily limit and an end date. That's all it can ever touch. I can take it back anytime." |
+| 4 | 0:55 | **Stocks** → **NVDAx** → Buy **$25** → receipt → open it on Explorer | "Buying Nvidia takes one tap. It goes through Jupiter, Solana's biggest exchange. Here's the real transaction." |
+| 5 | 1:20 | Home → **Momentum Scout** → **Hire Momentum Scout** → **Fund $100** → **Its rules → Edit**: $20 a trade, NVDAx + TSLAx, 3% max loss → **Save** → **Ask Momentum Scout to look now** | "Each agent gets its own wallet. I put $100 in, and it can never spend more than that. I set its rules: $20 a trade, only these two stocks, a stop 3% under the fill. Now I ask it to look." (Read what it answers — a trade, or why not.) |
+| 6 | 1:55 | **Safety** → **Stop all trading** → approve the popup → try to buy → refused | "One tap stops everything, the agent's wallet included. Watch — a buy is refused now, because the permission is gone on the blockchain itself." |
+| — | 2:20 | End card: live URL + GitHub | "xorr. Your agent, your rules, your money." |
+
+## If something goes wrong
+
+- **The agent says it won't trade** (market closed, cooldown, no setup): that's fine — read its reason out loud. "It
+  tells me exactly why it didn't trade. It keeps checking on its own, and trades from its wallet when the setup is
+  there."
+- **A buy fails with a route error**: the fork's routes went stale. Stop, redeploy `solana-fork`, start over.
+- **A Privy popup hangs**: close it and tap the button again. Nothing is sent until you approve.
+
+## Don't
+
+- Don't say "would" or "will" — everything shown already works.
+- Don't explain tech words (SPL, delegate, CPI, Token-2022). Say "permission", "wallet", "the blockchain".
+- Don't open any Base or EVM screen.
+- Don't go over 3 minutes. If you ran long, cut scene 4's Explorer tab first.

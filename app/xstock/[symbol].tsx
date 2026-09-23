@@ -308,7 +308,13 @@ export default function XStockTicket() {
       ) : (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8, marginTop: space.s8, flexWrap: 'wrap' }}>
           {signedOut ? (
-            <Tag label="Sign in to check backing" tone="neutral" small testID="xstock-backing" />
+            // The sheet's own grey: the neutral tone is drawn for black screens and vanishes on this white one.
+            <Tag
+              label="Sign in to check backing"
+              colors={{ bg: colors.sheet.fill, fg: colors.sheet.muted }}
+              small
+              testID="xstock-backing"
+            />
           ) : (
             <>
               <BackingBadge backing={backing.data ?? undefined} testID="xstock-backing" />
