@@ -88,8 +88,9 @@ export function breakdownRows(
     {
       label: 'Expected',
       value: `${fmt.quantity(q.receive)} ${q.receiveToken}`,
-      // What one share works out to once impact is in it, against the pool's own mark.
-      note: `${fmt.price(q.effectivePrice)} each · mark ${fmt.price(q.markPrice)}`,
+      // What one share works out to once impact is in it, against the pool's own price — named "pool", since a pre-IPO
+      // ticket also shows the issuer's mark above it, and two different "marks" on one sheet read as a contradiction.
+      note: `${fmt.price(q.effectivePrice)} each · pool ${fmt.price(q.markPrice)}`,
       cost: false,
     },
     {

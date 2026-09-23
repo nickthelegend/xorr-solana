@@ -15,6 +15,8 @@ import { THIS_CHAIN } from '../db/chain-scope.js';
 import { speak } from '../bot/llm.js';
 import { TONE_INSTRUCTIONS, type ToneId } from '../bot/tone.js';
 import type { PersonaId } from '../bot/personas.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { XSTOCKS } from '../venues/xstocks.js';
 
 const FEEDS = [
   { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', tag: 'ON-CHAIN' },
@@ -23,6 +25,7 @@ const FEEDS = [
 
 /** design.md tag chip colours, matching the handoff's fixture. */
 const TAG_STYLE: Record<string, { bg: string; fg: string }> = {
+  STOCKS: { bg: 'rgba(91,147,255,.16)', fg: '#7FA9FF' },
   MACRO: { bg: 'rgba(91,147,255,.16)', fg: '#7FA9FF' },
   EARNINGS: { bg: 'rgba(240,190,85,.16)', fg: '#F0BE55' },
   'ON-CHAIN': { bg: 'rgba(73,227,155,.16)', fg: '#49E39B' },
@@ -64,10 +67,52 @@ export async function fetchHeadlines(): Promise<Headline[]> {
   return all.sort((a, b) => b.at - a.at);
 }
 
-/** The user's actual exposure: symbols they hold or have a strategy on. */
+/**
+ * The listed share an xStock tracks: its symbol without Backed's `x` (NVDAx → NVDA), or undefined for anything else.
+ */
+export function listedTicker(symbol: string): string | undefined {
+  return XSTOCKS[symbol] && symbol.endsWith('x') ? symbol.slice(0, -1) : undefined;
+}
+
+/**
+ * Real headlines about one listed share, each tagged with the token that tracks it (2026-09-23).
+ *
+ * On Solana the book is stocks, and the two feeds above are crypto news: an NVDAx holder's briefing matched nothing
+ * and fell back to "Bitcoin slips under $86,000". Yahoo Finance publishes a public RSS feed per ticker, and every item
+ * in it is about the ticker asked for, so the item is tagged by the request rather than guessed from its title. Yahoo
+ * answers 404 to a request without a browser User-Agent, hence the header.
+ */
+export async function fetchStockHeadlines(symbols: string[], limitPerSymbol = 4): Promise<(Headline & { symbol: string })[]> {
+  const out: (Headline & { symbol: string })[] = [];
+  await Promise.all(
+    symbols.map(async (symbol) => {
+      const ticker = listedTicker(symbol);
+      if (!ticker) return;
+      try {
+        const res = await fetch(
+          `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ticker)}&region=US&lang=en-US`,
+          { headers: { accept: 'application/rss+xml, text/xml', 'user-agent': 'Mozilla/5.0 (compatible; xorr-briefing)' } },
+        );
+        if (!res.ok) return;
+        for (const h of parseRss(await res.text(), 'STOCKS', limitPerSymbol)) out.push({ ...h, symbol });
+      } catch {
+        // One ticker's feed being down is not a reason to have no briefing.
+      }
+    }),
+  );
+  return out.sort((a, b) => b.at - a.at);
+}
+
+/** The user's actual exposure: symbols they hold, or have a strategy on. */
 export async function heldSymbols(walletId: string): Promise<string[]> {
+  /*
+   * Positions as well as strategies (2026-09-23). A holding with no strategy on it — bought by hand, or left after a
+   * stop was swept — is still the user's book, and it was left out.
+   */
   const rows = await query<{ symbol: string }>(
-    `SELECT DISTINCT symbol FROM strategies WHERE wallet_id=$1 AND chain = ${THIS_CHAIN} AND state IN ('live','watch','paused')`,
+    `SELECT symbol FROM strategies WHERE wallet_id=$1 AND chain = ${THIS_CHAIN} AND state IN ('live','watch','paused')
+     UNION
+     SELECT symbol FROM positions WHERE wallet_id=$1 AND chain = ${THIS_CHAIN} AND units > 0.000001`,
     [walletId],
   );
   return rows.map((r) => r.symbol);
@@ -83,6 +128,10 @@ const NAMES: Record<string, string[]> = {
   AAVE: ['aave'],
   LINK: ['chainlink'],
   TON: ['toncoin', 'the open network'],
+  // Pre-IPO tokens have no listed ticker to ask a feed for, so they are found by the company's name.
+  'T-OpenAI': ['openai'],
+  'T-SpaceX': ['spacex'],
+  'T-Kalshi': ['kalshi'],
 };
 
 /** "Only what moved your book" — a headline that names nothing you hold is not your briefing. */
@@ -152,13 +201,53 @@ export type BriefingCard = {
   link: string;
 };
 
+/**
+ * Which headlines make a briefing, given the book.
+ *
+ * With no exposure there is no "your book" to filter to, so the freshest general headlines stand in — real news, not a
+ * fixture. With exposure, only headlines about it: this used to fall back to the freshest general news whenever nothing
+ * matched, so a book of stocks was briefed on Bitcoin under a screen that says "Only what moved your book". An empty
+ * briefing is the true answer then, and the screen says so.
+ */
+export function pickBriefing(
+  exposure: string[],
+  about: (Headline & { symbol: string })[],
+  general: Headline[],
+  count = 3,
+): (Headline & { symbol: string })[] {
+  if (exposure.length === 0) return general.slice(0, count).map((h) => ({ ...h, symbol: '' }));
+  const seen = new Set<string>();
+  const out: (Headline & { symbol: string })[] = [];
+  // One headline per holding first, so three NVDAx stories do not crowd out the only TSLAx one.
+  for (const pass of [true, false]) {
+    for (const h of about) {
+      if (out.length >= count) return out;
+      if (seen.has(h.link || h.title)) continue;
+      if (pass && out.some((o) => o.symbol === h.symbol)) continue;
+      seen.add(h.link || h.title);
+      out.push(h);
+    }
+  }
+  return out;
+}
+
 export async function briefing(walletId: string, tone: ToneId = 'dry'): Promise<BriefingCard[]> {
   const symbols = await heldSymbols(walletId);
-  const headlines = await fetchHeadlines();
-  // With no positions yet there is no "your book" to filter to, so show the freshest instead —
-  // and it is still real news, not a fixture.
-  const picked = (symbols.length > 0 ? relevant(headlines, symbols) : []).slice(0, 3);
-  const cards = picked.length > 0 ? picked : headlines.slice(0, 3).map((h) => ({ ...h, symbol: '' }));
+  let about: (Headline & { symbol: string })[];
+  let general: Headline[];
+  if (ON_SOLANA) {
+    // The book is stocks: each holding's own feed, and the broad market (SPY, QQQ) for a book with nothing in it yet.
+    const [own, market] = await Promise.all([fetchStockHeadlines(symbols), fetchStockHeadlines(['SPYx', 'QQQx'], 3)]);
+    // A pre-IPO holding has no ticker feed; it is found by name in whatever stock news was fetched.
+    const named = relevant([...own, ...market], symbols.filter((s) => !listedTicker(s)));
+    about = [...own, ...named].sort((a, b) => b.at - a.at);
+    general = market;
+  } else {
+    const headlines = await fetchHeadlines();
+    about = relevant(headlines, symbols);
+    general = headlines;
+  }
+  const cards = pickBriefing(symbols, about, general);
 
   const out: BriefingCard[] = [];
   for (const [i, h] of cards.entries()) {

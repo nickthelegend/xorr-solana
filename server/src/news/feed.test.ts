@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRss, relativeTime, relevant, type Headline } from './feed.js';
+import { listedTicker, parseRss, pickBriefing, relativeTime, relevant, type Headline } from './feed.js';
 
 const RSS = `<?xml version="1.0"?><rss><channel>
 <item><title><![CDATA[Solana staking yield ticks up]]></title><link>https://x/1</link><pubDate>Sat, 05 Sep 2026 12:00:00 GMT</pubDate></item>
@@ -42,5 +42,35 @@ describe('12.24 news ingestion [G34]', () => {
     expect(relativeTime(now - 18 * 60_000, now)).toBe('18m');
     expect(relativeTime(now - 2 * 3600_000, now)).toBe('2h');
     expect(relativeTime(now - 50 * 3600_000, now)).toBe('2d');
+  });
+
+  it('asks a stock feed for the share an xStock tracks, and nothing else', () => {
+    expect(listedTicker('NVDAx')).toBe('NVDA');
+    expect(listedTicker('GOOGLx')).toBe('GOOGL');
+    expect(listedTicker('T-OpenAI')).toBeUndefined();
+    expect(listedTicker('BTC')).toBeUndefined();
+  });
+
+  it('finds a pre-IPO holding by its company name', () => {
+    const items: Headline[] = [{ tag: 'STOCKS', title: 'OpenAI weighs a new funding round', at: 1, link: 'l' }];
+    expect(relevant(items, ['T-OpenAI']).map((h) => h.symbol)).toEqual(['T-OpenAI']);
+  });
+
+  it('never briefs a book on news about something else (2026-09-23)', () => {
+    const general: Headline[] = [{ tag: 'ON-CHAIN', title: 'Bitcoin slips under $86,000', at: 3, link: 'b' }];
+    // Holding NVDAx with no NVDAx news: an empty briefing, not the freshest crypto headline.
+    expect(pickBriefing(['NVDAx'], [], general)).toEqual([]);
+    // Holding nothing: the freshest general news stands in.
+    expect(pickBriefing([], [], general).map((h) => h.title)).toEqual(['Bitcoin slips under $86,000']);
+  });
+
+  it('gives each holding a headline before any gets a second', () => {
+    const about = [
+      { tag: 'STOCKS', title: 'n1', at: 5, link: 'n1', symbol: 'NVDAx' },
+      { tag: 'STOCKS', title: 'n2', at: 4, link: 'n2', symbol: 'NVDAx' },
+      { tag: 'STOCKS', title: 'n3', at: 3, link: 'n3', symbol: 'NVDAx' },
+      { tag: 'STOCKS', title: 't1', at: 2, link: 't1', symbol: 'TSLAx' },
+    ];
+    expect(pickBriefing(['NVDAx', 'TSLAx'], about, []).map((h) => h.title)).toEqual(['n1', 't1', 'n2']);
   });
 });

@@ -36,7 +36,7 @@ import { RollingNumber } from '@/ui/RollingNumber';
 import { successTap } from '@/ui/haptics';
 import { useAuth } from '@/auth/useAuth';
 import { shortAddress } from '@/format';
-import { activeChain, chainLabel, depositQrNote, depositQrWorks, depositUri } from '@/chain';
+import { activeChain, chainLabel, chainMoney, depositQrNote, depositQrWorks, depositUri } from '@/chain';
 import { NetworkChip } from '@/networks/NetworkChip';
 import { useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
@@ -81,7 +81,13 @@ export default function Deposit() {
   const faucet = useAsync(() => faucetStatus(), []);
   // Whether card deposits are set up on this executor at all: with no MoonPay key it answers 503, and the button would
   // only open a checkout that cannot work.
-  const moonPay = useAsync(() => fetchMoonPayConfig(), []);
+  /*
+   * On a copy of a network (a fork) a card cannot pay in at all: MoonPay delivers to the real chain, never to the copy.
+   * So nothing is asked, and the screen says that, rather than "no MoonPay key is configured" — a fault that is not the
+   * reason (2026-09-23).
+   */
+  const cardsReachHere = chainMoney !== 'copy';
+  const moonPay = useAsync(() => (cardsReachHere ? fetchMoonPayConfig() : Promise.resolve(null)), [cardsReachHere]);
   const now = useNow();
   const [copied, setCopied] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -188,7 +194,11 @@ export default function Deposit() {
             </Text>
             {address ? (
               <View style={{ marginTop: space.s12, gap: space.s10 }}>
-                {moonPay.data?.configured ? (
+                {!cardsReachHere ? (
+                  <Text variant="footnote" color={colors.ink50} align="center">
+                    A card pays in on the real network, not on this copy of it. Use the test USDC below.
+                  </Text>
+                ) : moonPay.data?.configured ? (
                   <Button
                     label="Buy with Card · MoonPay Sandbox"
                     variant="secondary"

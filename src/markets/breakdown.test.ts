@@ -154,7 +154,7 @@ describe('the whole breakdown', () => {
   });
 
   it('puts the effective price against the mark, so the gap is visible', () => {
-    expect(row(BUY, 'Expected').note).toBe('$216.74 each · mark $216.83');
+    expect(row(BUY, 'Expected').note).toBe('$216.74 each · pool $216.83');
   });
 
   it('works the same on a sell, in the tokens that side is denominated in', () => {
