@@ -153,14 +153,14 @@ export default function GrantDelegation() {
           <ConsequenceCard
             tone="up"
             label="It can place trades"
-            detail={isSolana ? `Up to ${capLabel(cap)}, which xorr holds it to each day.` : `Up to ${capLabel(cap)}.`}
+            detail={isSolana ? `Up to ${capLabel(cap)}. xorr counts every trade against it.` : `Up to ${capLabel(cap)}.`}
           />
           {isSolana ? (
             <>
               <ConsequenceCard
                 tone="down"
                 label="It can spend only the USDC you approve"
-                detail={`At most ${usd(cap * grantDays)} in all, and xorr only spends it on xStock buys through Jupiter.`}
+                detail={`At most ${usd(cap * grantDays)} in all, and xorr only spends it on xStock and pre-IPO token buys through Jupiter.`}
               />
               {/*
                 The grant also approves the bot on your xStock accounts (2026-09-19), so a stop-loss can sell while you are
@@ -169,8 +169,8 @@ export default function GrantDelegation() {
               */}
               <ConsequenceCard
                 tone="down"
-                label="It can sell the xStocks you hold"
-                detail="So a stop-loss or take-profit can fire while you are away. xorr only moves them into a sale that pays you USDC. Nothing else in your wallet is reachable."
+                label="It can sell the stock tokens you hold"
+                detail="xStocks and pre-IPO tokens, so a stop-loss or take-profit can fire while you are away. xorr only moves them into a sale that pays you USDC. Nothing else in your wallet is reachable."
               />
               {/* The one disclosure a new holder must see before granting (2026-09-19); the rest is in Risk disclosure. */}
               <ConsequenceCard

@@ -39,7 +39,8 @@ describe('errorText', () => {
 
   it('leaves the errors that write their own sentence alone', () => {
     expect(errorText(new TimedOut('/orders', 20_000))).toContain('did not answer within 20s');
-    expect(errorText(new NotSignedIn('/wallet/balance'))).toContain('Not signed in');
+    // Signed out writes a step, never the internal path it did not request (2026-09-23).
+    expect(errorText(new NotSignedIn('/wallet/balance'))).toBe('Sign in first.');
   });
 
   it('has something to say about a value that is not an Error at all', () => {

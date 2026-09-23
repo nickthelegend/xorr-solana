@@ -38,6 +38,7 @@ import {
   CloseButton,
   SignInButton,
   FailureNote,
+  Tag,
   Keypad,
   Pill,
   Price,
@@ -178,10 +179,16 @@ export default function XStockTicket() {
   // What backs the token, and whether the issuer's own gates let this wallet hold it — each read from its route, each
   // saying so in words when it could not be read.
   const { address } = useAuth();
-  const backing = useAsync(() => (hasBacking ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol, hasBacking]);
-  const detail = useAsync(() => (hasBacking ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol, hasBacking]);
-  const history = useAsync(() => (hasBacking ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol, hasBacking]);
-  const income = useAsync(() => (hasBacking ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol, hasBacking]);
+  /*
+   * The executor serves the backing panels to a session only, so a signed-out visitor is not sent four requests that
+   * are certain to be refused (2026-09-23: four 401s in the console, and a "Backing unverified" badge that was really
+   * "not asked"). The badge says what is missing instead.
+   */
+  const readBacking = hasBacking && !signedOut;
+  const backing = useAsync(() => (readBacking ? fetchBacking(symbol) : Promise.resolve(undefined)), [symbol, readBacking]);
+  const detail = useAsync(() => (readBacking ? fetchBackingDetail(symbol) : Promise.resolve(null)), [symbol, readBacking]);
+  const history = useAsync(() => (readBacking ? fetchReservesHistory(symbol) : Promise.resolve(null)), [symbol, readBacking]);
+  const income = useAsync(() => (readBacking ? fetchYield(symbol) : Promise.resolve(undefined)), [symbol, readBacking]);
   const eligibility = useAsync(
     () => (hasBacking && address ? fetchEligibility(symbol, address) : Promise.resolve(undefined)),
     [symbol, address, hasBacking],
@@ -202,10 +209,11 @@ export default function XStockTicket() {
   const quoteUsd = cappedToHolding ? heldUsd : quoted;
   const quote = useAsync(
     () =>
-      quoteUsd > 0 && listed
+      // A quote is drawn for a session; signed out it is not asked for, and the sheet says why.
+      quoteUsd > 0 && listed && !signedOut
         ? system.xstockQuote({ symbol, side, usd: quoteUsd })
         : Promise.resolve(null),
-    [symbol, side, quoteUsd, listed],
+    [symbol, side, quoteUsd, listed, signedOut],
   );
   const { sell: sellShares, selling, ready: canSell } = useXStockSell();
   const [sold, setSold] = useState<XStockSellOutcome>();
@@ -299,13 +307,19 @@ export default function XStockTicket() {
         ) : null
       ) : (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8, marginTop: space.s8, flexWrap: 'wrap' }}>
-          <BackingBadge backing={backing.data ?? undefined} testID="xstock-backing" />
-          <Pill
-            label={showBacking ? 'Hide backing' : 'What backs it'}
-            light
-            onPress={() => setShowBacking((v) => !v)}
-            testID="xstock-backing-toggle"
-          />
+          {signedOut ? (
+            <Tag label="Sign in to check backing" tone="neutral" small testID="xstock-backing" />
+          ) : (
+            <>
+              <BackingBadge backing={backing.data ?? undefined} testID="xstock-backing" />
+              <Pill
+                label={showBacking ? 'Hide backing' : 'What backs it'}
+                light
+                onPress={() => setShowBacking((v) => !v)}
+                testID="xstock-backing-toggle"
+              />
+            </>
+          )}
         </View>
       )}
       {address && !maybePreIpo ? (
@@ -360,6 +374,10 @@ export default function XStockTicket() {
         {amount <= 0 ? (
           <Text variant="secondary" color={colors.sheet.muted} align="center" style={{ paddingVertical: space.s20 }}>
             Enter an amount to see what it costs.
+          </Text>
+        ) : signedOut ? (
+          <Text variant="secondary" color={colors.sheet.muted} align="center" style={{ paddingVertical: space.s20 }}>
+            Sign in to see what this costs at the pool right now.
           </Text>
         ) : quote.error ? (
           /*
