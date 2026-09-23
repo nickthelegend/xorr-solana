@@ -585,11 +585,11 @@ extra.post('/bot/say', async (c) => {
 // GET /agents moved to server/src/agents/routes.ts, where it reads the persisted roster.
 
 extra.get('/briefing', async (c) => {
-  const id = await walletId(c);
-  if (!id) return c.json([]);
+  const wallet = await currentWallet(c);
+  if (!wallet) return c.json([]);
   const tone = (c.req.query('tone') ?? 'dry') as ToneId;
   try {
-    return c.json(await briefing(id, tone));
+    return c.json(await briefing(wallet, tone));
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }

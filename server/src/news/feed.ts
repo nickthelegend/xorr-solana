@@ -17,6 +17,7 @@ import { TONE_INSTRUCTIONS, type ToneId } from '../bot/tone.js';
 import type { PersonaId } from '../bot/personas.js';
 import { ON_SOLANA } from '../solana/clusters.js';
 import { XSTOCKS } from '../venues/xstocks.js';
+import { listPositions } from '../positions/index.js';
 
 const FEEDS = [
   { url: 'https://www.coindesk.com/arc/outboundfeeds/rss/', tag: 'ON-CHAIN' },
@@ -104,18 +105,21 @@ export async function fetchStockHeadlines(symbols: string[], limitPerSymbol = 4)
 }
 
 /** The user's actual exposure: symbols they hold, or have a strategy on. */
-export async function heldSymbols(walletId: string): Promise<string[]> {
-  /*
-   * Positions as well as strategies (2026-09-23). A holding with no strategy on it — bought by hand, or left after a
-   * stop was swept — is still the user's book, and it was left out.
-   */
-  const rows = await query<{ symbol: string }>(
-    `SELECT symbol FROM strategies WHERE wallet_id=$1 AND chain = ${THIS_CHAIN} AND state IN ('live','watch','paused')
-     UNION
-     SELECT symbol FROM positions WHERE wallet_id=$1 AND chain = ${THIS_CHAIN} AND units > 0.000001`,
-    [walletId],
-  );
-  return rows.map((r) => r.symbol);
+export async function heldSymbols(wallet: { id: string; address: string }): Promise<string[]> {
+  const [strategies, positions] = await Promise.all([
+    query<{ symbol: string }>(
+      `SELECT DISTINCT symbol FROM strategies WHERE wallet_id=$1 AND chain = ${THIS_CHAIN} AND state IN ('live','watch','paused')`,
+      [wallet.id],
+    ),
+    /*
+     * Holdings as well as strategies (2026-09-23): a position with no strategy on it — bought by hand, or left after a
+     * stop was swept — is still the user's book. Read through `listPositions`, which caps each ledger row at what the
+     * wallet holds on chain, so a row the chain no longer backs (a fork rebuilt under it) is not news about "your book".
+     */
+    listPositions(wallet),
+  ]);
+  const held = positions.filter((p) => p.units > 0.000001).map((p) => p.symbol);
+  return [...new Set([...strategies.map((r) => r.symbol), ...held])];
 }
 
 const NAMES: Record<string, string[]> = {
@@ -231,8 +235,8 @@ export function pickBriefing(
   return out;
 }
 
-export async function briefing(walletId: string, tone: ToneId = 'dry'): Promise<BriefingCard[]> {
-  const symbols = await heldSymbols(walletId);
+export async function briefing(wallet: { id: string; address: string }, tone: ToneId = 'dry'): Promise<BriefingCard[]> {
+  const symbols = await heldSymbols(wallet);
   let about: (Headline & { symbol: string })[];
   let general: Headline[];
   if (ON_SOLANA) {
