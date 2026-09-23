@@ -555,7 +555,7 @@ export default function Safety() {
               <Row
                 title="Agent key"
                 // On Solana the key holds an SPL approval: it can move the approved USDC, and only that (2026-09-19).
-                secondary={isSolana ? 'Your approved USDC, and selling your xStocks' : 'Can’t withdraw'}
+                secondary={isSolana ? 'Your approved USDC, and selling your stock tokens' : 'Can’t withdraw'}
                 value={
                   <Text variant="rowPrimary" color={colors.ink55} selectable>
                     {delegateShown ? shortAddress(delegateShown) : '—'}

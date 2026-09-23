@@ -75,7 +75,7 @@ export default function Briefing() {
           <ErrorState error={error} onRetry={reload} />
         ) : (data ?? []).length === 0 ? (
           /* The feed answered with nothing. A blank area under the header read as still loading. */
-          <EmptyState text="No headlines right now." />
+          <EmptyState text="Nothing in the news touched your book today." />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
