@@ -19,7 +19,9 @@ process.env.PRIVY_APP_SECRET ??= 'sec_test_dummy_secret';
 process.env.XORR_CHAIN = 'solana-fork';
 process.env.MOONPAY_API_KEY = 'pk_test_xorr_dev_sandbox';
 process.env.MOONPAY_SECRET_KEY = 'sk_test_dev_secret_key_proof';
+process.env.MOONPAY_WEBHOOK_KEY = 'wk_test_dev_webhook_key_proof';
 
+import { createHmac } from 'node:crypto';
 import {
   Keypair,
   LAMPORTS_PER_SOL,
@@ -65,6 +67,7 @@ async function main() {
   process.env.XORR_CHAIN = 'solana-fork';
   process.env.MOONPAY_API_KEY = 'pk_test_xorr_dev_sandbox';
   process.env.MOONPAY_SECRET_KEY = 'sk_test_dev_secret_key_proof';
+process.env.MOONPAY_WEBHOOK_KEY = 'wk_test_dev_webhook_key_proof';
 
   const userKeypair = Keypair.generate();
   const userAddress = userKeypair.publicKey.toBase58();
@@ -128,24 +131,34 @@ async function main() {
   assert(urlData.url.includes('&signature='), 'URL is signed with HMAC-SHA256 signature using MOONPAY_SECRET_KEY');
   console.log(`  MoonPay Sandbox Signed URL:\n  ${urlData.url.slice(0, 100)}...`);
 
-  // 1.3 Webhook handling
-  const webhookRes = await app.request('/deposit/moonpay/webhook', {
+  // 1.3 Webhook handling: MoonPay signs each event (header `Moonpay-Signature-V2: t=<unix>,s=<HMAC-SHA256 of "t.body">`),
+  // and the executor refuses one it cannot verify.
+  const webhookBody = JSON.stringify({
+    type: 'transaction_updated',
+    data: {
+      id: 'tx_mp_sandbox_demo_123',
+      walletAddress: userAddress,
+      currency: { code: 'usdc_sol' },
+      baseCurrencyAmount: 250,
+      quoteCurrencyAmount: 250,
+      status: 'completed',
+      cryptoTransactionId: '5demoSigSolanaMoonPayDeposit1111111111111111111111111111111111111111111111111111111111111',
+    },
+  });
+  const unsigned = await app.request('/deposit/moonpay/webhook', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'transaction_completed',
-      data: {
-        id: 'tx_mp_sandbox_demo_123',
-        walletAddress: userAddress,
-        currencyCode: 'usdc_sol',
-        baseCurrencyAmount: 250,
-        quoteCurrencyAmount: 250,
-        status: 'completed',
-        cryptoTransactionId: '5demoSigSolanaMoonPayDeposit1111111111111111111111111111111111111111111111111111111111111',
-      },
-    }),
+    body: webhookBody,
   });
-  assert(webhookRes.status === 200, 'POST /deposit/moonpay/webhook handles transaction_completed');
+  assert(unsigned.status === 401, 'An unsigned webhook is refused (401)');
+  const t = Math.floor(Date.now() / 1000);
+  const s = createHmac('sha256', process.env.MOONPAY_WEBHOOK_KEY!).update(`${t}.${webhookBody}`).digest('hex');
+  const webhookRes = await app.request('/deposit/moonpay/webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'moonpay-signature-v2': `t=${t},s=${s}` },
+    body: webhookBody,
+  });
+  assert(webhookRes.status === 200, 'A signed transaction_updated (completed) webhook is accepted');
   const webhookData = (await webhookRes.json()) as any;
   assert(webhookData.received === true, 'Webhook confirmed transaction receipt');
 
