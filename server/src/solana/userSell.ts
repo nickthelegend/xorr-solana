@@ -1,27 +1,21 @@
 /**
- * A sale the OWNER signs, from the app (2026-09-19).
+ * A sale the OWNER signs, from the app (2026-09-19; through Jupiter since 2026-09-24).
  *
- * One transaction, both legs, so neither side can be left half done: the owner's xStock moves into the venue vault
- * (signed by the owner) and the vault pays the owner USDC (signed by the vault) at a live Jupiter quote for exactly that
- * many shares. The executor builds it, the vault signs its leg, the owner signs theirs in Privy and broadcasts, and
- * `verifyUserSell` reads the confirmed transaction back before anything is booked.
+ * Jupiter's own swap transaction, built for the owner's wallet: their shares go into the route and USDC comes back to
+ * their own account, with the owner as the only signer and fee payer. The executor builds it from a live quote, the
+ * owner signs in Privy and broadcasts, and `verifyUserSell` reads the confirmed transaction back before anything is
+ * booked.
  *
- * It settles against the vault, not through a Jupiter route, and says so (`venue: 'venue-vault'`): the price is the
- * route's live quote, the transfers are real, and there is no AMM in the middle. A fork's pools drift from mainnet and
- * do not include the sell direction, so a user-signed route would fail simulation more often than it filled.
+ * It used to settle against the venue vault — the owner's shares into xorr's account, the vault's USDC out at the
+ * quote — which is real transfers with no market in between. A sale is a trade, so it now goes to the market.
  */
-import { PublicKey, Transaction, type Connection } from '@solana/web3.js';
-import {
-  createAssociatedTokenAccountIdempotentInstruction,
-  createTransferCheckedInstruction,
-  getAccount,
-} from '@solana/spl-token';
+import { PublicKey, type Connection } from '@solana/web3.js';
+import { getAccount } from '@solana/spl-token';
 import { connection as defaultConnection } from './connection.js';
 import { ataFor, readMintScale, tokenProgramForMint, fromUiAmount, toUiAmount } from './balances.js';
 import { DEFAULT_MINTS } from './clusters.js';
-import { venueVaultKeypair } from './keys.js';
 import { tradableToken } from '../venues/tradable-token.js';
-import { quote } from '../venues/jupiter.js';
+import { buildOwnerSwap, quote } from '../venues/jupiter.js';
 
 export class SellRefused extends Error {
   constructor(
@@ -34,7 +28,7 @@ export class SellRefused extends Error {
 }
 
 export type PreparedSell = {
-  /** The partially signed transaction (vault leg signed), base64. */
+  /** Jupiter's swap for the owner's wallet, unsigned, base64. */
   transaction: string;
   blockhash: string;
   lastValidBlockHeight: number;
@@ -62,7 +56,7 @@ function stockFor(symbol: string) {
   return token;
 }
 
-/** Build the two-leg sale for `units` shares (as a holder sees them), priced by a live Jupiter quote. */
+/** Build the owner's Jupiter sale of `units` shares (as a holder sees them), from a live quote. */
 export async function prepareUserSell(
   params: { owner: string; symbol: string; units: number },
   conn: Connection = defaultConnection,
@@ -70,11 +64,8 @@ export async function prepareUserSell(
   if (!(params.units > 0)) throw new SellRefused('invalid_amount', 'The number of shares must be above zero.');
   const stock = stockFor(params.symbol);
   const owner = new PublicKey(params.owner);
-  const vault = venueVaultKeypair();
   const xMint = new PublicKey(stock.address);
-  const usdcMint = new PublicKey(DEFAULT_MINTS.USDC);
   const xProg = tokenProgramForMint(xMint);
-  const usdcProg = tokenProgramForMint(usdcMint);
 
   const xScale = await readMintScale(xMint, conn, xProg);
   const asked = fromUiAmount(params.units, xScale);
@@ -91,33 +82,22 @@ export async function prepareUserSell(
     throw new SellRefused('over_balance', `You hold ${toUiAmount(held.amount, xScale)} ${stock.symbol}, fewer than that.`);
   }
 
-  let usdcOut: bigint;
+  let q: Awaited<ReturnType<typeof quote>>;
   try {
-    const q = await quote({ inSymbolOrMint: stock.address, outSymbolOrMint: 'USDC', amountUnits: units, slippageBps: 50 });
-    usdcOut = BigInt(q.outAmount);
+    q = await quote({ inSymbolOrMint: stock.address, outSymbolOrMint: 'USDC', amountUnits: units, slippageBps: 50 });
   } catch (e) {
     throw new SellRefused('no_quote', `No venue would quote a sale of ${stock.symbol} right now (${e instanceof Error ? e.message : String(e)}).`);
   }
+  const usdcOut = BigInt(q.outAmount);
   if (usdcOut <= 0n) throw new SellRefused('no_quote', `The quote for ${stock.symbol} came back empty.`);
 
-  const vaultUsdc = ataFor(vault.publicKey, usdcMint, usdcProg);
-  const vaultCash = await getAccount(conn, vaultUsdc, 'confirmed', usdcProg).catch(() => null);
-  if (!vaultCash || vaultCash.amount < usdcOut) {
-    throw new SellRefused('venue_short', 'The venue cannot cover that sale right now, so nothing was prepared.');
+  let built: Awaited<ReturnType<typeof buildOwnerSwap>>;
+  try {
+    built = await buildOwnerSwap({ quoteResponse: q, owner, conn });
+  } catch (e) {
+    throw new SellRefused('no_route', `Jupiter could not build a sale of ${stock.symbol} right now (${e instanceof Error ? e.message : String(e)}).`);
   }
-
-  const vaultX = ataFor(vault.publicKey, xMint, xProg);
-  const ownerUsdc = ataFor(owner, usdcMint, usdcProg);
-  const tx = new Transaction().add(
-    createAssociatedTokenAccountIdempotentInstruction(owner, vaultX, vault.publicKey, xMint, xProg),
-    createAssociatedTokenAccountIdempotentInstruction(owner, ownerUsdc, owner, usdcMint, usdcProg),
-    createTransferCheckedInstruction(ownerX, xMint, vaultX, owner, units, xScale.decimals, [], xProg),
-    createTransferCheckedInstruction(vaultUsdc, usdcMint, ownerUsdc, vault.publicKey, usdcOut, 6, [], usdcProg),
-  );
-  const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
-  tx.recentBlockhash = blockhash;
-  tx.feePayer = owner;
-  tx.partialSign(vault);
+  const { transaction: tx, blockhash, lastValidBlockHeight } = built;
 
   const soldUnits = toUiAmount(units, xScale);
   const usd = Number(usdcOut) / 1e6;
@@ -135,8 +115,8 @@ export async function prepareUserSell(
 export type VerifiedSell = { symbol: string; units: number; usd: number; price: number; slot: number };
 
 /**
- * Read a sale back from the chain: confirmed without error, signed by the owner AND the vault (only `prepareUserSell`
- * produces the vault's signature), the owner's xStock fell and their USDC rose.
+ * Read a sale back from the chain: confirmed without error, signed by the owner, executed by the Jupiter program, and
+ * the owner's token fell while their USDC rose. A transfer to anyone at all is not a sale; a swap through the market is.
  */
 export async function verifyUserSell(
   params: { owner: string; signature: string; symbol: string },
@@ -148,8 +128,11 @@ export async function verifyUserSell(
   if (got.meta?.err) throw new SellRefused('failed', 'That transaction failed on the chain, so nothing was sold.');
   const msg = got.transaction.message;
   const signers = msg.staticAccountKeys.slice(0, msg.header.numRequiredSignatures).map((k) => k.toBase58());
-  if (!signers.includes(params.owner) || !signers.includes(venueVaultKeypair().publicKey.toBase58())) {
-    throw new SellRefused('not_a_sale', 'That transaction is not a sale this app prepared.');
+  if (!signers.includes(params.owner)) {
+    throw new SellRefused('not_a_sale', 'That transaction was not signed by this wallet.');
+  }
+  if (!msg.staticAccountKeys.some((k) => k.toBase58() === DEFAULT_MINTS.JUPITER_V6)) {
+    throw new SellRefused('not_a_sale', 'That transaction did not go through Jupiter, so it is not a sale.');
   }
   const change = (mint: string) => {
     const pre = got.meta?.preTokenBalances?.find((b) => b.owner === params.owner && b.mint === mint);

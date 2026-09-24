@@ -1,9 +1,9 @@
 /**
  * Selling an xStock, signed by the owner (2026-09-19) — the ticket's Sell and a position's Close share this one path.
  *
- * The executor builds one transaction (the owner's shares into the venue vault, the vault's USDC to the owner at
- * Jupiter's live quote) and co-signs its leg; the owner signs theirs in Privy and it is broadcast here; the executor then
- * reads it back from the chain before booking it. A refusal at either end comes back as `blocked` with its sentence.
+ * The executor builds Jupiter's own swap for the owner's wallet from a live quote (2026-09-24; it was a settlement against
+ * the venue vault); the owner signs it in Privy as its only signer and it is broadcast here; the executor then reads it
+ * back from the chain before booking it. A refusal at either end comes back as `blocked` with its sentence.
  */
 import { useCallback, useState } from 'react';
 import { Transaction } from '@solana/web3.js';

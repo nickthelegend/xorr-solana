@@ -11,18 +11,14 @@ import {
   PublicKey,
   VersionedTransaction,
   Transaction,
+  type Message,
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
-import {
-  createTransferInstruction,
-  createTransferCheckedInstruction,
-  createAssociatedTokenAccountIdempotentInstruction,
-  getAccount,
-} from '@solana/spl-token';
+import { createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token';
 import { connection as defaultConnection, waitForTx } from '../solana/connection.js';
 import { DEFAULT_MINTS, CLUSTER_KEY } from '../solana/clusters.js';
 import { payerKeypair, venueVaultKeypair } from '../solana/keys.js';
-import { ataFor, tokenProgramForMint, readMintScale } from '../solana/balances.js';
+import { ataFor, tokenProgramForMint } from '../solana/balances.js';
 
 export const JUPITER_TOKENS: Record<string, string> = {
   USDC: DEFAULT_MINTS.USDC,
@@ -346,6 +342,56 @@ async function routeThroughJupiter(params: {
   throw lastError ?? new Error('Jupiter route failed for an unknown reason.');
 }
 
+/**
+ * A Jupiter swap the OWNER signs, built for their own wallet (2026-09-24).
+ *
+ * The owner's own sale went to the venue vault: their shares moved to xorr's account and the vault paid them USDC at
+ * Jupiter's quote, with no market in between. This builds the real thing — Jupiter's own swap transaction, with the
+ * owner as the only signer and fee payer, their shares in and their USDC out — for the app to sign and broadcast.
+ *
+ * Legacy only, and stamped with this cluster's blockhash: off mainnet the quote is pinned to a legacy-sized route (see
+ * `routeThroughJupiter`), the app's signer takes a legacy `Transaction`, and Jupiter stamps a mainnet blockhash the fork
+ * has never seen. A v0 quote is refused rather than half-supported.
+ */
+export async function buildOwnerSwap(params: {
+  quoteResponse: JupiterQuoteResponse;
+  owner: PublicKey;
+  conn?: Connection;
+}): Promise<{ transaction: Transaction; blockhash: string; lastValidBlockHeight: number }> {
+  const { quoteResponse, owner, conn = defaultConnection } = params;
+  if (quoteResponse.transactionVersion === 0) {
+    throw new Error('Only a direct route can be signed in the app, and this quote needs a larger transaction.');
+  }
+  let lastError: Error | null = null;
+  for (const baseUrl of JUPITER_APIS) {
+    try {
+      const res = await fetch(`${baseUrl}/swap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quoteResponse,
+          userPublicKey: owner.toBase58(),
+          wrapAndUnwrapSol: true,
+          dynamicComputeUnitLimit: true,
+          asLegacyTransaction: true,
+        }),
+      });
+      if (!res.ok) throw new Error(`Jupiter swap build HTTP ${res.status}: ${await res.text()}`);
+      const { swapTransaction } = (await res.json()) as { swapTransaction: string };
+      const vtx = VersionedTransaction.deserialize(Buffer.from(swapTransaction, 'base64'));
+      if (vtx.message.version !== 'legacy') throw new Error('Jupiter built a v0 transaction for a legacy quote.');
+      const transaction = Transaction.populate(vtx.message as Message);
+      const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed');
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = owner;
+      return { transaction, blockhash, lastValidBlockHeight };
+    } catch (err) {
+      lastError = err as Error;
+    }
+  }
+  throw lastError ?? new Error('Jupiter could not build the swap.');
+}
+
 export async function swap(params: {
   quoteResponse: JupiterQuoteResponse;
   userPublicKey: PublicKey | string;
@@ -358,8 +404,6 @@ export async function swap(params: {
    * for that agent pays back into (2026-09-23). It exists already and belongs to the user, so nothing is created.
    */
   destination?: PublicKey | string;
-  /** Refuse to settle through the vault if the route cannot execute. */
-  requireRoute?: boolean;
 }): Promise<JupiterSwapResult> {
   const {
     quoteResponse,
@@ -368,18 +412,15 @@ export async function swap(params: {
     conn = defaultConnection,
     feePayer = payerKeypair(),
     vaultKeypair = venueVaultKeypair(),
-    requireRoute = false,
     destination,
   } = params;
   const destinationPk = destination ? (typeof destination === 'string' ? new PublicKey(destination) : destination) : null;
 
   const userPk = typeof userPublicKey === 'string' ? new PublicKey(userPublicKey) : userPublicKey;
-  const inputMintPk = new PublicKey(quoteResponse.inputMint);
   const outputMintPk = new PublicKey(quoteResponse.outputMint);
   const inAmount = BigInt(quoteResponse.inAmount);
   const outAmount = BigInt(quoteResponse.outAmount);
 
-  const inputProg = tokenProgramForMint(inputMintPk);
   const outputProg = tokenProgramForMint(outputMintPk);
 
   /*
@@ -429,112 +470,14 @@ export async function swap(params: {
       venue: 'jupiter-route',
     };
   } catch (err) {
-    if (requireRoute) {
-      throw new Error(
-        `Jupiter route could not execute and requireRoute was set, so nothing was filled: ${
-          (err as Error).message
-        }`,
-      );
-    }
-    // The program's own lines, so why a route failed is never cut down to "Simulation failed".
+    /*
+     * The route or nothing (2026-09-24). A route that could not execute used to be settled by the venue vault at the
+     * quoted price — real transfers, but no market: the vault paid out of its own inventory and the fill was labelled
+     * `venue-vault`. That is a stand-in for a trade, so it is gone. The caller refunds what it moved (`place.ts`), and
+     * the person reads why in words; a stale fork is fixed by refreshing it, not by pretending it filled.
+     */
     const logs = (err as { logs?: string[] }).logs ?? (err as { transactionLogs?: string[] }).transactionLogs ?? [];
-    console.warn(
-      `Jupiter route unavailable (${(err as Error).message}). Settling through the venue vault ` +
-        'at the quoted price — this fill is NOT a Jupiter swap.' +
-        (logs.length ? `\n  program logs:\n    ${logs.slice(-12).join('\n    ')}` : ''),
-    );
+    if (logs.length) console.warn(`Jupiter route failed; program logs:\n    ${logs.slice(-12).join('\n    ')}`);
+    throw new Error(`The Jupiter route could not execute, so nothing was filled: ${(err as Error).message}`);
   }
-
-  /*
-   * Fallback (PLAN.md §6.2 option A): a capped SPL delegate transfer settled by the venue vault.
-   * Real on-chain transfers at the quoted price, but no route and no AMM — `venue` says so.
-   *
-   * 1) If userSigner is provided and input is not yet in vault: transfer input from user to vault
-   * 2) Transfer output tokens from vault to user ATA
-   */
-  // Both legs are `transferChecked`, which rejects a decimals value the mint disagrees with.
-  const [inputScale, outputScale] = await Promise.all([
-    readMintScale(inputMintPk, conn, inputProg),
-    readMintScale(outputMintPk, conn, outputProg),
-  ]);
-
-  const userInAta = ataFor(userPk, inputMintPk, inputProg);
-  const vaultInAta = ataFor(vaultKeypair.publicKey, inputMintPk, inputProg);
-  const userOutAta = destinationPk ?? ataFor(userPk, outputMintPk, outputProg);
-  const vaultOutAta = ataFor(vaultKeypair.publicKey, outputMintPk, outputProg);
-
-  const tx = new Transaction();
-
-  // Ensure vault output ATA and user output ATA exist
-  // An agent's wallet already exists and is not an associated account, so it is not created here.
-  if (!destinationPk) {
-    tx.add(
-      createAssociatedTokenAccountIdempotentInstruction(
-        feePayer.publicKey,
-        userOutAta,
-        userPk,
-        outputMintPk,
-        outputProg,
-      ),
-    );
-  }
-  tx.add(
-    createAssociatedTokenAccountIdempotentInstruction(
-      feePayer.publicKey,
-      vaultInAta,
-      vaultKeypair.publicKey,
-      inputMintPk,
-      inputProg,
-    ),
-  );
-
-  // If user signs directly (e.g. for selling), transfer input to vault
-  if (userSigner && !userSigner.publicKey.equals(vaultKeypair.publicKey)) {
-    tx.add(
-      createTransferCheckedInstruction(
-        userInAta,
-        inputMintPk,
-        vaultInAta,
-        userSigner.publicKey,
-        inAmount,
-        inputScale.decimals,
-        [],
-        inputProg,
-      ),
-    );
-  }
-
-  // Transfer outAmount from vault to user
-  tx.add(
-    createTransferCheckedInstruction(
-      vaultOutAta,
-      outputMintPk,
-      userOutAta,
-      vaultKeypair.publicKey,
-      outAmount,
-      outputScale.decimals,
-      [],
-      outputProg,
-    ),
-  );
-
-  const signers = [feePayer, vaultKeypair];
-  if (userSigner && !signers.some((s) => s.publicKey.equals(userSigner.publicKey))) {
-    signers.push(userSigner);
-  }
-
-  const sig = await sendAndConfirmTransaction(conn, tx, signers, {
-    commitment: 'confirmed',
-  });
-
-  const { slot } = await waitForTx(sig, conn);
-  return {
-    signature: sig,
-    slot,
-    inAmount,
-    outAmount,
-    inputMint: quoteResponse.inputMint,
-    outputMint: quoteResponse.outputMint,
-    venue: 'venue-vault',
-  };
 }

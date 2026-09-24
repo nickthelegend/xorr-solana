@@ -40,3 +40,31 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(PORT, '::', () => console.log(`fork proxy on :${PORT} → rpc :${RPC_PORT}, ws :${WS_PORT}`));
+
+/*
+ * A fresh fork once a day (2026-09-24), at FORK_REFRESH_UTC_HOUR when it is set.
+ *
+ * A running validator cannot re-clone accounts, so its copies of mainnet's pools freeze at boot while mainnet moves on.
+ * Jupiter builds each swap against mainnet's current pool, and once the price leaves the tick arrays the fork copied,
+ * the route fails on chain (measured: NVDAx `InvalidTickArraySequence` 31 hours after boot). The executor no longer
+ * papers over that with a vault fill, so the fork has to stay fresh instead: exiting here lets the service restart,
+ * and every start runs the bootstrap again (`--reset`, today's routes). The executor sees the new genesis and resets
+ * its book to match (`server/src/fork/solanaReset.ts`). Test balances start over; the app says so.
+ */
+const REFRESH_HOUR = process.env.FORK_REFRESH_UTC_HOUR;
+if (REFRESH_HOUR !== undefined && REFRESH_HOUR !== '') {
+  const hour = Number(REFRESH_HOUR);
+  if (Number.isInteger(hour) && hour >= 0 && hour < 24) {
+    const now = new Date();
+    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour));
+    // At least an hour of life, so a fork that booted just before the hour is not thrown away at once.
+    while (next.getTime() - now.getTime() < 3_600_000) next.setUTCDate(next.getUTCDate() + 1);
+    console.log(`fork refresh scheduled for ${next.toISOString()}`);
+    setTimeout(() => {
+      console.log('daily refresh: exiting so the service restarts with a fresh clone of mainnet');
+      process.exit(1);
+    }, next.getTime() - now.getTime());
+  } else {
+    console.warn(`FORK_REFRESH_UTC_HOUR=${REFRESH_HOUR} is not an hour of the day (0-23); no daily refresh.`);
+  }
+}

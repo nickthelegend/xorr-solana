@@ -50,8 +50,9 @@ on Solana; nobody can watch a market all night. xorr lets an agent do it for you
 - **Token-2022, used as intended.** Scaled UI multipliers in every balance and P&L; the issuer's pause, freeze, permanent
   delegate and transfer hook read from the chain and shown on each stock; buys refused for a wallet the issuer's gates
   would refuse.
-- **Nothing is invented.** Every price is a live quote or says it has none; a fill that did not go through Jupiter is
-  labelled `venue-vault`; a signature is only ever one the chain confirmed.
+- **Nothing is invented.** Every price is a live quote or says it has none; every fill — buy, agent exit, or a sale
+  you sign yourself — is a Jupiter route executed on chain, and a route that cannot execute fills nothing and returns
+  your money; a signature is only ever one the chain confirmed.
 - **The guard is measured against someone else's number.** An xStock trades 24/7; the share behind it does not. While
   Nasdaq is shut, nothing arbitrages the pool back, so before any entry xorr compares the pool price to **Pyth's
   `Equity.US.<TICKER>/USD` feed, read straight off its Solana price account** — and holds if they have come apart by
@@ -208,10 +209,10 @@ Check two things. **`PRICE SOURCE`** is only ever a number fetched over HTTP. **
 what happened on-chain, and it has two possible values:
 
 - `jupiter-route`: the Jupiter program ran and swapped against the pool's reserves.
-- `venue-vault`: a capped delegate transfer at the quoted price, filled from a maker account. It is legitimate, but it is **not** a Jupiter swap.
+- `venue-vault`: a label kept for fills recorded before 2026-09-24, when a failed route was settled by a maker account.
+  The executor no longer does that: a route that cannot execute fills nothing and the USDC goes back.
 
-The tool **exits non-zero** on anything other than `jupiter-route`, and it prints
-`PROOF FAILED: Filled through 'venue-vault'`. It also fails if the reported fill and the on-chain
+The tool **exits non-zero** on anything other than `jupiter-route`. It also fails if the reported fill and the on-chain
 balance change disagree after applying the Token-2022 Scaled-UI multiplier (step 7).
 
 ### 6. Check the signature yourself, without our code
@@ -315,13 +316,15 @@ above, not the executor's. That is the non-custodial property, read straight off
 
 - **It is a fork, not mainnet.** The money is test money on a `solana-test-validator --clone` of mainnet. The programs,
   mints and pools are mainnet's own, cloned at boot; nothing here moves real funds.
-- **A fork's pools stop at boot.** A running validator cannot re-clone accounts, so over hours the pools drift from the
-  live price and a route can fail simulation. The fill then settles against the venue vault at the live quote and is
-  labelled `venue-vault` — never called a Jupiter swap. Re-run the bootstrap for fresh routes.
-- **A sale you sign in the app settles against the venue vault** at Jupiter's live quote, in one transaction you and
-  the vault both sign. A sale the agent makes (an exit) is routed through Jupiter.
-- **Card deposits need MoonPay keys**, which this repository does not have. Without them the Deposit screen says so;
-  the fork faucet works.
+- **A fork's pools stop at boot.** A running validator cannot re-clone accounts, so over a day or so a pool drifts out
+  of the price range the fork copied and its route fails on chain (measured: NVDAx, 31 hours after boot). Nothing
+  papers over that: the trade fills nothing and the USDC is returned, in words. The hosted fork therefore restarts
+  once a day (`FORK_REFRESH_UTC_HOUR` on the fork service) with today's routes, and test balances start over — the
+  app says so on Network and Deposit. Locally, re-run the bootstrap.
+- **A sale you sign in the app** is Jupiter's own swap transaction, built for your wallet: you are its only signer
+  and fee payer, and the executor books it only after reading back that Jupiter ran and your USDC rose.
+- **Card deposits need MoonPay keys**, which this repository does not have — and on a fork a card could not pay in
+  anyway, since MoonPay delivers to the real chain. The Deposit screen says so; the fork faucet works.
 - **Agent reasoning is deterministic without an `OPENROUTER_API_KEY`.** Each trade still names the setup and the
   numbers behind it; with a key the sentence is written by a model.
 - **An agent's rules are enforced by the executor**, like the daily cap; what an agent can spend at all is enforced by
