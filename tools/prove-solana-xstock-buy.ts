@@ -6,12 +6,11 @@
  *
  *   PRICE is always a live quote from Jupiter's off-chain quote API. No on-chain program is
  *         involved in a quote. It is a number over HTTP.
- *   FILL  is one of two on-chain paths, and `venue` on the receipt says which:
+ *   FILL  is the on-chain path, and `venue` on the receipt names it:
  *           `jupiter-route`  the Jupiter v6 program is invoked on-chain, CPIs into the AMM,
  *                            and the pool's own reserves move.
- *           `venue-vault`    a capped SPL delegate transfer, with the asset delivered from the
- *                            venue/maker account at the quoted price (PLAN.md §6.2 option A).
- *                            Legitimate, and NOT a Jupiter swap — no route executes.
+ *           A route that cannot execute fills nothing (2026-09-24): the executor no longer settles
+ *           it through the venue vault, so `venue-vault` appears only on fills recorded before then.
  *
  * A reader should never have to infer which one happened, so this tool asserts it and prints it.
  *

@@ -44,7 +44,8 @@ Jupiter v6, Meteora DLMM, Pyth (Equity.US feeds read on-chain), Privy (Solana em
 Hono + Postgres, `solana-test-validator --clone` of mainnet, Railway, Vercel.
 
 **What is real.** Every transaction in the demo is signed and confirmed on a fork of Solana mainnet cloned at boot —
-mainnet's USDC, xStocks, Jupiter program and today's routes. The money is test money. Nothing is simulated; a fill that
-did not go through Jupiter is labelled so. The limits are listed in the README.
+mainnet's USDC, xStocks, Jupiter program and today's routes. The money is test money. Nothing is simulated: every fill,
+including a sale you sign yourself, is a Jupiter route executed on chain, and a route that cannot execute fills nothing
+and returns your money. The fork restarts daily with fresh routes. The limits are listed in the README.
 
 **Team:** [names]
