@@ -297,6 +297,13 @@ export async function guardAndSpend(intent: SpendIntent): Promise<SpendOutcome> 
     // Recorded on the request's idempotency key before the first transaction leaves, so a retry never buys twice.
     await markBroadcast();
 
+    /*
+     * The vault's USDC account has to exist before USDC can move into it (2026-09-25). On a fork the bootstrap made it;
+     * on mainnet nothing had, so the first buy would fail its transfer. Created once, idempotently, by the fee payer —
+     * the same way the sell leg below makes the vault's account for the token being sold.
+     */
+    await getOrCreateAssociatedTokenAccount(connection, payerKeypair(), new PublicKey(DEFAULT_MINTS.USDC), vault.publicKey, false, 'confirmed');
+
     // Step 5a: spendAsDelegate (SPL transfer user USDC -> venue vault)
     const spendRes = await spendAsDelegate({
       owner: intent.ownerPubkey,

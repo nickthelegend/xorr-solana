@@ -8,6 +8,7 @@ import { Keypair } from '@solana/web3.js';
 
 const DELEGATE = Keypair.generate();
 const VAULT = Keypair.generate();
+const PAYER = Keypair.generate();
 const OWNER = Keypair.generate().publicKey.toBase58();
 
 const evaluateMock = vi.fn();
@@ -28,7 +29,12 @@ vi.mock('../solana/delegation.js', () => ({
   baseUnitsToUsd: (u: bigint) => Number(u) / 1e6,
 }));
 vi.mock('../http/request-id.js', () => ({ markBroadcast: () => markBroadcastMock() }));
-vi.mock('../solana/keys.js', () => ({ delegateKeypair: () => DELEGATE, venueVaultKeypair: () => VAULT }));
+vi.mock('../solana/keys.js', () => ({ delegateKeypair: () => DELEGATE, venueVaultKeypair: () => VAULT, payerKeypair: () => PAYER }));
+// The vault's USDC account is made idempotently before a buy moves anything (2026-09-25); here it simply exists.
+vi.mock('@solana/spl-token', async (original) => ({
+  ...(await original<typeof import('@solana/spl-token')>()),
+  getOrCreateAssociatedTokenAccount: vi.fn(async () => ({ address: VAULT.publicKey })),
+}));
 vi.mock('../solana/balances.js', () => ({
   ataFor: () => Keypair.generate().publicKey,
   tokenProgramForMint: vi.fn(),
