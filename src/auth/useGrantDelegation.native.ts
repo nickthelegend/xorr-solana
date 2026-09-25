@@ -268,5 +268,5 @@ export function useGrantDelegation() {
    * sign-in first." to someone who had. A screen shows its button as loading until this is true.
    */
   const ready = isSolana ? solana.ready : true;
-  return { grant, revoke, sendTransaction: send, estimateFee, busy, error, ready };
+  return { grant, revoke, sendTransaction: send, estimateFee, busy, error, ready, walletStatus: isSolana ? solana.status : undefined, walletError: isSolana ? solana.error : undefined };
 }
