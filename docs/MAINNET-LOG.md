@@ -32,3 +32,5 @@ wallet made with an email sign-in. Momentum Scout's own wallet is
 | 2026-09-25 17:39 | The owner sells the AAPLx position ($9.98), a Jupiter swap the owner signs | [`2XnAtMZx…`](https://solscan.io/tx/2XnAtMZx8Ya6SyiNaUcAmeEqsXYWi2UzjBP9osYb9N8w8xEYYKbhKKHsGEC43WyKGNa69MZH5fE6TuD8Rqg86bRu) |
 | 2026-09-25 17:42 | The owner grants the permission again: $100 a day for one day | [`oScKNCnx…`](https://solscan.io/tx/oScKNCnxWzonP7RJUNEgW2UD6jExCAFhJR7ynBDMBDrjApqDXjmLaSL2J9Dbo9VqjX22pQMXcM5eUTkMJzMirGy) |
 | 2026-09-25 17:44 | The owner funds Momentum Scout's wallet with $10 again | [`3uaKFyeQ…`](https://solscan.io/tx/3uaKFyeQdX59E9sfxzRXQq17qkqEwR5g9r1QXgF4fGS67F6xfmZrjb3b5T5uzTZ5d7iGJzrVpSdMryRB1rrSwVKf) |
+| 2026-09-25 20:14 | The owner funds Yield Keeper's own wallet with $10 | [`27uUp8…`](https://explorer.solana.com/address/95Eg) — see Activity |
+| 2026-09-25 20:15 | **Yield Keeper buys $10 of AMZNx on its own**, seconds after funding, from its own wallet through Jupiter; the phone posts "Yield Keeper bought AMZNx" | [`4vonrF4y…`](https://solscan.io/tx/4vonrF4yxuvqFs81kDoGw9EVsRpw2HGwxkovNuqTcwymuTKc9NUWU75a4gfcRFniokeMTGWzvG9MNqBppzSE6aBa) |
