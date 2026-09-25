@@ -11,7 +11,7 @@ import { Asset } from 'expo-asset';
 import { colors, useReducedMotion } from '@/ui';
 import { COIN_FOCUS, HeroFades } from './coinHeroParts';
 
-const POSTER = Asset.fromModule(require('../../assets/landing/night-shift-poster.webp')).uri;
+const POSTER = Asset.fromModule(require('../../assets/landing/coins-poster.webp')).uri;
 const WEBM = Asset.fromModule(require('../../assets/landing/hero.webm')).uri;
 const MP4 = Asset.fromModule(require('../../assets/landing/hero.mp4')).uri;
 /** An alpha mask, not a colour: opaque in the middle, clear at the very edges. */
