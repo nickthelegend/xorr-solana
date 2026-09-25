@@ -10,7 +10,7 @@ revoke in one tap — it never holds your money.
 
 **Links**
 - Website: https://xorr.finance
-- Live app: https://xorr-solana.vercel.app (sign in with email; hosted mainnet fork, test money, real transactions)
+- Live app: https://xorr-solana.vercel.app (Solana mainnet; sign in with email, Google, X, GitHub or a Solana wallet)
 - Repository: https://github.com/nickthelegend/xorr-solana
 - Video: [link]
 - Verify it yourself: README → "Verify it yourself, on your own machine" (ten minutes, no keys)
@@ -50,9 +50,9 @@ one to the user.
 Jupiter v6, Meteora DLMM, Pyth (Equity.US feeds read on-chain), Privy (Solana embedded wallets), Expo,
 Hono + Postgres, `solana-test-validator --clone` of mainnet, Railway, Vercel.
 
-**What is real.** Every transaction in the demo is signed and confirmed on a fork of Solana mainnet cloned at boot —
-mainnet's USDC, xStocks, Jupiter program and today's routes. The money is test money. Nothing is simulated: every fill,
-including a sale you sign yourself, is a Jupiter route executed on chain, and a route that cannot execute fills nothing
-and returns your money. The fork restarts daily with fresh routes. The limits are listed in the README.
+**What is real.** Everything. The hosted app runs on Solana mainnet with real USDC: every transaction in the demo is on
+Solscan. Every fill, including a sale you sign yourself, is a Jupiter route executed on chain, and a route that cannot
+execute fills nothing and returns your money. Anyone can also reproduce the on-chain proofs without money on a local
+clone of mainnet (README → Verify it yourself). The limits are listed in the README.
 
 **Team:** [names]
