@@ -15,6 +15,8 @@ import { activeChain, isSolana, supportedChains } from '@/chain';
 import { colors } from '@/ui';
 
 const APP_ID = process.env.EXPO_PUBLIC_PRIVY_APP_ID;
+/** The app client this build signs in through (2026-09-25), when one is configured; see PrivyProvider.native.tsx. */
+const CLIENT_ID = process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID;
 
 if (!APP_ID) {
   throw new Error('EXPO_PUBLIC_PRIVY_APP_ID is required — the app has no offline login path.');
@@ -58,6 +60,7 @@ export function AppPrivyProvider({ children }: { children: React.ReactNode }) {
   return (
     <WebProvider
       appId={APP_ID!}
+      {...(CLIENT_ID ? { clientId: CLIENT_ID } : {})}
       config={isSolana ? SOLANA_CONFIG : {
         // A wallet is created on login for anyone who does not already have one, which is what
         // makes "sign in and you own a wallet" a single step rather than two.
