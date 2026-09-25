@@ -71,6 +71,8 @@ import {
 } from '@/data/marketData';
 import { walletTokens } from '@/data/walletTokens';
 import { system } from '@/data/system';
+import { preIpo } from '@/data/preIpo';
+import { compactMoney } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
 import { rangeChange } from '@/state/derived';
@@ -286,6 +288,53 @@ export default function AssetDetail() {
           ),
     [symbol, equity],
   );
+
+  /*
+   * The details under the pills (2026-09-26). The space down to Sell/Buy was empty; these are all reads the app already
+   * makes elsewhere, each shown only when it answered — nothing here is a number the screen made up.
+   * The day's range is its own 1D read (the same cached request the 1D pill makes), so it is a day on every pill.
+   */
+  const dayRead = useAsync(() => fetchTimedHistory(symbol!, '1D'), [symbol]);
+  const dayBars = (dayRead.data ?? []).map((c) => c.bar);
+  const dayLow = dayBars.length ? Math.min(...dayBars.map((b) => b[2])) : undefined;
+  const dayHigh = dayBars.length ? Math.max(...dayBars.map((b) => b[1])) : undefined;
+  const xstock = isSolana && isXStockSymbol(symbol ?? '');
+  const preIpoToken = isSolana && isPreIpoSymbol(symbol ?? '');
+  const catalogRow = useAsync(
+    () => (xstock ? system.xstocks().then((c) => c.rows.find((r) => r.symbol === symbol) ?? null) : Promise.resolve(null)),
+    [symbol, xstock],
+  );
+  const preIpoRow = useAsync(
+    () => (preIpoToken ? preIpo.list().then((p) => p.rows.find((r) => r.symbol === symbol) ?? null) : Promise.resolve(null)),
+    [symbol, preIpoToken],
+  );
+  const stats: { label: string; value: string }[] = [];
+  if (dayLow !== undefined && dayHigh !== undefined) {
+    stats.push({ label: 'Day range', value: `${fmtPrice(dayLow)} – ${fmtPrice(dayHigh)}` });
+  }
+  if (current && hasSeries) stats.push({ label: `Change · ${range}`, value: percent(seriesPct, 2) });
+  const cat = catalogRow.data;
+  if (cat?.price != null && cat.underlyingPrice != null && cat.underlyingPrice > 0) {
+    stats.push({ label: 'Pool vs share', value: `${fmtPrice(cat.price)} · ${fmtPrice(cat.underlyingPrice)}` });
+    stats.push({ label: 'Pool premium', value: percent(((cat.price - cat.underlyingPrice) / cat.underlyingPrice) * 100, 2) });
+  }
+  if (cat?.liquidityUsd != null) stats.push({ label: 'Liquidity', value: compactMoney(cat.liquidityUsd) });
+  if (xstock) stats.push({ label: 'Backed', value: '1:1 by the share' });
+  const pre = preIpoRow.data;
+  if (pre?.poolUsd != null && pre.markUsd != null) {
+    stats.push({ label: 'Pool vs mark', value: `${fmtPrice(pre.poolUsd)} · ${fmtPrice(pre.markUsd)}` });
+  }
+  if (pre?.spreadPct != null) stats.push({ label: 'Premium to mark', value: percent(pre.spreadPct, 1) });
+  if (pre?.valuationUsd != null) stats.push({ label: 'Valuation', value: compactMoney(pre.valuationUsd) });
+  if (pre?.holders != null) stats.push({ label: 'Holders', value: pre.holders.toLocaleString('en-US') });
+  // This wallet's agent trades of this token, newest first, from the same `/runs` page the chart's fills come from.
+  const agentTrades = useMemo(() => {
+    const token = settlementSymbol(symbol ?? '').toUpperCase();
+    return (runs.data ?? [])
+      .filter((r) => r.status === 'filled' && r.symbol.toUpperCase() === token && (r.side === 'buy' || r.side === 'sell'))
+      .sort((a, b) => Date.parse(b.finishedAt ?? b.at) - Date.parse(a.finishedAt ?? a.at))
+      .slice(0, 5);
+  }, [runs.data, symbol]);
 
   // The hero reads live SPOT, not the last candle close — a candle series is a history and
   // the number at the top of this screen is a price.
@@ -635,6 +684,66 @@ export default function AssetDetail() {
           </Press>
         ) : null}
       </View>
+      {/* Details (2026-09-26): what fills the space above Sell/Buy, each tile a read that answered. */}
+      {stats.length > 0 ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: space.s8,
+            marginTop: space.s16,
+            paddingHorizontal: space.gutter,
+          }}
+        >
+          {stats.map((st) => (
+            <View
+              key={st.label}
+              style={{
+                flexBasis: '48%',
+                flexGrow: 1,
+                paddingVertical: space.s10,
+                paddingHorizontal: space.s12,
+                borderRadius: radius.tile,
+                backgroundColor: colors.surfaceAlt,
+                borderWidth: 1,
+                borderColor: colors.cardBorder,
+              }}
+            >
+              <Text variant="footnote" color={colors.ink45}>
+                {st.label}
+              </Text>
+              <Text variant="secondary" color={colors.ink} numberOfLines={1} style={{ marginTop: space.s4 }}>
+                {st.value}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {runs.data ? (
+        <View style={{ marginTop: space.s16, paddingHorizontal: space.gutter }}>
+          <Text variant="secondarySm" color={colors.ink55} style={{ marginBottom: space.s4 }}>
+            {`Agents on ${symbol}`}
+          </Text>
+          {agentTrades.length === 0 ? (
+            <Text variant="footnote" color={colors.ink45}>
+              {`No agent has traded ${symbol} yet.`}
+            </Text>
+          ) : (
+            agentTrades.map((r, i) => (
+              <Row
+                key={r.id}
+                title={`${r.label} ${r.side === 'buy' ? 'bought' : 'sold'}${r.usd != null ? ` ${money(r.usd)}` : ''}`}
+                secondary={when(Date.parse(r.finishedAt ?? r.at))}
+                height={ROW_H}
+                divider={i < agentTrades.length - 1}
+                onPress={() => router.push(`/runs/${r.id}`)}
+              />
+            ))
+          )}
+        </View>
+      ) : null}
+      <View style={{ height: space.s16 }} />
       </ScrollView>
 
       {/*

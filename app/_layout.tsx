@@ -14,6 +14,7 @@ import { AppPrivyProvider } from '@/auth/PrivyProvider';
 import { PhoneFrame, colors } from '@/ui';
 import { useRegisterDevice } from '@/notifications/useRegisterDevice';
 import { useNotificationRoute } from '@/notifications/useNotificationRoute';
+import { useAgentTradeAlerts } from '@/notifications/useAgentTradeAlerts';
 import { useHydrateWallet } from '@/wallet/useHydrateWallet';
 import { useHydrateDelegation } from '@/wallet/useHydrateDelegation';
 import { ReachabilityProvider } from '@/net/Reachability';
@@ -37,6 +38,18 @@ void SplashScreen.preventAutoHideAsync().catch(() => undefined);
  */
 function DeviceRegistration() {
   useRegisterDevice();
+  return null;
+}
+
+/**
+ * A banner when a hired agent trades, fired by the app itself (2026-09-26).
+ *
+ * The executor's push cannot reach this build — no APNs credentials — so while the app is open it watches the same
+ * `/agents/last-look` Home does and posts a local notification for a trade it has not seen. Beside DeviceRegistration
+ * for the same reason: it keys on the signed-in wallet. Renders nothing.
+ */
+function AgentTradeAlerts() {
+  useAgentTradeAlerts();
   return null;
 }
 
@@ -150,6 +163,7 @@ export default function RootLayout() {
         <ReachabilityProvider>
         <WalletHydration />
         <DeviceRegistration />
+        <AgentTradeAlerts />
         {/* The app is true-black by design; the OS theme never gets to change it. */}
         <StatusBar style="light" />
         {/*

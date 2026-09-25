@@ -282,7 +282,13 @@ export type ObservedPoint = { at: number; usd: number };
  * divide evenly: a day in half-hours, a week in hours, a month or more in four-hour rows.
  */
 function observedRowMs(days: number): number {
-  if (days <= 1) return 30 * 60_000;
+  /*
+   * Five minutes for a day, not thirty (2026-09-26). A day window is 24h back from now, which is never on a bucket edge,
+   * so thirty-minute rows came to 49 and `foldWindowTimed` cut them five at a time into ten candles — and a day whose
+   * readings began recently (a fresh deployment, a new listing) was one or two half-hour rows, which drew ONE candle.
+   * Five-minute rows still divide an hour, so `candlesOfLength` keeps its hourly candles.
+   */
+  if (days <= 1) return 5 * 60_000;
   if (days <= 7) return HOUR_MS;
   return 4 * HOUR_MS;
 }

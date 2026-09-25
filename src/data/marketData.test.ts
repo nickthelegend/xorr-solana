@@ -204,6 +204,26 @@ describe('what each pill and range asks the executor for', () => {
     expect(await fetchHistory('T-SpaceX', '1D')).toBeNull();
   });
 
+  it('folds an xStock’s day into twelve candles, and a day that began recently into more than one (2026-09-26)', async () => {
+    // A reading every half minute for the last 24h, the window starting off a bucket edge as `now − 24h` always does.
+    const end = Date.UTC(2026, 8, 14, 12, 7, 13);
+    const day = Array.from({ length: 2880 }, (_, i) => ({ at: end - (2879 - i) * 30_000, usd: 100 + i / 100 }));
+    // Readings for only the last fifty minutes: thirty-minute rows made this one or two candles.
+    const fresh = day.slice(-100);
+    let points = day;
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const body = String(input).includes('/market/stocks/history') ? { symbol: 'NVDAx', points } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const whole = await fetchHistory('NVDAx', '1D');
+    expect(whole).toHaveLength(12);
+    expect(whole![0]![0]).toBe(day[0]!.usd);
+    expect(whole![11]![3]).toBe(day[2879]!.usd);
+    clearMarketDataCache();
+    points = fresh;
+    expect((await fetchHistory('NVDAx', '1D'))!.length).toBeGreaterThanOrEqual(10);
+  });
+
   it('knows a tokenized share by its suffix, and nothing else as one', () => {
     expect(isStockSymbol('NVDAc')).toBe(true);
     for (const s of ['BTC', 'CBBTC', 'WETH', 'SPYx']) expect(isStockSymbol(s)).toBe(false);
