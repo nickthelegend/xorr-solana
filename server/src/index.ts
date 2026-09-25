@@ -1,3 +1,4 @@
+import { rpcRelay } from './routes/rpcRelay.js';
 import { serve } from '@hono/node-server';
 import { ON_SOLANA, activeClusterKey, getClusterKey } from './solana/clusters.js';
 import { connection as solanaConnection } from './solana/connection.js';
@@ -162,6 +163,7 @@ app.use('*', async (c, next) => {
  */
 guardRequests(app, authMiddleware);
 
+app.route('/', rpcRelay);
 app.route('/', routes);
 app.route('/', strategyRoutes);
 app.route('/', agentSurface);

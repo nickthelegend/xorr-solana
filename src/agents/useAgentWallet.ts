@@ -8,6 +8,7 @@ import { system, type AgentWalletView } from '@/data/system';
 import { useSolanaSigner } from '@/wallet/solanaSigner';
 import { solanaConnection } from '@/wallet/solanaTx';
 import { buildFundAgentTx, buildWithdrawAgentTx } from '@/wallet/agentWallet';
+import { rememberApproved } from '@/wallet/approvedAccounts';
 
 export function useAgentWallet() {
   const signer = useSolanaSigner();
@@ -32,6 +33,8 @@ export function useAgentWallet() {
               })
             : await buildWithdrawAgentTx({ owner, agentId: wallet.agentId, usd, mint });
         const signature = await signer.signAndSend(tx);
+        // A fund re-approves the bot on the agent's wallet; remembered so the stop can find it without the executor.
+        if (mode === 'fund') await rememberApproved(owner.toBase58(), tx);
         return await system.agentWalletRecord(wallet.agentId, signature);
       } finally {
         setBusy(false);
