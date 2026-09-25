@@ -21,7 +21,7 @@ const FEATURES: Feature[] = [
     icon: "shieldCheck",
     points: [
       ["Daily cap", "the bot cannot spend past the limit you set for the day."],
-      ["Venue allowlist", "trades route only through the venues you approved."],
+      ["Chain-enforced total", "an SPL approval the token program itself holds the bot to."],
       ["Expiry", "the permission ends on its own, on the date you chose."],
     ],
     Art: RingsArt,
@@ -30,8 +30,9 @@ const FEATURES: Feature[] = [
     title: "Autopilot",
     icon: "repeat",
     points: [
-      ["Recurring buys", "placed on the schedule you pick."],
-      ["Stops that hold", "exits written as rules, not reminders."],
+      ["Recurring buys", "placed on the schedule you pick, through Jupiter."],
+      ["Stops that hold", "exits written as rules, not reminders — checked every 30 seconds."],
+      ["Pre-IPO too", "OpenAI, SpaceX and Kalshi, tokenised by Tessera, from the same ticket."],
     ],
     Art: AutopilotArt,
   },
@@ -40,7 +41,7 @@ const FEATURES: Feature[] = [
     icon: "receipt",
     points: [
       ["Hash-chained", "every action the bot takes, and every one it declines, commits to the row before it."],
-      ["Anchored on Base", "the head of that chain is published on an hourly sweep."],
+      ["Readable off the chain", "every fill links to its Solana transaction."],
     ],
     Art: TrailArt,
   },

@@ -1,6 +1,7 @@
 # STOCKLANA submission — xorr
 
-Paste-ready text for hackathons.solana.com. Fill the two bracketed links on the day (video, and the repo once public).
+Paste-ready text for hackathons.solana.com. Fill the video link and the team on the day. Submissions close Friday 25
+September 2026, 4:00 PM ET (1:30 AM IST Saturday); edits are allowed until then, so submit early and edit.
 
 **Name:** xorr
 
@@ -8,10 +9,16 @@ Paste-ready text for hackathons.solana.com. Fill the two bracketed links on the 
 revoke in one tap — it never holds your money.
 
 **Links**
+- Website: https://xorr.finance
 - Live app: https://xorr-solana.vercel.app (sign in with email; hosted mainnet fork, test money, real transactions)
-- Repository: [github.com/nickthelegend/xorr-solana — make public before submitting]
+- Repository: https://github.com/nickthelegend/xorr-solana
 - Video: [link]
 - Verify it yourself: README → "Verify it yourself, on your own machine" (ten minutes, no keys)
+
+**Tracks:** main track, plus **Tessera** (OpenAI and Kalshi T-Tokens trade from the same ticket through Meteora, with the
+pool price against Tessera's mark) and **Pyth** (before any agent entry while Nasdaq is shut, the pool is checked against
+Pyth's `Equity.US.<TICKER>/USD` feed read from its Solana price account). Not PreStocks: its rules exclude projects that
+use other pre-IPO tokens, and these are Tessera's.
 
 **The problem.** Tokenized US stocks trade around the clock on Solana; people do not. Automating it today means handing a
 bot your keys or your funds. Handing a bot your money is a trust problem, not a trading problem.

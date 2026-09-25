@@ -30,8 +30,8 @@ export function Solution() {
       <div className="mx-auto mt-14 grid max-w-5xl items-center gap-8 md:grid-cols-[1fr_minmax(0,380px)_1fr]">
         <Reveal>
           <p className="mx-auto max-w-sm text-center text-[15px] leading-relaxed text-ink/70 md:mx-0 md:text-left">
-            <span className="font-medium text-ink">XorrDelegation</span> is a contract you grant. It caps what the bot can
-            spend per day, restricts it to venues you allowlisted, and expires on its own.
+            <span className="font-medium text-ink">An SPL approval</span> is the permission. The chain caps the total the
+            bot can move; xorr holds it to your daily cap and end date; each agent trades only from its own wallet.
           </p>
         </Reveal>
         <Reveal delay={0.15} className="relative mx-auto aspect-[4/3] w-full max-w-[380px] mix-blend-lighten">

@@ -20,7 +20,7 @@ export function Overview() {
         </h2>
         <Reveal delay={0.35}>
           <p className="mt-4 max-w-md text-[15px] leading-relaxed text-ink/55">
-            Recurring buys, stops that hold and a one-tap stop — all inside a permission you control.
+            Tokenized US stocks on Solana: agents that buy through Jupiter, stops that hold, and a one-tap stop — all inside a permission you control.
           </p>
         </Reveal>
       </div>
@@ -35,16 +35,16 @@ export function Overview() {
             Four agents, one mandate each
           </h3>
           <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-ink/55">
-            Momentum Scout, Yield Keeper, Drawdown Guard and Earnings Desk each watch for one thing — and act only inside
-            the limits you set.
+            Momentum Scout, Yield Keeper, Drawdown Guard and Earnings Desk each watch for one thing. Each trades from its
+            own wallet — you fund it, the chain stops it at what it holds — and only inside the rules you set.
           </p>
         </Card>
 
         <Card delay={0.1} className="flex min-h-[420px] flex-col">
           <Arc className="-left-36 top-[58%]" />
           <p className="relative max-w-[21rem] p-7 font-display text-[17px] leading-snug text-ink/90 md:p-9">
-            Every trade clears the same gates: your daily cap, the venues you allowlisted, and a permission that expires
-            on its own.
+            Every trade clears the same gates: your daily cap, the agent's own rules, a live Jupiter quote, and a
+            permission that expires on its own.
           </p>
           <RuleTracks className="mt-auto w-full" />
         </Card>
@@ -66,8 +66,8 @@ export function Overview() {
             Your keys never leave you
           </h3>
           <p className="mt-2 max-w-lg text-[15px] leading-relaxed text-ink/55">
-            Non-custodial by design. The bot trades inside a scoped on-chain permission and cannot move funds to an
-            address of its choosing.
+            Non-custodial by design. The bot holds a delegate key that can move only what you approved — a total the
+            token program itself enforces — and xorr spends it only on trades that pay back into your wallet.
           </p>
         </Card>
       </div>
