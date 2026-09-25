@@ -15,3 +15,15 @@ was written here. The owner's personal funding wallet is left out on purpose.
 
 Recorded as the demo runs: the grant, the agent-wallet funding, the agent's own trade, the owner's pre-IPO buy and sale,
 and the stop — each with its signature.
+
+The demo account is [`ChZuNgqv…`](https://solscan.io/account/ChZuNgqv2ACbc7X4ymxtAe51gY7ALDjdSfWmejQ3Z7Vb), a Privy
+wallet made with an email sign-in. Momentum Scout's own wallet is
+[`87oWjdNW…`](https://solscan.io/account/87oWjdNWYKTkiRhbHS7Mq6K4eACKaNpVh1cvEKCvicVG), a USDC account the owner owns.
+
+| When (UTC) | What | Transaction |
+|---|---|---|
+| 2026-09-25 15:20 | The owner signs the permission: $100 a day for one day, the bot's key as delegate on their USDC | [`2vSM5dsQ…`](https://solscan.io/tx/2vSM5dsQJzmPmTPcxHgiAvNpkQVis7JPxVvdwTmq6M3mcMMrry2PNUxaexEPHB3YByZNaJjtH7Cj3m5QefNaYAyE) |
+| 2026-09-25 15:22 | Momentum Scout buys $24 of METAx through Jupiter — from the main account, because it had no wallet of its own yet. A bug: fixed the same evening (an agent now spends only from its own funded wallet, `0152206`) | [`m7BQ4MCY…`](https://solscan.io/tx/m7BQ4MCYa2dmBrHMvL4gCKxJFU1ZErNVMn2KH2tg5jn5g9N3koXKumnHzEuw1NEy3RpVqMXM155GKzMVeWEkHJA) |
+| 2026-09-25 15:38 | The owner sells the METAx back to USDC: a Jupiter swap the owner alone signs ($23.89 back; the round trip cost $0.11) | [`5pHJSS7P…`](https://solscan.io/tx/5pHJSS7P2kYmaDvQ5nL5rsz384FAmPQErHWZWMvZqPQotwmK4nBbi9m6AZ44wEtCUHF2y9Me9APB4QXjx68pKvMf) |
+| 2026-09-25 15:42 | The owner funds Momentum Scout's wallet with $10: the account is created with a seed from the owner's key, $10 USDC moves in, and the bot is approved on it | [`4sUvrbgd…`](https://solscan.io/tx/4sUvrbgd68Rk8f5TQqAHTTcw49jGuyq4vzr8HsQygRx4pZG6zHgTw3GZEu5eHuNEQeyYViP3FCi5RZXZQpxqpW9q) |
+| 2026-09-25 15:48 | The owner buys $5 of T-OpenAI (Tessera, pre-IPO) through Jupiter; 0.004794622 T-OpenAI lands in the owner's wallet. The ticket warned the pool was 28.3% above Tessera's mark | [`3pS6houV…`](https://solscan.io/tx/3pS6houVi93TRUyz2y5H1xBPShRc8jJ6PVR3EbqNSR2pwumEgchEeLKY29Z9emG6hJYq2g1qAfeLRGp5VZcjUsZA) |

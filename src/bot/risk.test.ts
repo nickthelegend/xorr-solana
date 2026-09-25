@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { differences, settingLines, type RiskSettings } from './risk';
+import { changePhrase, differences, settingLines, type RiskSettings } from './risk';
 
 const balanced: RiskSettings = {
   maxTradeUsd: 25,
@@ -86,5 +86,46 @@ describe('differences', () => {
     expect(differences(conservative, balanced).map((d) => d.label)).toEqual(
       differences(balanced, conservative).map((d) => d.label),
     );
+  });
+});
+
+describe('changePhrase', () => {
+  /*
+   * "75th percentile and above → 65th percentile and above" did not fit a phone: it pushed the setting's name off the
+   * row and was cut off itself. The words both sides share are said once, around the part that changes.
+   */
+  it('says the shared words once, around what changes', () => {
+    expect(changePhrase('75th percentile and above', '65th percentile and above')).toEqual({
+      lead: '',
+      before: '75th',
+      after: '65th',
+      tail: 'percentile and above',
+    });
+    expect(changePhrase('up to 25%', 'up to 50%')).toEqual({ lead: 'up to', before: '25%', after: '50%', tail: '' });
+    expect(changePhrase('below the 40th', 'below the 25th')).toEqual({
+      lead: 'below the',
+      before: '40th',
+      after: '25th',
+      tail: '',
+    });
+    expect(changePhrase('48 hours', '96 hours')).toEqual({ lead: '', before: '48', after: '96', tail: 'hours' });
+  });
+
+  it('shares whole words only, and leaves each side a word of its own', () => {
+    expect(changePhrase('$25', '$50')).toEqual({ lead: '', before: '$25', after: '$50', tail: '' });
+    expect(changePhrase('3 days', '1 day')).toEqual({ lead: '', before: '3 days', after: '1 day', tail: '' });
+    expect(changePhrase('6', '10')).toEqual({ lead: '', before: '6', after: '10', tail: '' });
+  });
+
+  it('phrases every row a profile switch can show', () => {
+    for (const d of differences(balanced, conservative)) {
+      const p = changePhrase(d.before, d.after);
+      const join = (side: string) => [p.lead, side, p.tail].filter(Boolean).join(' ');
+      // Nothing is lost: each side reads back whole.
+      expect(join(p.before)).toBe(d.before);
+      expect(join(p.after)).toBe(d.after);
+      expect(p.before).not.toBe('');
+      expect(p.after).not.toBe('');
+    }
   });
 });

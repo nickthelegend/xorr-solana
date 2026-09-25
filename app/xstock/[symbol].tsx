@@ -27,7 +27,7 @@
  * none of those — it has a pool price, the issuer's own mark, the gap between them and a fee on the mint — so that is
  * what its ticket shows in their place.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
@@ -81,7 +81,33 @@ const SIDES = [
   { value: 'sell', label: 'Sell' },
 ] as const;
 
-const QUICK = ['$100', '$250', '$500'] as const;
+/**
+ * The quick amounts, sized to what the wallet can spend (2026-09-25).
+ *
+ * They were $100 / $250 / $500 for everyone and the amount opened at $250, so over a wallet holding $14 every chip and
+ * the default were orders it could not pay for, and the first quote a new user saw was for money they did not have.
+ * The largest ladder that fits whole is offered; a wallet smaller than every ladder gets the rungs of the smallest that
+ * fit, and one smaller than those keeps the smallest ladder rather than a row of nothing. Unknown — signed out, or the
+ * chain not read yet — keeps the ladder it always had.
+ */
+const LADDERS: readonly (readonly number[])[] = [
+  [100, 250, 500],
+  [25, 50, 100],
+  [5, 10, 25],
+];
+
+function quickAmounts(budget: number | undefined): readonly number[] {
+  const largest = LADDERS[0]!;
+  const smallest = LADDERS[LADDERS.length - 1]!;
+  if (budget === undefined) return largest;
+  const whole = LADDERS.find((ladder) => ladder[ladder.length - 1]! <= budget);
+  if (whole) return whole;
+  const fits = smallest.filter((usd) => usd <= budget);
+  return fits.length > 0 ? fits : smallest;
+}
+
+/** The most a ticket opens at, when the wallet can pay it. */
+const OPENING_USD = 250;
 
 const FORMAT = { money, quantity, price: fmtPrice };
 
@@ -200,6 +226,36 @@ export default function XStockTicket() {
   const held = tokens.data?.tokens.find((t) => t.symbol === symbol);
   const heldUnits = held?.units ?? 0;
   const heldUsd = held?.usd ?? 0;
+  /*
+   * The USDC a buy can spend, from the same read: `/wallet/tokens` lists USDC only when there is some, so absent from
+   * an answered read is none. Undefined until the chain has answered.
+   */
+  const usdc = tokens.data ? (tokens.data.tokens.find((t) => t.symbol === 'USDC')?.units ?? 0) : undefined;
+  /** What the chips are sized to: the USDC for a buy, the holding's worth for a sale. */
+  const quick = quickAmounts(side === 'buy' ? usdc : tokens.data ? heldUsd : undefined);
+
+  /*
+   * The amount opens at what the wallet can pay (2026-09-25): at most $250, and never more than the USDC it holds,
+   * rounded down to the dollar. Once per visit, the first time the balance is known on the buy side, and only if the
+   * person has not already typed or picked an amount here. An amount carried in that the wallet can pay is left alone.
+   */
+  const touched = useRef(false);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || touched.current || side !== 'buy' || usdc === undefined) return;
+    opened.current = true;
+    const affordable = Math.min(OPENING_USD, Math.floor(usdc));
+    if (amount > affordable) setOrderAmt(String(affordable));
+  }, [usdc, side, amount, setOrderAmt]);
+  /** An amount the person chose. From here on the opening amount is theirs, not the balance's. */
+  const choose = (usd: string) => {
+    touched.current = true;
+    setOrderAmt(usd);
+  };
+  const press = (key: string) => {
+    touched.current = true;
+    pressKey(key);
+  };
   /*
    * A sale is never sized past the holding, so the breakdown is not quoted past it either (2026-09-20). Typing $1,009
    * against 0.4499 NVDAx drew "Expected 997.52 USDC" over a button that would sell $100 of shares: the panel described
@@ -354,12 +410,12 @@ export default function XStockTicket() {
       <View
         style={{ flexDirection: 'row', gap: space.s8, marginTop: space.s16, justifyContent: 'center' }}
       >
-        {QUICK.map((q) => (
-          <Pill key={q} label={q} light onPress={() => setOrderAmt(q.slice(1))} />
+        {quick.map((usd) => (
+          <Pill key={usd} label={`$${usd}`} light onPress={() => choose(String(usd))} />
         ))}
         {side === 'sell' && heldUsd > 0 ? (
           // Everything held, at the chain's balance and the live price; the quote then sizes the shares exactly.
-          <Pill label="All" light onPress={() => setOrderAmt(String(Math.floor(heldUsd * 100) / 100))} testID="xstock-sell-all" />
+          <Pill label="All" light onPress={() => choose(String(Math.floor(heldUsd * 100) / 100))} testID="xstock-sell-all" />
         ) : null}
       </View>
 
@@ -438,7 +494,7 @@ export default function XStockTicket() {
         )}
       </ScrollView>
 
-      <Keypad light onPress={pressKey} />
+      <Keypad light onPress={press} />
 
       {side === 'buy' ? (
         <View style={{ paddingTop: space.s12, gap: space.s8 }}>
@@ -503,7 +559,8 @@ export default function XStockTicket() {
                 {`Sold ${quantity(sold.units)} ${sold.symbol} for ${money(sold.usd)}`}
               </Text>
               <Text variant="footnote" color={colors.sheet.muted} align="center">
-                {`Against the venue vault at Jupiter's live quote · slot ${sold.slot}`}
+                {/* A Jupiter swap you signed (2026-09-24); "against the venue vault" was the fork-era wording. */}
+                {`Swapped through Jupiter, signed by you · slot ${sold.slot}`}
               </Text>
               <Text
                 variant="footnote"

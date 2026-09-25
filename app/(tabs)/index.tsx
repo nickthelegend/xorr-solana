@@ -49,6 +49,7 @@ import { RollingNumber } from '@/ui/RollingNumber';
 import { STAGGER } from '@/ui/motion';
 import { selectionTick } from '@/ui/haptics';
 import { repos } from '@/data';
+import { api } from '@/data/api';
 import { NotSignedIn, isRetryable } from '@/data/apiError';
 import { system } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
@@ -78,6 +79,7 @@ import { standingOnChain } from '@/wallet/delegationChain';
 import { killSwitchChip } from '@/state/killSwitch';
 import { KillSwitchChip } from '@/ui/KillSwitchChip';
 import { TradingTicker } from '@/ui/TradingTicker';
+import { lastLookHeadline } from '@/state/tradingNow';
 import { usePoll } from '@/data/usePoll';
 import { strategyLibrary } from '@/data/strategyLibrary';
 import { StrategyRows } from '@/ui/StrategyRows';
@@ -91,8 +93,31 @@ const ALL_TABS: readonly { key: SheetTab; label: string }[] = [
   { key: 'strategies', label: 'Strategies' },
   { key: 'futures', label: 'Futures' },
 ];
-/** Futures are Hyperliquid data with nothing tradable on Solana, so the Solana build has no Futures tab. */
-const TABS = isSolana ? ALL_TABS.filter((t) => t.key !== 'futures') : ALL_TABS;
+/**
+ * The tabs this build shows.
+ *
+ * Futures are Hyperliquid data with nothing tradable on Solana, so the Solana build has no Futures tab. Nor, since
+ * 2026-09-25, a Strategies one: the book it lists is crypto-perp backtests — "Liq Squeeze Break", "B200 Sess 8" — with
+ * nothing to do with the stocks these agents trade, and its label was the one pushed off a 402pt phone, so the row
+ * clipped "Agents" or "Strategies" at the edge beside the Armed chip. Three tabs and the chip fit.
+ */
+const DROPPED_ON_SOLANA: ReadonlySet<SheetTab> = new Set<SheetTab>(['strategies', 'futures']);
+const TABS = isSolana ? ALL_TABS.filter((t) => !DROPPED_ON_SOLANA.has(t.key)) : ALL_TABS;
+/**
+ * Where a link to a tab this build dropped lands instead (2026-09-25).
+ *
+ * `/?tab=strategies` still exists in links and in muscle memory, and a link that silently does nothing is the failure
+ * the deep-link handling below was written to end. Strategies land on the agents, which are what trade on Solana; Futures
+ * on the stocks, the one list here with something to buy.
+ */
+const DROPPED_TAB_LANDS: ReadonlyMap<string, SheetTab> = new Map<string, SheetTab>(
+  isSolana
+    ? [
+        ['strategies', 'agents'],
+        ['futures', 'stocks'],
+      ]
+    : [],
+);
 
 const AVATAR = 40;
 const GRABBER_W = 36;
@@ -105,11 +130,26 @@ const SPARK_W = 56;
 const SPARK_H = 22;
 /** The agents are tiles, not rows: a medium orb with its name under it, four across. */
 const ORB = 56 as const;
-const TILE_W = '25%' as const;
+const TILES_PER_ROW = 4;
+const TILE_W = `${100 / TILES_PER_ROW}%` as const;
+/**
+ * The ring a hired agent wears, and the gap between it and the orb (2026-09-25). Every orb sits in the ring's box, hired
+ * or not, so a ring never pushes one tile's name below its neighbours'.
+ */
+const RING_W = 2;
+const RING_GAP = 3;
+const ORB_BOX = ORB + 2 * (RING_W + RING_GAP);
+/** How far an agent nobody hired recedes beside the ones that are. */
+const UNHIRED_OPACITY = 0.5;
 /** Placeholder tiles while the roster loads — the same shape it will arrive in. */
 const AGENT_SLOTS = 4;
 /** How many of today's gainers the sheet lists. */
 const GAINERS = 8;
+/** Tessera's three pre-IPO tokens, in the order the Pre-IPO row names them. */
+const PRE_IPO = ['T-SpaceX', 'T-OpenAI', 'T-Kalshi'] as const;
+/** Each of the three in the Pre-IPO row's mark, and the ring of sheet that parts one from the next. */
+const TRIO_MARK = 17;
+const TRIO_RING = 1.5;
 /** How many futures contracts the sheet lists before handing over to Futures. */
 const FUTURES = 8;
 /** A sideways drag this far, or this fast, moves to the next tab; under the slop it is still a tap or a scroll. */
@@ -131,6 +171,12 @@ function shortAddress(address: string): string {
 
 function isSheetTab(value: string | undefined): value is SheetTab {
   return TABS.some((t) => t.key === value);
+}
+
+/** The tab a link names, or where it lands when this build has dropped that tab; `undefined` for anything else. */
+function linkedSheetTab(value: string | undefined): SheetTab | undefined {
+  if (isSheetTab(value)) return value;
+  return value === undefined ? undefined : DROPPED_TAB_LANDS.get(value);
 }
 
 /**
@@ -248,6 +294,116 @@ function SetupCard({ steps, onOpen }: { steps: readonly SetupStep[]; onOpen: (hr
   );
 }
 
+/**
+ * The Pre-IPO row's mark: Tessera's three tokens, overlapping in the one mark's box (2026-09-25).
+ *
+ * The row wore T-SpaceX's gradient, which was the catalogue's neutral grey — a plain sphere at the head of a row about
+ * three named companies. Each of the three now has a mark of its own (`assetGradient`), so the row that opens them shows
+ * them: two above, one in front, each parted from the next by a ring of the sheet. Small enough that they overlap only
+ * at the rims — at 20pt the front one covered half of the others' letters. It fills exactly `size.mark`, so the row's
+ * title lines up with the stocks' below it.
+ */
+function PreIpoMark() {
+  const outer = TRIO_MARK + 2 * TRIO_RING;
+  const step = size.mark - outer;
+  const at = [
+    { left: 0, top: 0 },
+    { left: step, top: 0 },
+    { left: step / 2, top: step },
+  ] as const;
+  return (
+    <View style={{ width: size.mark, height: size.mark }}>
+      {PRE_IPO.map((symbol, i) => (
+        <View
+          key={symbol}
+          style={{
+            position: 'absolute',
+            ...at[i],
+            width: outer,
+            height: outer,
+            borderRadius: outer / 2,
+            borderWidth: TRIO_RING,
+            borderColor: colors.surfaceAlt,
+            backgroundColor: colors.surfaceAlt,
+          }}
+        >
+          <AssetMark gradient={assetGradient(symbol)} size={TRIO_MARK} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * One agent on the roster: its orb, its name, and whether it is hired (2026-09-25).
+ *
+ * Hired and not hired used to differ by one grey word under identical orbs, so a roster with one agent working and
+ * three idle read as four of the same thing — on the screen that has to show, at a glance, that agents trade for you.
+ * A hired agent now wears a green ring and a green "Hired", and the cash in its own wallet where that has been read;
+ * one nobody hired recedes. Green here is the kill-switch chip's exception, for the chip's question: this agent may act
+ * on your wallet. It still never marks a profit.
+ */
+function AgentTile({
+  agent,
+  funds,
+  hidden,
+  onPress,
+}: {
+  agent: Agent;
+  /** The USDC in the agent's own wallet, or `undefined` where it has none or it has not been read. */
+  funds: number | undefined;
+  /** Whether amounts are hidden (FEATURES.md #47), so the spoken label does not say one the screen masks. */
+  hidden: boolean;
+  onPress: () => void;
+}) {
+  const hired = !!agent.hired;
+  const toTrade = hired && funds !== undefined ? `${money(funds)} to trade` : undefined;
+  const status = hired ? 'hired' : 'not hired';
+  return (
+    <Press
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${agent.name}, ${status}${toTrade && !hidden ? `, ${toTrade}` : ''}. ${agent.role}`}
+      style={{ alignItems: 'center', gap: space.s8, paddingHorizontal: space.s4 }}
+    >
+      <View
+        style={{
+          width: ORB_BOX,
+          height: ORB_BOX,
+          borderRadius: ORB_BOX / 2,
+          borderWidth: RING_W,
+          borderColor: hired ? colors.up : 'transparent',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: hired ? 1 : UNHIRED_OPACITY,
+        }}
+      >
+        <AgentOrb gradient={agentGradient(agent.name)} size={ORB} face />
+      </View>
+      {/* Two lines reserved for every name, so a short one does not lift its status line. */}
+      <Text
+        variant="orbName"
+        align="center"
+        numberOfLines={2}
+        color={hired ? colors.ink : colors.ink55}
+        style={{ minHeight: typeScale.orbName.lineHeight * 2 }}
+      >
+        {agent.name}
+      </Text>
+      <View style={{ alignItems: 'center', gap: space.s2 }}>
+        <Text variant="orbStatus" color={hired ? colors.up : colors.ink30}>
+          {hired ? 'Hired' : 'Not hired'}
+        </Text>
+        {toTrade ? (
+          <Text variant="orbStatus" color={colors.ink55} align="center" numberOfLines={2} figure="own">
+            {toTrade}
+          </Text>
+        ) : null}
+      </View>
+    </Press>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const hydrated = useHasHydrated();
@@ -256,7 +412,7 @@ export default function Home() {
   const { email } = usePrivyIdentity();
   /* `/?tab=futures` opens straight onto a tab — for links from elsewhere in the app. */
   const params = useLocalSearchParams<{ tab?: string }>();
-  const [tab, setTab] = useState<SheetTab>(() => (isSheetTab(params.tab) ? params.tab : 'agents'));
+  const [tab, setTab] = useState<SheetTab>(() => linkedSheetTab(params.tab) ?? 'agents');
   /* Stocks and futures load the first time their tab opens: Home does not pay for a tab nobody looked at. */
   const [opened, setOpened] = useState<ReadonlySet<SheetTab>>(() => new Set([tab]));
   const tabsRef = useRef<ScrollView>(null);
@@ -271,7 +427,7 @@ export default function Home() {
    * to a Home that was already on screen — which is every time but the first. A deep link that
    * silently lands you on the tab you were already looking at is worse than one that fails.
    */
-  const wantedTab = isSheetTab(params.tab) ? params.tab : undefined;
+  const wantedTab = linkedSheetTab(params.tab);
   /* Adjusted while rendering, not in an effect: the new tab paints on the same pass, not one after. */
   const [linkedTab, setLinkedTab] = useState(wantedTab);
   if (wantedTab !== linkedTab) {
@@ -419,6 +575,19 @@ export default function Home() {
    * sentence whether an agent was hired or not.
    */
   const lastLook = usePoll(() => system.agentLastLook(), TICKER_EVERY_MS);
+  /*
+   * When the cooldown lifts, asked only while the last look says the agents are in one (2026-09-25).
+   *
+   * The sweep's cooldown sentence quoted the rule back — "waits 60 minutes between autonomous entries" — and never said
+   * until when. `/agents/preview` answers that from the same decision the sweep keys on. Keyed on being in a cooldown,
+   * not on each look, so a wait of an hour is one read, and a new trade (a look that is not a cooldown) starts the next.
+   */
+  const look = lastLook.data?.looked ? lastLook.data : null;
+  const inCooldown = look?.outcome === 'cooldown';
+  const cooldown = useAsync(
+    async () => (inCooldown ? api.get<{ wallet: { cooldownUntil: number | null } }>('/agents/preview') : null),
+    [inCooldown],
+  );
   const signedOut = useSignedOut();
   /* What each agent holds in its own wallet (2026-09-23), so a funded agent reads as one on the roster. */
   const agentFunds = useAsync(() => (isSolana && !signedOut ? system.agentWallets() : Promise.resolve([])), [signedOut]);
@@ -648,10 +817,19 @@ export default function Home() {
         */}
         {signedOut ? null : (
           <Rise index={2} style={{ marginTop: space.s12, paddingHorizontal: space.gutter }}>
+            {/*
+              Two lines, and the cooldown said for a person (2026-09-25): the last look's sentence was cut to one line
+              and read like a log entry, on the line somebody reads to find out whether the agents are working.
+            */}
             <TradingTicker
               runs={liveRuns.data}
               failed={liveRuns.error !== undefined}
-              lastLook={lastLook.data?.looked ? lastLook.data : null}
+              lastLook={
+                look
+                  ? { headline: lastLookHeadline(look, { cooldownUntil: cooldown.data?.wallet.cooldownUntil, now }) }
+                  : null
+              }
+              lines={2}
             />
           </Rise>
         )}
@@ -688,7 +866,10 @@ export default function Home() {
               borderBottomColor: colors.hairline,
             }}
           >
-            {/* Four tabs scroll sideways on a narrow phone rather than crowding the Live dot out. */}
+            {/*
+              The tabs scroll sideways on a narrow phone rather than crowding the Armed chip out. The Solana build's three
+              fit a 402pt phone outright (2026-09-25); the scroll is for the five elsewhere, and for large text.
+            */}
             <ScrollView
               ref={tabsRef}
               horizontal
@@ -755,7 +936,10 @@ export default function Home() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: space.s18 }}>
                     {Array.from({ length: AGENT_SLOTS }, (_, i) => (
                       <View key={i} style={{ width: TILE_W, alignItems: 'center', gap: space.s8 }}>
-                        <Placeholder width={ORB} height={ORB} style={{ borderRadius: radius.full }} />
+                        {/* In the ring's box, as the orbs arrive in, so nothing moves when they do. */}
+                        <View style={{ width: ORB_BOX, height: ORB_BOX, alignItems: 'center', justifyContent: 'center' }}>
+                          <Placeholder width={ORB} height={ORB} style={{ borderRadius: radius.full }} />
+                        </View>
                         <Placeholder width={ORB} height={space.s10} />
                       </View>
                     ))}
@@ -766,27 +950,12 @@ export default function Home() {
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: space.s18, marginTop: space.s18 }}>
                     {roster.map((a, i) => (
                       <Rise key={a.id} index={ROWS_FROM + i} style={{ width: TILE_W }}>
-                        <Press
+                        <AgentTile
+                          agent={a}
+                          funds={fundsOf(a.id)?.usdc}
+                          hidden={balancesHidden}
                           onPress={() => router.push(`/agent/${a.id}`)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`${a.name}, ${a.hired ? 'hired' : 'not hired'}. ${a.role}`}
-                          style={{ alignItems: 'center', gap: space.s8, paddingHorizontal: space.s4 }}
-                        >
-                          <AgentOrb gradient={agentGradient(a.name)} size={ORB} face />
-                          {/* Two lines reserved for every name, so a short one does not lift its status line. */}
-                          <Text
-                            variant="orbName"
-                            align="center"
-                            numberOfLines={2}
-                            style={{ minHeight: typeScale.orbName.lineHeight * 2 }}
-                          >
-                            {a.name}
-                          </Text>
-                          {/* Grey, never green: hired is a fact about the roster, not a profit. */}
-                          <Text variant="orbStatus" color={a.hired ? colors.ink55 : colors.ink30}>
-                            {a.hired ? (fundsOf(a.id) ? `Hired · ${money(fundsOf(a.id)!.usdc)}` : 'Hired') : 'Not hired'}
-                          </Text>
-                        </Press>
+                        />
                       </Rise>
                     ))}
                     {/* Making one of your own, where the agents are (2026-09-16). */}
@@ -797,25 +966,36 @@ export default function Home() {
                         accessibilityLabel="New agent. Make one of your own"
                         style={{ alignItems: 'center', gap: space.s8, paddingHorizontal: space.s4 }}
                       >
-                        <View
-                          style={{
-                            width: ORB,
-                            height: ORB,
-                            borderRadius: ORB / 2,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            borderWidth: 1.5,
-                            borderStyle: 'dashed',
-                            borderColor: colors.ink28,
-                          }}
-                        >
-                          <Icon name="plus" size={26} color={colors.ink55} strokeWidth={2} />
+                        <View style={{ width: ORB_BOX, height: ORB_BOX, alignItems: 'center', justifyContent: 'center' }}>
+                          <View
+                            style={{
+                              width: ORB,
+                              height: ORB,
+                              borderRadius: ORB / 2,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderWidth: 1.5,
+                              borderStyle: 'dashed',
+                              borderColor: colors.ink28,
+                            }}
+                          >
+                            <Icon name="plus" size={26} color={colors.ink55} strokeWidth={2} />
+                          </View>
                         </View>
+                        {/*
+                          Two lines reserved only beside agents it shares a row with (2026-09-25). Alone on its row — four
+                          agents, as the roster ships — the empty second line pushed "Make one" a line lower than every
+                          other tile's status sat under its name.
+                        */}
                         <Text
                           variant="orbName"
                           align="center"
                           numberOfLines={2}
-                          style={{ minHeight: typeScale.orbName.lineHeight * 2 }}
+                          style={
+                            roster.length % TILES_PER_ROW === 0
+                              ? undefined
+                              : { minHeight: typeScale.orbName.lineHeight * 2 }
+                          }
                         >
                           New agent
                         </Text>
@@ -899,12 +1079,12 @@ export default function Home() {
                         height={size.rowLg}
                         divider
                         onPress={() => router.push('/pre-ipo')}
-                        left={<AssetMark gradient={assetGradient('T-SpaceX')} size={size.mark} />}
+                        left={<PreIpoMark />}
                         title="Pre-IPO"
                         secondary="SpaceX, OpenAI and Kalshi, tokenised by Tessera"
                         value={
                           <Text variant="rowPrimary" color={colors.ink55}>
-                            3
+                            {PRE_IPO.length}
                           </Text>
                         }
                         figure="market"

@@ -554,8 +554,22 @@ export default function Safety() {
               />
               <Row
                 title="Agent key"
-                // On Solana the key holds an SPL approval: it can move the approved USDC, and only that (2026-09-19).
-                secondary={isSolana ? 'Your approved USDC, and selling your stock tokens' : 'Can’t withdraw'}
+                /*
+                 * On Solana the key holds an SPL approval: it can move the approved USDC, and only that (2026-09-19).
+                 *
+                 * Two lines, not one (2026-09-25). A string secondary is cut to a line, and beside the key this one
+                 * read "Your approved USDC, and selling you…" — the half of the sentence that says what the key may
+                 * sell was the half that was cut.
+                 */
+                secondary={
+                  isSolana ? (
+                    <Text variant="secondarySm" color={colors.ink38} numberOfLines={2} style={{ marginTop: space.s2 }}>
+                      Can spend your approved USDC and sell your stock tokens
+                    </Text>
+                  ) : (
+                    'Can’t withdraw'
+                  )
+                }
                 value={
                   <Text variant="rowPrimary" color={colors.ink55} selectable>
                     {delegateShown ? shortAddress(delegateShown) : '—'}

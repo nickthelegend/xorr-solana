@@ -22,10 +22,10 @@ import {
   LoadingRows,
   NoteStrip,
   RadioCard,
-  Row,
   Screen,
   Text,
   colors,
+  divider,
   size,
   space,
 } from '@/ui';
@@ -34,6 +34,7 @@ import { errorText } from '@/data/apiError';
 import { useAsync } from '@/data/useAsync';
 import {
   PROFILE_TITLE,
+  changePhrase,
   differences,
   settingLines,
   type RiskProfile,
@@ -129,13 +130,7 @@ export default function AgentRisk() {
                   What changes
                 </Text>
                 {changes.map((d, i) => (
-                  <Row
-                    key={d.label}
-                    title={d.label}
-                    value={`${d.before} → ${d.after}`}
-                    height={size.rowLg}
-                    divider={i < changes.length - 1}
-                  />
+                  <ChangeLine key={d.label} {...d} divider={i < changes.length - 1} />
                 ))}
               </View>
             ) : activeOption ? (
@@ -145,13 +140,7 @@ export default function AgentRisk() {
                   In force now
                 </Text>
                 {settingLines(activeOption.settings).map((line, i, all) => (
-                  <Row
-                    key={line.label}
-                    title={line.label}
-                    value={line.value}
-                    height={size.rowLg}
-                    divider={i < all.length - 1}
-                  />
+                  <SettingLine key={line.label} {...line} divider={i < all.length - 1} />
                 ))}
               </View>
             ) : null}
@@ -188,5 +177,81 @@ export default function AgentRisk() {
         )}
       </Fill>
     </Screen>
+  );
+}
+
+/*
+ * The rows below are drawn here rather than with `Row` (2026-09-25).
+ *
+ * `Row` is a one-line row of a fixed height: a title that gives way and a value that never does. That is right for a
+ * price, and wrong here, where the value is a sentence. "Counts as a breakout" with "75th percentile and above → 65th
+ * percentile and above" beside it lost the title entirely on a 402pt phone and still cut the value off. A setting's name
+ * and what it is set to are both the point of the row, so neither is ever truncated: they wrap and the row grows.
+ */
+
+const STRUCK = { textDecorationLine: 'line-through' } as const;
+
+/**
+ * One setting that would change: its name on the first line, and the change on its own line under it — what it was,
+ * struck through, then what it becomes. The words both share are said once around the change (`changePhrase`), so
+ * "75th → 65th percentile and above" rather than the whole phrase twice.
+ */
+function ChangeLine({
+  label,
+  before,
+  after,
+  divider: rule,
+}: {
+  label: string;
+  before: string;
+  after: string;
+  divider: boolean;
+}) {
+  const p = changePhrase(before, after);
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${label}: from ${before} to ${after}`}
+      style={[{ paddingVertical: space.s12, gap: space.s4 }, rule ? divider : null]}
+    >
+      <Text variant="rowPrimary">{label}</Text>
+      <Text variant="bodyLg" color={colors.ink55}>
+        {p.lead ? `${p.lead} ` : ''}
+        <Text variant="bodyLg" color={colors.ink45} style={STRUCK}>
+          {p.before}
+        </Text>
+        {'  →  '}
+        <Text variant="value" color={colors.ink}>
+          {p.after}
+        </Text>
+        {p.tail ? ` ${p.tail}` : ''}
+      </Text>
+    </View>
+  );
+}
+
+/** One setting in force: its name, and what it is set to at the right. Either wraps before it is ever cut short. */
+function SettingLine({ label, value, divider: rule }: { label: string; value: string; divider: boolean }) {
+  return (
+    <View
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: space.s12,
+          minHeight: size.row,
+          paddingVertical: space.s10,
+        },
+        rule ? divider : null,
+      ]}
+    >
+      <Text variant="rowPrimary" style={{ flexShrink: 1 }}>
+        {label}
+      </Text>
+      <Text variant="rowPrimary" align="right" style={{ flexShrink: 1 }}>
+        {value}
+      </Text>
+    </View>
   );
 }
