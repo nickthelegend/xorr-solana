@@ -15,6 +15,8 @@ import { colors } from '@/ui';
 import { isSolana } from '@/chain';
 
 const APP_ID = process.env.EXPO_PUBLIC_PRIVY_APP_ID;
+/** The app client this build signs in through (2026-09-25): Privy's per-platform settings — allowed apps, login methods. */
+const CLIENT_ID = process.env.EXPO_PUBLIC_PRIVY_CLIENT_ID;
 
 if (!APP_ID) {
   throw new Error(
@@ -27,6 +29,7 @@ export function AppPrivyProvider({ children }: { children: React.ReactNode }) {
   return (
     <Provider
       appId={APP_ID!}
+      {...(CLIENT_ID ? { clientId: CLIENT_ID } : {})}
       config={{
         // One wallet, on the chain this build settles on (2026-09-19): a Solana build makes the Solana one.
         embedded: {
