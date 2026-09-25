@@ -36,7 +36,7 @@ import { RollingNumber } from '@/ui/RollingNumber';
 import { successTap } from '@/ui/haptics';
 import { useAuth } from '@/auth/useAuth';
 import { shortAddress } from '@/format';
-import { activeChain, chainLabel, chainMoney, depositQrNote, depositQrWorks, depositUri } from '@/chain';
+import { activeChain, chainLabel, chainMoney, depositQrNote, depositQrWorks, depositUri, isSolana } from '@/chain';
 import { NetworkChip } from '@/networks/NetworkChip';
 import { useStore } from '@/state/store';
 import { useNow } from '@/state/useNow';
@@ -223,7 +223,8 @@ export default function Deposit() {
               </View>
             ) : null}
             <Text variant="footnote" color={colors.ink55} style={{ marginTop: space.s10 }}>
-              {depositQrWorks ? `Send only USDC on ${chainLabel}.` : depositQrNote}
+              {/* On Solana the note also asks for SOL: without it no fee can be paid, and mainnet has no faucet. */}
+              {depositQrWorks && !isSolana ? `Send only USDC on ${chainLabel}.` : depositQrNote}
             </Text>
           </SheetCard>
 

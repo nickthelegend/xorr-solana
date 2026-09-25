@@ -108,3 +108,16 @@ describe('a Solana send that the cluster refused', () => {
     expect(humanWalletError(cancelled)).toBe(CANCELLED);
   });
 });
+
+describe('no SOL for the fee, on Solana (2026-09-25)', () => {
+  it('says SOL, not ETH, and what to do', () => {
+    for (const raw of [
+      'Transaction simulation failed: Attempt to debit an account but found no record of a prior credit.',
+      'failed to send transaction: Transaction simulation failed: Error processing Instruction 0: insufficient funds for fee',
+    ]) {
+      expect(humanWalletError(new Error(raw))).toBe(
+        'Your wallet has no SOL to pay the network fee, so nothing was sent. Send it a little SOL (about 0.02) and try again.',
+      );
+    }
+  });
+});
