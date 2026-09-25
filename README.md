@@ -7,19 +7,19 @@
 **Built for [STOCKLANA](https://hackathons.solana.com/hackathons/stocklana).** Tokenized US stocks trade around the clock
 on Solana; nobody can watch a market all night. xorr lets an agent do it for you — without ever holding your money.
 
-- **Live app:** https://xorr-solana.vercel.app (sign in with email; it runs against a hosted mainnet fork, so the money
-  is test money and every transaction is real on that fork)
+- **Live app:** https://xorr-solana.vercel.app — **Solana mainnet, real money.** Sign in with email, Google, X, GitHub
+  or a Solana wallet; bring your own SOL (fees) and USDC. Every transaction is on mainnet and on Solscan.
+- **Website:** https://xorr.finance
 - **Executor health:** https://executor-production-a672.up.railway.app/health
-- **Fork RPC:** https://solana-fork-production.up.railway.app
 
 ## What it does
 
 1. **Sign in** with email or Google. Privy creates a Solana wallet that is yours; xorr never sees its key.
-2. **Fund it** with test USDC from the fork's faucet (or, on a real cluster, a Solana Pay deposit code).
+2. **Fund it** with USDC and a little SOL for fees — send them to the address the app shows, or scan its Solana Pay code.
 3. **Grant a permission** — one transaction you sign: an SPL `ApproveChecked` on your USDC for your daily cap × the days
    it runs, plus a sell approval on each xStock, so a stop-loss can fire while you are away. xorr holds the daily cap and
    the end date and enforces them on every trade; the chain enforces the total.
-4. **Hire an agent.** It watches [Backed's xStocks](https://xstocks.com) (NVDAx, TSLAx, AAPLx, MSFTx, SPYx on the fork),
+4. **Hire an agent.** It watches [Backed's xStocks](https://xstocks.com) (NVDAx, TSLAx, AAPLx, MSFTx, SPYx and the rest of the catalogue),
    buys through **Jupiter** when a setup appears, says why in Activity, and arms a stop-loss and take-profit that sell
    unattended. It is paced: one entry per stock per day, a quarter of the grant per stock, and the risk profile's wait
    between entries (90 minutes on Balanced). **Ask it to look now** and it runs the same cycle on the spot, behind every
@@ -65,9 +65,9 @@ on Solana; nobody can watch a market all night. xorr lets an agent do it for you
 |---|---|
 | App | Expo (web + iOS/Android), Privy Solana embedded wallet — signs grant, revoke, sells and withdrawals |
 | Executor | Hono + Postgres (`server/`): the grant record, `guardAndSpend`, the scheduler (agents, exits, recurring buys), Jupiter |
-| Chain | `solana-test-validator --clone` of mainnet: real USDC, xStocks (Token-2022), Jupiter v6 and today's routes |
+| Chain | **Solana mainnet**: USDC, xStocks (Token-2022), Tessera T-Tokens, Jupiter v6. (The reproducible proofs below run on a local `solana-test-validator --clone` of mainnet, so anyone can check them without money.) |
 | Oracle | **Pyth** `Equity.US.*` price accounts on Solana mainnet (`server/src/market/pyth.ts`) — the independent Nasdaq print the off-hours guard measures against |
-| Hosting | Railway (fork + executor + Postgres), Vercel (web) |
+| Hosting | Railway (executor + Postgres), Helius RPC, Vercel (web and xorr.finance) |
 
 ### The off-hours guard, and why Pyth
 
@@ -314,17 +314,15 @@ above, not the executor's. That is the non-custodial property, read straight off
 
 ### Known limitations — read these before you believe us
 
-- **It is a fork, not mainnet.** The money is test money on a `solana-test-validator --clone` of mainnet. The programs,
-  mints and pools are mainnet's own, cloned at boot; nothing here moves real funds.
-- **A fork's pools stop at boot.** A running validator cannot re-clone accounts, so over a day or so a pool drifts out
-  of the price range the fork copied and its route fails on chain (measured: NVDAx, 31 hours after boot). Nothing
-  papers over that: the trade fills nothing and the USDC is returned, in words. The hosted fork therefore restarts
-  once a day (`FORK_REFRESH_UTC_HOUR` on the fork service) with today's routes, and test balances start over — the
-  app says so on Network and Deposit. Locally, re-run the bootstrap.
+- **It is real money.** The hosted app runs on Solana mainnet (from 2026-09-25; before that, a hosted mainnet fork).
+  The permission caps what the bot can spend, and a route that cannot execute fills nothing and returns the USDC — but
+  trading can lose money within those limits, and this is hackathon software that has not been audited.
+- **xStocks are not for US persons.** Backed does not offer them to US persons; the app reads the issuer's gates and
+  refuses a buy for a wallet they would refuse, but it does not geo-block.
 - **A sale you sign in the app** is Jupiter's own swap transaction, built for your wallet: you are its only signer
   and fee payer, and the executor books it only after reading back that Jupiter ran and your USDC rose.
-- **Card deposits need MoonPay keys**, which this repository does not have — and on a fork a card could not pay in
-  anyway, since MoonPay delivers to the real chain. The Deposit screen says so; the fork faucet works.
+- **Card deposits need MoonPay keys**, which this repository does not have; the Deposit screen says so. Deposit by
+  sending USDC to your address or scanning its Solana Pay code.
 - **Agent reasoning is deterministic without an `OPENROUTER_API_KEY`.** Each trade still names the setup and the
   numbers behind it; with a key the sentence is written by a model.
 - **An agent's rules are enforced by the executor**, like the daily cap; what an agent can spend at all is enforced by
