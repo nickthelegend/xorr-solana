@@ -187,7 +187,7 @@ describe('what each pill and range asks the executor for', () => {
     expect(ohlcDays()).toEqual([]);
   });
 
-  it('reads an xStock’s history from its recorded prices, and asks nothing for a pre-IPO token (2026-09-25)', async () => {
+  it('reads an xStock’s history from its recorded prices (2026-09-25)', async () => {
     const end = Date.UTC(2026, 8, 14, 12);
     const points = Array.from({ length: 48 * 4 }, (_, i) => ({ at: end - MIN - (48 * 4 - 1 - i) * 7.5 * MIN, usd: 100 + i }));
     vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
@@ -201,7 +201,43 @@ describe('what each pill and range asks the executor for', () => {
     expect(ohlcDays()).toEqual([]);
     expect(day).toHaveLength(12);
     expect(day![11]![3]).toBe(100 + 48 * 4 - 1);
-    expect(await fetchHistory('T-SpaceX', '1D')).toBeNull();
+  });
+
+  /*
+   * A T-Token's seeded hourly bars and live readings are recorded the same way (2026-09-26); this returned null for every
+   * `T-` symbol, so the pre-IPO screens drew no chart at all.
+   */
+  it('reads a pre-IPO token’s history from the same recorded prices, folded the same way (2026-09-26)', async () => {
+    const end = Date.UTC(2026, 8, 25, 12);
+    const points = Array.from({ length: 7 * 24 }, (_, i) => ({ at: end - (7 * 24 - 1 - i) * HOUR, usd: 400 + i }));
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      const body = url.includes('/market/stocks/history') ? { symbol: 'T-SpaceX', points } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const week = await fetchHistory('T-SpaceX', '1W');
+    expect(asked.some((u) => u.includes('/market/stocks/history?symbol=T-SpaceX&hours=168'))).toBe(true);
+    expect(ohlcDays()).toEqual([]);
+    expect(week).toHaveLength(12);
+    expect(week![11]![3]).toBe(400 + 7 * 24 - 1);
+  });
+
+  it('falls back to the recorded rows on /market/ohlc when an older executor refuses a T-Token (2026-09-26)', async () => {
+    const t0 = Date.UTC(2026, 8, 25, 0);
+    const rows = Array.from({ length: 24 }, (_, i) => [t0 + (i + 1) * HOUR, 420 + i, 421 + i, 419 + i, 420.5 + i]);
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      if (url.includes('/market/stocks/history')) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'not_an_equity' }), { status: 404 }));
+      }
+      const body = url.includes('/market/symbols') ? ['T-OpenAI'] : url.includes('/market/ohlc') ? { rows } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const day = await fetchHistory('T-OpenAI', '1D');
+    expect(ohlcDays()).toEqual([1]);
+    expect(day).toHaveLength(12);
   });
 
   it('folds an xStock’s day into twelve candles, and a day that began recently into more than one (2026-09-26)', async () => {

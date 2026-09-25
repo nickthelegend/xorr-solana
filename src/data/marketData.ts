@@ -333,18 +333,30 @@ export function rowsOfReadings(points: readonly ObservedPoint[], rowMs: number):
 async function fetchRows(symbol: string, days: number): Promise<OhlcRow[] | null> {
   /*
    * An xStock has no candle feed; its history is what the executor has recorded of its route price (2026-09-25).
-   * It was never asked for here, so the asset screen drew "No chart yet" for every one of them — and a pre-IPO token
-   * has no recorded history at all, which is an answer, not a failure.
+   * It was never asked for here, so the asset screen drew "No chart yet" for every one of them.
+   *
+   * A pre-IPO token has one too (2026-09-26): the executor seeds a thousand hourly bars of each T-Token's pool into the
+   * same table and records its live price beside them, so it is read and folded exactly as an xStock is. This returned
+   * null for every `T-` symbol, which is why the SpaceX, OpenAI and Kalshi screens were a price and nothing else.
    */
-  if (isPreIpoSymbol(symbol)) return null;
-  if (isXStockSymbol(symbol)) {
-    const { points } = await getJson<{ points: ObservedPoint[] }>(
-      `/market/stocks/history?symbol=${encodeURIComponent(symbol)}&hours=${days * 24}`,
-      60_000,
-    );
-    // No readings in the window is nothing to draw, which the screen already says as "No chart yet".
-    const observed = rowsOfReadings(points ?? [], observedRowMs(days));
-    return observed.length > 0 ? observed : null;
+  const preIpo = isPreIpoSymbol(symbol);
+  if (preIpo || isXStockSymbol(symbol)) {
+    try {
+      const { points } = await getJson<{ points: ObservedPoint[] }>(
+        `/market/stocks/history?symbol=${encodeURIComponent(symbol)}&hours=${days * 24}`,
+        60_000,
+      );
+      // No readings in the window is nothing to draw, which the screen already says as "No chart yet".
+      const observed = rowsOfReadings(points ?? [], observedRowMs(days));
+      return observed.length > 0 ? observed : null;
+    } catch (e) {
+      /*
+       * An executor older than 2026-09-26 refuses a T-Token on that route (`not_an_equity`) but already serves the
+       * same recorded series as rows on `/market/ohlc`, so a pre-IPO token falls through to it below. An xStock's
+       * failure is still the caller's to see.
+       */
+      if (!preIpo) throw e;
+    }
   }
   const priced = await pricedSymbols();
   if (priced.size > 0 && !priced.has(symbol)) return null;

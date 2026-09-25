@@ -13,6 +13,12 @@ import { THIS_CHAIN } from '../db/chain-scope.js';
 import { priceOf } from '../market/prices.js';
 import { personaForKind } from './attribution.js';
 
+/**
+ * `AGENT_DECISION` in `bot/autonomous.ts`, the decision an autonomous entry's proposal is written with (2026-09-26).
+ * Restated rather than imported: that module pulls the whole executor and the Solana client in with it.
+ */
+const AGENT_DECISION = 'approve';
+
 export type LeaderboardRow = {
   id: string;
   name: string;
@@ -37,6 +43,18 @@ const AGENTS = [
   { id: 'yield-keeper', name: 'Yield Keeper', role: PERSONAS['yield-keeper'].role, c1: '#49E39B', c2: '#12A45F' },
   { id: 'drawdown-guard', name: 'Drawdown Guard', role: PERSONAS['drawdown-guard'].role, c1: '#B58CFF', c2: '#7A45E0' },
 ];
+
+/** One autonomous entry: its proposal, what the wallet still holds of the symbol, and the first sale of it after. */
+type AgentEntryRow = {
+  agent: string;
+  persona: string | null;
+  symbol: string;
+  usd: string;
+  units: string | null;
+  price: string | null;
+  held_units: string;
+  sold_amount: string | null;
+};
 
 type RunRow = { kind: string; persona_id: string | null; symbol: string; usd: string; units: string; price: string };
 
@@ -65,24 +83,39 @@ export async function agentRecords(walletId: string): Promise<Map<string, AgentR
   );
 
   /*
-   * The autonomous agent's own entries (2026-09-19). They are not strategy runs — each is a position sleeve credited to
-   * the persona that took it (`bot/autonomous.ts`) — so a Momentum Scout that had bought MSFTx on the hosted build showed
-   * "0 trades" on its own profile. Its open entries, at cost, are its record beside the runs above.
+   * The autonomous agent's own entries (2026-09-26). Every entry `bot/autonomous.ts` made in the window, open or closed,
+   * read from the proposal it writes for each fill (`decision = AGENT_DECISION`, the payload is its `DecisionRecord`:
+   * symbol, usd, units, price, persona). It read open `position_sleeves` rows before, so an entry the owner later sold,
+   * or one whose sleeve never got booked, left the agent at "0 Trades · $0.00" on the night it had traded twice.
+   * The proposal is the one row per entry, so an entry that also has a sleeve is counted once.
+   *
+   * Still held → units at today's mark less what it paid. Sold since → the first "Sold <symbol>" on the trail after it,
+   * when that sale is plausibly this entry's (within half and double what was paid); otherwise marked like a held one.
    */
-  const entries = await query<{ source_label: string; symbol: string; units: string; cost_usd: string }>(
-    `SELECT source_label, symbol, units, cost_usd FROM position_sleeves
-      WHERE wallet_id = $1 AND chain = ${THIS_CHAIN} AND source = 'agent' AND cost_usd > 0
-        AND opened_at > now() - interval '30 days'`,
-    [walletId],
-  ).catch(() => []);
+  const entries = await query<AgentEntryRow>(
+    `SELECT p.agent, p.payload->>'persona' AS persona, p.payload->>'symbol' AS symbol,
+            p.payload->>'usd' AS usd, p.payload->>'units' AS units, p.payload->>'price' AS price,
+            COALESCE(pos.units, 0) AS held_units, sale.amount AS sold_amount
+       FROM proposals p
+       LEFT JOIN positions pos
+         ON pos.wallet_id = p.wallet_id AND pos.chain = ${THIS_CHAIN} AND pos.side = 'long'
+        AND pos.symbol = p.payload->>'symbol'
+       LEFT JOIN LATERAL (
+         SELECT a.amount FROM audit_log a
+          WHERE a.wallet_id = p.wallet_id AND a.action = 'Sold ' || (p.payload->>'symbol') AND a.at > p.decided_at
+          ORDER BY a.at ASC LIMIT 1
+       ) sale ON true
+      WHERE p.wallet_id = $1 AND p.decision = $2 AND p.decided_at > now() - interval '30 days'
+        AND p.payload ? 'symbol' AND p.payload ? 'usd' AND p.payload ? 'personaName' AND p.payload ? 'signature'`,
+    [walletId, AGENT_DECISION],
+  ).catch(() => [] as AgentEntryRow[]);
   const personaByName = new Map(AGENTS.map((a) => [a.name, a.id]));
-  for (const e of entries) {
-    const persona = personaByName.get(e.source_label);
-    if (persona) runs.push({ kind: 'agent', persona_id: persona, symbol: e.symbol, usd: e.cost_usd, units: e.units, price: '0' });
-  }
+  const personaIds = new Set(AGENTS.map((a) => a.id));
 
   // One price lookup per symbol, not per run — and all of them at once, not one after another.
-  const symbols = [...new Set(runs.map((r) => r.symbol))];
+  const symbols = [
+    ...new Set([...runs.map((r) => r.symbol), ...entries.map((e) => e.symbol).filter(Boolean)]),
+  ];
   const marks = new Map<string, number>();
   await Promise.all(
     symbols.map(async (s) => {
@@ -108,6 +141,27 @@ export async function agentRecords(walletId: string): Promise<Map<string, AgentR
     const value = Number(r.units) * mark;
     const paid = Number(r.usd);
     const pnl = value - paid;
+    const acc = byAgent.get(agent) ?? { pnl: 0, wins: 0, trades: 0 };
+    acc.pnl += pnl;
+    acc.trades += 1;
+    if (pnl > 0) acc.wins += 1;
+    byAgent.set(agent, acc);
+  }
+
+  // The autonomous entries (2026-09-26). Counted even when unpriced — valued at their own fill then — because the trade
+  // happened whether or not a feed answers this minute.
+  for (const e of entries) {
+    const agent = e.persona && personaIds.has(e.persona) ? e.persona : personaByName.get(e.agent);
+    if (!agent || !e.symbol) continue;
+    const paid = Number(e.usd);
+    const units = Number(e.units);
+    if (!Number.isFinite(paid) || paid <= 0) continue;
+    const mark = marks.get(e.symbol) ?? (Number(e.price) > 0 ? Number(e.price) : undefined);
+    const marked = mark !== undefined && Number.isFinite(units) ? units * mark : paid;
+    const proceeds = Number(String(e.sold_amount ?? '').replace(/[^0-9.]/g, ''));
+    const held = Number(e.held_units) > 0.000001;
+    const realized = !held && proceeds > 0 && proceeds >= paid / 2 && proceeds <= paid * 2;
+    const pnl = (realized ? proceeds : marked) - paid;
     const acc = byAgent.get(agent) ?? { pnl: 0, wins: 0, trades: 0 };
     acc.pnl += pnl;
     acc.trades += 1;

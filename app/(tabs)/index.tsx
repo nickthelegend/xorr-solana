@@ -404,6 +404,58 @@ function AgentTile({
   );
 }
 
+/**
+ * "Agents at work" (2026-09-26): under the roster, what each hired agent has done this month — its trades, its win rate
+ * and its P&L — from the same `/agents` records the grid and the agent screen read. The roster alone showed who was
+ * hired, never that they had traded; the space under it was empty.
+ */
+function AgentsAtWork({ roster, onOpen }: { roster: Agent[]; onOpen: (id: string) => void }) {
+  const hired = roster.filter((a) => a.hired);
+  if (hired.length === 0) return null;
+  const trades = hired.reduce((n, a) => n + (a.trades ?? 0), 0);
+  const pnl = hired.reduce((n, a) => n + (a.pnl30d ?? 0), 0);
+  const tone = (v: number) => (v > 0 ? colors.up : v < 0 ? colors.down : colors.ink55);
+  const count = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
+  return (
+    <View style={{ marginTop: space.s22, gap: space.s8 }}>
+      <Eyebrow>Agents at work</Eyebrow>
+      {trades === 0 ? (
+        <Text variant="body" color={colors.ink55}>
+          Your agents haven’t traded yet.
+        </Text>
+      ) : (
+        <>
+          <Text variant="body" color={colors.ink55} figure="own">
+            {`${count(hired.length, 'agent')} · ${count(trades, 'trade')} · ${money(pnl, { signed: true })} this month`}
+          </Text>
+          {hired.map((a) => (
+            <Press
+              key={a.id}
+              onPress={() => onOpen(a.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`${a.name}, ${count(a.trades, 'trade')}, ${a.win}% win`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: space.s12, paddingVertical: space.s8 }}
+            >
+              <AgentOrb gradient={agentGradient(a.name)} size={52} face />
+              <View style={{ flex: 1, gap: space.s2 }}>
+                <Text variant="body" numberOfLines={1}>
+                  {a.name}
+                </Text>
+                <Text variant="orbStatus" color={colors.ink55}>
+                  {a.trades > 0 ? `${count(a.trades, 'trade')} · ${a.win}% win` : 'No trades yet'}
+                </Text>
+              </View>
+              <Text variant="body" color={tone(a.pnl30d)} figure="own">
+                {money(a.pnl30d, { signed: true })}
+              </Text>
+            </Press>
+          ))}
+        </>
+      )}
+    </View>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const hydrated = useHasHydrated();
@@ -947,6 +999,7 @@ export default function Home() {
                 ) : agents.error ? (
                   <TabFailed what="agents" error={agents.error} onRetry={agents.reload} />
                 ) : (
+                  <>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', rowGap: space.s18, marginTop: space.s18 }}>
                     {roster.map((a, i) => (
                       <Rise key={a.id} index={ROWS_FROM + i} style={{ width: TILE_W }}>
@@ -1005,6 +1058,8 @@ export default function Home() {
                       </Press>
                     </Rise>
                   </View>
+                  <AgentsAtWork roster={roster} onOpen={(id) => router.push(`/agent/${id}`)} />
+                  </>
                 )
               ) : tab === 'gainers' ? (
                 (isSolana ? stocks.loading && !stocks.data : classes.loading && !classes.data) ? (

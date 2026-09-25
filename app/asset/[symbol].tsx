@@ -300,13 +300,23 @@ export default function AssetDetail() {
   const dayLow = dayBars.length ? Math.min(...dayBars.map((b) => b[2])) : undefined;
   const dayHigh = dayBars.length ? Math.max(...dayBars.map((b) => b[1])) : undefined;
   const xstock = isSolana && isXStockSymbol(symbol ?? '');
-  const preIpoToken = isSolana && isPreIpoSymbol(symbol ?? '');
+  /*
+   * By the symbol alone (2026-09-26). A T-Token exists only on Tessera's Solana mints and `/market/preipo` is what
+   * answers for it, so `isSolana` added nothing here but a way to lose the tiles: the price above (`quoteOf`) and the
+   * chart (`fetchRows`) never asked it, so a bundle whose chain key did not say Solana priced SpaceX and showed none
+   * of its details.
+   */
+  const preIpoToken = isPreIpoSymbol(symbol ?? '');
   const catalogRow = useAsync(
     () => (xstock ? system.xstocks().then((c) => c.rows.find((r) => r.symbol === symbol) ?? null) : Promise.resolve(null)),
     [symbol, xstock],
   );
-  const preIpoRow = useAsync(
-    () => (preIpoToken ? preIpo.list().then((p) => p.rows.find((r) => r.symbol === symbol) ?? null) : Promise.resolve(null)),
+  // The page's own note comes with the row (2026-09-26): it is the venue's sentence about what these tokens are.
+  const preIpoRead = useAsync(
+    () =>
+      preIpoToken
+        ? preIpo.list().then((p) => ({ row: p.rows.find((r) => r.symbol === symbol) ?? null, note: p.note }))
+        : Promise.resolve(null),
     [symbol, preIpoToken],
   );
   const stats: { label: string; value: string }[] = [];
@@ -321,7 +331,7 @@ export default function AssetDetail() {
   }
   if (cat?.liquidityUsd != null) stats.push({ label: 'Liquidity', value: compactMoney(cat.liquidityUsd) });
   if (xstock) stats.push({ label: 'Backed', value: '1:1 by the share' });
-  const pre = preIpoRow.data;
+  const pre = preIpoRead.data?.row ?? null;
   if (pre?.poolUsd != null && pre.markUsd != null) {
     stats.push({ label: 'Pool vs mark', value: `${fmtPrice(pre.poolUsd)} · ${fmtPrice(pre.markUsd)}` });
   }
@@ -722,6 +732,25 @@ export default function AssetDetail() {
               </Text>
             </View>
           ))}
+        </View>
+      ) : null}
+      {/*
+        About a pre-IPO token (2026-09-26): only what `/market/preipo` says of it — the company, the sector its issuer
+        files it under, and the venue's own note. Nothing here is written by the app.
+      */}
+      {pre ? (
+        <View style={{ marginTop: space.s16, paddingHorizontal: space.gutter }}>
+          <Text variant="secondarySm" color={colors.ink55} style={{ marginBottom: space.s4 }}>
+            About
+          </Text>
+          <Text variant="secondary" color={colors.ink}>
+            {pre.sector ? `${pre.name} · ${pre.sector}` : pre.name}
+          </Text>
+          {preIpoRead.data?.note ? (
+            <Text variant="footnote" color={colors.ink45} style={{ marginTop: space.s4 }}>
+              {preIpoRead.data.note}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
