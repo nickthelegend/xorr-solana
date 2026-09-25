@@ -20,6 +20,7 @@ import {
   foldWindow,
   isStockSymbol,
   resetPricedSymbols,
+  rowsOfReadings,
   type OhlcRow,
 } from './marketData';
 import type { Bar } from './types';
@@ -186,8 +187,46 @@ describe('what each pill and range asks the executor for', () => {
     expect(ohlcDays()).toEqual([]);
   });
 
+  it('reads an xStock’s history from its recorded prices, and asks nothing for a pre-IPO token (2026-09-25)', async () => {
+    const end = Date.UTC(2026, 8, 14, 12);
+    const points = Array.from({ length: 48 * 4 }, (_, i) => ({ at: end - MIN - (48 * 4 - 1 - i) * 7.5 * MIN, usd: 100 + i }));
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      const body = url.includes('/market/stocks/history') ? { symbol: 'NVDAx', points } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const day = await fetchHistory('NVDAx', '1D');
+    expect(asked.some((u) => u.includes('/market/stocks/history?symbol=NVDAx&hours=24'))).toBe(true);
+    expect(ohlcDays()).toEqual([]);
+    expect(day).toHaveLength(12);
+    expect(day![11]![3]).toBe(100 + 48 * 4 - 1);
+    expect(await fetchHistory('T-SpaceX', '1D')).toBeNull();
+  });
+
   it('knows a tokenized share by its suffix, and nothing else as one', () => {
     expect(isStockSymbol('NVDAc')).toBe(true);
     for (const s of ['BTC', 'CBBTC', 'WETH', 'SPYx']) expect(isStockSymbol(s)).toBe(false);
+  });
+});
+
+describe('an xStock’s recorded prices as rows (2026-09-25)', () => {
+  it('buckets readings by time: first as open, last as close, stamped when the bucket closes', () => {
+    const t0 = Date.UTC(2026, 8, 14, 12);
+    const out = rowsOfReadings(
+      [
+        { at: t0 + 1 * MIN, usd: 10 },
+        { at: t0 + 10 * MIN, usd: 12 },
+        { at: t0 + 20 * MIN, usd: 9 },
+        // Nothing read in the next half hour: no row, not a flat one.
+        { at: t0 + 65 * MIN, usd: 11 },
+      ],
+      30 * MIN,
+    );
+    expect(out).toEqual([
+      [t0 + 30 * MIN, 10, 12, 9, 9],
+      [t0 + 65 * MIN, 11, 11, 11, 11],
+    ]);
+    expect(rowsOfReadings([], 30 * MIN)).toEqual([]);
   });
 });

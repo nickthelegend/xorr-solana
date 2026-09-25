@@ -1095,7 +1095,7 @@ export default function Home() {
                       <Row
                         height={size.rowLg}
                         divider={i < stockRows.length - 1}
-                        onPress={() => router.push(isSolana ? `/xstock/${s.symbol}` : `/oracle/${s.symbol}`)}
+                        onPress={() => router.push(isSolana ? `/asset/${s.symbol}` : `/oracle/${s.symbol}`)}
                         left={<AssetMark gradient={assetGradient(s.symbol)} {...logoProps(logos, s.symbol)} size={size.mark} />}
                         title={s.symbol}
                         secondary={s.name}

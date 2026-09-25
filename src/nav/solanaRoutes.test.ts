@@ -22,8 +22,7 @@ describe('the Solana build hides the Base-only screens', () => {
   it('sends the Base doors to their Solana counterparts', () => {
     expect(solanaRedirect('/swap')).toBe('/xstocks');
     expect(solanaRedirect('/oracle/NVDAx')).toBe('/xstock/NVDAx');
-    expect(solanaRedirect('/asset/TSLAx')).toBe('/xstock/TSLAx');
-    expect(solanaRedirect('/asset/T-OpenAI')).toBe('/xstock/T-OpenAI');
+    expect(solanaRedirect('/chart/TSLAx')).toBe('/xstock/TSLAx');
     expect(solanaRedirect('/chart/T-OpenAI')).toBeNull();
     expect(solanaRedirect('/asset/SOL')).toBeNull();
     expect(solanaRedirect('/futures')).toBe('/not-here?from=%2Ffutures');
@@ -36,6 +35,13 @@ describe('the Solana build hides the Base-only screens', () => {
     expect(shownHere('/markets')).toBe(false);
     expect(shownHere('/search')).toBe(false);
     expect(shownHere('/xstocks')).toBe(true);
+  });
+
+  it('opens an xStock or pre-IPO asset page as itself, not the ticket (2026-09-25)', () => {
+    expect(solanaRedirect('/asset/TSLAx')).toBeNull();
+    expect(solanaRedirect('/asset/NVDAx?from=home')).toBeNull();
+    expect(solanaRedirect('/asset/T-OpenAI')).toBeNull();
+    expect(hiddenOn('/asset/NVDAx', true)).toBe(false);
   });
 
   it('hides the perp movers', () => {

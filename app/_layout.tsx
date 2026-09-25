@@ -71,9 +71,13 @@ function SolanaRouteGuard() {
  * 400 in the network tab on its way out, asking the executor about a Base-only screen. Hidden routes render nothing for
  * the frame or two the redirect takes. Routes that merely MOVE — `/swap` to the xStocks market — keep rendering, because
  * there the destination is the point and a blank flash would be the only thing the user saw.
+ *
+ * The hidden screen's body is blanked, not the navigator (2026-09-25). It used to unmount the whole Stack, and with no
+ * navigator mounted the guard's `router.replace` had nothing to handle it: `/movers`, `/history`, `/compare` and the
+ * rest opened a black screen with no title and no way back, forever, instead of reaching `/not-here`.
  */
-function useHiddenHere(): boolean {
-  return hiddenOn(usePathname());
+function hiddenScreenLayout({ route, children }: { route: { name: string }; children: React.ReactElement }): React.ReactElement {
+  return hiddenOn(`/${route.name}`) ? <></> : children;
 }
 
 function NotificationRouting() {
@@ -169,9 +173,9 @@ export default function RootLayout() {
 
 /** The navigator itself, so a hidden route can render nothing while the guard navigates away. */
 function AppRoutes() {
-  if (useHiddenHere()) return null;
   return (
         <Stack
+          screenLayout={hiddenScreenLayout}
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: colors.bg },

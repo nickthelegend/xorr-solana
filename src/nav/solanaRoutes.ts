@@ -77,7 +77,7 @@ const XSTOCKS_INSTEAD: readonly string[] = ['/markets', '/search'];
 
 /**
  * Where a Base route that has a Solana counterpart goes instead. The Swap tab becomes the xStocks market; a stock's
- * oracle page becomes its xStock ticket.
+ * oracle page and chart page become its xStock ticket.
  */
 export function solanaRedirect(path: string): string | null {
   if (!isSolana) return null;
@@ -85,16 +85,14 @@ export function solanaRedirect(path: string): string | null {
   if (XSTOCKS_INSTEAD.includes(path.split('?')[0] ?? path)) return '/xstocks';
   const oracle = path.match(/^\/oracle\/([^/?]+)/);
   if (oracle) return `/xstock/${oracle[1]}`;
-  // An xStock's asset page is its ticket; other assets (SOL, BTC) keep their chart.
-  const asset = path.match(/^\/(?:asset|chart)\/([A-Z0-9]+x)(?:[/?]|$)/);
-  if (asset) return `/xstock/${asset[1]}`;
   /*
-   * A pre-IPO token's asset page is its ticket too (2026-09-23). `/asset/T-OpenAI` fell through to the Base asset
-   * screen, which showed the holding and then "Not tradable here" — for a token the executor buys, sells and closes.
-   * Only the asset page: a T-Token's chart stays its chart.
+   * An xStock's chart page is its ticket. Its asset page is not redirected any more (2026-09-25): the asset screen
+   * reads an xStock's and a pre-IPO token's price and recorded history, shows the holding, and its Buy and Sell open
+   * `/xstock/<symbol>` on the chosen side. Sending the asset page straight to the keypad meant tapping a stock never
+   * showed the stock.
    */
-  const preIpoAsset = path.match(/^\/asset\/(T-[A-Za-z0-9]+)(?:[/?]|$)/);
-  if (preIpoAsset) return `/xstock/${preIpoAsset[1]}`;
+  const chart = path.match(/^\/chart\/([A-Z0-9]+x)(?:[/?]|$)/);
+  if (chart) return `/xstock/${chart[1]}`;
   if (hiddenOn(path, true)) return `/not-here?from=${encodeURIComponent(path)}`;
   return null;
 }

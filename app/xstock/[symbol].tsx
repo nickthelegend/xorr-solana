@@ -146,7 +146,7 @@ function PreIpoFacts({ row }: { row: PreIpoRow }) {
 }
 
 export default function XStockTicket() {
-  const { symbol = '' } = useLocalSearchParams<{ symbol: string }>();
+  const { symbol = '', side: sideParam } = useLocalSearchParams<{ symbol: string; side?: string }>();
   const router = useRouter();
   const logo = useLogo(symbol || undefined);
   const goBack = useGoBack();
@@ -157,6 +157,13 @@ export default function XStockTicket() {
   const setOrderAmt = useStore((s) => s.setOrderAmt);
   const side = useStore((s) => s.side);
   const setSide = useStore((s) => s.setSide);
+  /*
+   * A link can open the ticket on a side (2026-09-25): `/xstock/NVDAx?side=sell` from a stock's page opens on Sell, not
+   * on whichever side the last ticket was left. Applied when the link arrives; the tabs are the person's after that.
+   */
+  useEffect(() => {
+    if (sideParam === 'buy' || sideParam === 'sell') setSide(sideParam);
+  }, [sideParam, setSide]);
 
   const amount = parseFloat(orderAmt || '0') || 0;
 
@@ -407,17 +414,24 @@ export default function XStockTicket() {
         </Text>
       </View>
 
-      <View
-        style={{ flexDirection: 'row', gap: space.s8, marginTop: space.s16, justifyContent: 'center' }}
-      >
-        {quick.map((usd) => (
-          <Pill key={usd} label={`$${usd}`} light onPress={() => choose(String(usd))} />
-        ))}
-        {side === 'sell' && heldUsd > 0 ? (
-          // Everything held, at the chain's balance and the live price; the quote then sizes the shares exactly.
-          <Pill label="All" light onPress={() => choose(String(Math.floor(heldUsd * 100) / 100))} testID="xstock-sell-all" />
-        ) : null}
-      </View>
+      {/*
+        The presets and the keypad step aside while the backing card is open (2026-09-25). Under them the dark card showed
+        its title and "1:1 BACKED" and nothing else, the reserves and the attestation hidden behind the digits. Open, it
+        has the room they had and scrolls; "Hide backing" brings them back. The amount typed so far is kept.
+      */}
+      {showBacking ? null : (
+        <View
+          style={{ flexDirection: 'row', gap: space.s8, marginTop: space.s16, justifyContent: 'center' }}
+        >
+          {quick.map((usd) => (
+            <Pill key={usd} label={`$${usd}`} light onPress={() => choose(String(usd))} />
+          ))}
+          {side === 'sell' && heldUsd > 0 ? (
+            // Everything held, at the chain's balance and the live price; the quote then sizes the shares exactly.
+            <Pill label="All" light onPress={() => choose(String(Math.floor(heldUsd * 100) / 100))} testID="xstock-sell-all" />
+          ) : null}
+        </View>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -494,7 +508,7 @@ export default function XStockTicket() {
         )}
       </ScrollView>
 
-      <Keypad light onPress={press} />
+      {showBacking ? null : <Keypad light onPress={press} />}
 
       {side === 'buy' ? (
         <View style={{ paddingTop: space.s12, gap: space.s8 }}>
