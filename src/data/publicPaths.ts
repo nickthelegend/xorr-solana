@@ -50,6 +50,8 @@ export const PUBLIC_PATHS: readonly string[] = [
   '/yield/supply',
   '/deposit/moonpay/config',
   '/deposit/moonpay/webhook',
+  // The app's chain calls, relayed so the RPC key stays on the server (server/src/routes/rpcRelay.ts).
+  '/rpc',
 ];
 
 export const PUBLIC_PREFIXES: readonly string[] = ['/perp/', '/strategies/library'];

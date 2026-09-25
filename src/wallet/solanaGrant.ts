@@ -21,6 +21,7 @@ import {
 import { parseUnits } from 'viem';
 import { api } from '@/data/api';
 import { solanaConnection } from './solanaTx';
+import { approvedFor, namesDelegate, rememberApproved } from './approvedAccounts';
 
 const DAY_MS = 86_400_000;
 
@@ -139,15 +140,16 @@ export async function grantOnSolana(params: {
   const agentWallets = await api
     .get<{ address: string; exists: boolean }[]>('/agents/wallets')
     .then((ws) => ws.filter((w) => w.exists).map((w) => new PublicKey(w.address)), () => []);
-  const signature = await params.signAndSend(
-    buildGrantTx({
-      owner: new PublicKey(params.owner),
-      grant,
-      dailyCapUsd: params.dailyCapUsd,
-      durationMs: params.durationMs,
-      agentWallets,
-    }),
-  );
+  const tx = buildGrantTx({
+    owner: new PublicKey(params.owner),
+    grant,
+    dailyCapUsd: params.dailyCapUsd,
+    durationMs: params.durationMs,
+    agentWallets,
+  });
+  const signature = await params.signAndSend(tx);
+  // Remembered on this device, so the stop can find every approval even with the executor down.
+  await rememberApproved(params.owner, tx);
   await api.post('/delegation/record', { signature, dailyCapUsd: params.dailyCapUsd, expiresAt });
   return signature;
 }
@@ -165,8 +167,18 @@ export async function revokeOnSolana(params: {
     .get<SolanaGrantParams>('/delegation/params')
     .then((p) => p.token, () => USDC_MINT);
   const owner = new PublicKey(params.owner);
-  // Read from the chain, not the executor, so the stop drops every approval even with the executor down.
-  const delegated = await delegatedAccounts(solanaConnection(), owner).catch(() => []);
+  const conn = solanaConnection();
+  /*
+   * Read from the chain, not the executor, so the stop drops every approval even with the executor down. The full read
+   * is indexed, which only the executor's relay serves; when it cannot be had, every account this device approved is
+   * checked instead, one plain read for all of them, and each that still names a delegate is revoked (2026-09-25).
+   */
+  const delegated = await delegatedAccounts(conn, owner).catch(async () => {
+    const known = await approvedFor(params.owner);
+    if (!known.length) return [];
+    const infos = await conn.getMultipleAccountsInfo(known.map((k) => k.account), 'confirmed').catch(() => null);
+    return infos ? known.filter((_, i) => namesDelegate(infos[i]?.data)) : known;
+  });
   const signature = await params.signAndSend(buildRevokeTx({ owner, token, delegated }));
   await api.post('/delegation/revoke', { signature }).catch(() => undefined);
   return signature;

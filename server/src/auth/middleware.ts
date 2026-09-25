@@ -65,6 +65,11 @@ const PUBLIC_PATHS = new Set([
   '/deposit/moonpay/config',
   /** MoonPay webhook callbacks from MoonPay servers. */
   '/deposit/moonpay/webhook',
+  /**
+   * The app's chain calls, relayed to the executor's RPC so its key stays on the server (`routes/rpcRelay.ts`). A
+   * signed-out visitor reads prices from the chain too; the relay carries only the app's own methods, rate-limited.
+   */
+  '/rpc',
 ]);
 
 /**

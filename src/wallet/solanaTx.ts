@@ -23,18 +23,44 @@ export function solanaRpcUrl(): string {
 }
 
 /**
- * The cluster's websocket endpoint: the RPC's host on ws/wss, one port up where the RPC names a port — the
- * convention `solana-test-validator` and a local fork follow (8899 → 8900).
+ * Where chain calls go when the primary RPC cannot answer (2026-09-25).
+ *
+ * On mainnet the primary is the executor's relay (`server/src/routes/rpcRelay.ts`), which keeps the paid RPC's key on the
+ * server. If the executor is down, the app must still be able to read, sign and send — above all the stop — so it falls
+ * back to a public node that serves browsers. That node refuses indexed reads; `revokeOnSolana` covers that case.
+ */
+export function solanaFallbackRpcUrl(): string | undefined {
+  return process.env.EXPO_PUBLIC_CHAIN_RPC_FALLBACK || undefined;
+}
+
+/**
+ * The cluster's websocket endpoint: named outright when the build says (a relay has no websocket; a public node does),
+ * else the RPC's host on ws/wss, one port up where the RPC names a port — the convention `solana-test-validator` and a
+ * local fork follow (8899 → 8900).
  */
 export function solanaWsUrl(rpc: string = solanaRpcUrl()): string {
+  if (process.env.EXPO_PUBLIC_CHAIN_WS) return process.env.EXPO_PUBLIC_CHAIN_WS;
   const u = new URL(rpc);
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
   if (u.port) u.port = String(Number(u.port) + 1);
   return u.toString().replace(/\/$/, '');
 }
 
+/** The primary RPC, and the fallback when it is unreachable, rate-limited or failing. */
+export async function resilientFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const fallback = solanaFallbackRpcUrl();
+  try {
+    const res = await fetch(input, init);
+    if (fallback && (res.status >= 500 || res.status === 429)) throw new Error(`RPC answered ${res.status}`);
+    return res;
+  } catch (e) {
+    if (!fallback || String(input) === fallback) throw e;
+    return fetch(fallback, init);
+  }
+}
+
 export function solanaConnection(): Connection {
-  return new Connection(solanaRpcUrl(), 'confirmed');
+  return new Connection(solanaRpcUrl(), { commitment: 'confirmed', wsEndpoint: solanaWsUrl(), fetch: resilientFetch });
 }
 
 export type Prepared = { blockhash: string; lastValidBlockHeight: number };
