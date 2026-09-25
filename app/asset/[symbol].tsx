@@ -222,6 +222,7 @@ export default function AssetDetail() {
    * and says nothing: an unmarked chart is not a claim that nothing filled, and the price is still worth showing.
    */
   const runs = useAsync(() => system.runs(RUNS_WINDOW), []);
+  const activity = useAsync(() => repos.activity.list(), []);
   const fills = useMemo(() => fillsOf(runs.data ?? [], settlementSymbol(symbol ?? '')), [runs.data, symbol]);
   const onLine = useMemo(() => lineMarks(fills, line.times), [fills, line]);
   const inCandles = useMemo(() => candleMarks(fills, spans), [fills, spans]);
@@ -327,14 +328,18 @@ export default function AssetDetail() {
   if (pre?.spreadPct != null) stats.push({ label: 'Premium to mark', value: percent(pre.spreadPct, 1) });
   if (pre?.valuationUsd != null) stats.push({ label: 'Valuation', value: compactMoney(pre.valuationUsd) });
   if (pre?.holders != null) stats.push({ label: 'Holders', value: pre.holders.toLocaleString('en-US') });
-  // This wallet's agent trades of this token, newest first, from the same `/runs` page the chart's fills come from.
+  /*
+   * This wallet's agent trades of this token, newest first, from the activity trail (2026-09-26). `/runs` holds the
+   * strategies' fills, not the autonomous sweep's: Yield Keeper bought AMZNx on its own and this said "No agent has
+   * traded AMZNx yet". The trail records both, each under the agent that traded.
+   */
   const agentTrades = useMemo(() => {
     const token = settlementSymbol(symbol ?? '').toUpperCase();
-    return (runs.data ?? [])
-      .filter((r) => r.status === 'filled' && r.symbol.toUpperCase() === token && (r.side === 'buy' || r.side === 'sell'))
-      .sort((a, b) => Date.parse(b.finishedAt ?? b.at) - Date.parse(a.finishedAt ?? a.at))
+    return (activity.data ?? [])
+      .filter((r) => r.kind === 'trade' && r.agent !== 'You' && r.agent !== 'xorr' && r.action.toUpperCase().includes(token))
+      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
       .slice(0, 5);
-  }, [runs.data, symbol]);
+  }, [activity.data, symbol]);
 
   // The hero reads live SPOT, not the last candle close — a candle series is a history and
   // the number at the top of this screen is a price.
@@ -733,11 +738,11 @@ export default function AssetDetail() {
             agentTrades.map((r, i) => (
               <Row
                 key={r.id}
-                title={`${r.label} ${r.side === 'buy' ? 'bought' : 'sold'}${r.usd != null ? ` ${money(r.usd)}` : ''}`}
-                secondary={when(Date.parse(r.finishedAt ?? r.at))}
+                title={`${r.agent} · ${r.action}${r.amount ? ` ${r.amount.replace(/^[+\-−]\s*/, '')}` : ''}`}
+                secondary={r.at ? when(r.at) : r.t}
                 height={ROW_H}
                 divider={i < agentTrades.length - 1}
-                onPress={() => router.push(`/runs/${r.id}`)}
+                onPress={() => router.push('/activity')}
               />
             ))
           )}

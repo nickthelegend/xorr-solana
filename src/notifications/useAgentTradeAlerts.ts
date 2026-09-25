@@ -86,6 +86,17 @@ async function announce(look: TakenLook): Promise<void> {
   });
 }
 
+/** The newest trade an agent made, from the activity trail, which keeps every one (the last look lasts ~30 s). */
+async function newestAgentTrade() {
+  const rows = await repos.activity.list();
+  return rows
+    .filter((r) => r.kind === 'trade' && r.agent !== 'You' && r.agent !== 'xorr' && typeof r.at === 'number')
+    .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0];
+}
+
+/** How recent a trade must be for a first launch to still announce it: "your agent just traded" (2026-09-26). */
+const CATCH_UP_MS = 15 * 60_000;
+
 export function useAgentTradeAlerts(): void {
   const address = useStore((s) => s.wallet?.address);
   const inFlight = useRef(false);
@@ -93,21 +104,41 @@ export function useAgentTradeAlerts(): void {
   useEffect(() => {
     if (!address) return;
     let alive = true;
-    const key = seenKey(address);
+    const key = seenKey(address) + '.v2';
 
+    /*
+     * Read from the activity trail, not the last look (2026-09-26). A sweep that traded is the last look for about
+     * thirty seconds before the cooldown replaces it, and a twelve-second poll missed Yield Keeper's AMZNx buy that way.
+     * The trail keeps every trade with its time, so a trade is caught however late the app asks.
+     */
     const check = async () => {
       if (inFlight.current || AppState.currentState !== 'active') return;
       inFlight.current = true;
       try {
-        const look = await system.agentLastLook();
-        if (!alive || !look.looked || look.outcome !== 'taken') return;
-        const stamp = String(look.at);
+        const row = await newestAgentTrade();
+        if (!alive || !row?.at) return;
         const seen = await AsyncStorage.getItem(key).catch(() => null);
-        if (seen === stamp || (seen !== null && Number(seen) >= look.at)) return;
-        await AsyncStorage.setItem(key, stamp).catch(() => undefined);
-        // First run for this wallet on this phone: remember the newest trade, announce nothing that is already old.
-        if (seen === null) return;
-        await announce(look);
+        if (seen !== null && Number(seen) >= row.at) return;
+        await AsyncStorage.setItem(key, String(row.at)).catch(() => undefined);
+        // First run: announce only a trade from the last few minutes, never this morning's.
+        if (seen === null && Date.now() - row.at > CATCH_UP_MS) return;
+        const m = /^(bought|sold)\s+(\S+)/i.exec(row.action.trim());
+        const side = (m?.[1] ?? 'traded').toLowerCase();
+        const symbol = m?.[2] ?? '';
+        const amount = row.amount.replace(/^[+\-−]\s*/, '').trim();
+        const perm = await Notifications.getPermissionsAsync();
+        let granted = perm.status === 'granted';
+        if (!granted && perm.canAskAgain) granted = (await Notifications.requestPermissionsAsync()).status === 'granted';
+        if (!granted) return;
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: `${row.agent} ${side} ${symbol}`.trim(),
+            body: amount ? `${amount} from its own wallet · tap to see it` : 'From its own wallet · tap to see it',
+            sound: 'default',
+            data: { kind: AGENT_TRADE_KIND, route: '/activity', seq: row.id },
+          },
+          trigger: null,
+        });
       } catch (e) {
         if (__DEV__) console.log(`[agent-alerts] check failed: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
@@ -115,26 +146,10 @@ export function useAgentTradeAlerts(): void {
       }
     };
 
-    /*
-     * A trade the app has never seen needs a baseline even when the last look is not a trade, or the first 'taken'
-     * after install would be swallowed as "first run". Seed with 0 when nothing is stored yet and the current look is
-     * not a trade, so the next trade — the one this feature exists for — does alert.
-     */
-    const seed = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(key);
-        if (stored !== null) return;
-        const look = await system.agentLastLook();
-        if (!look.looked || look.outcome !== 'taken') await AsyncStorage.setItem(key, '0');
-      } catch {
-        // No baseline: the first trade seen is recorded rather than announced, which errs quiet.
-      }
-    };
-
-    void seed().then(check);
+    void check();
     const timer = setInterval(() => void check(), EVERY_MS);
-    const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
-      if (s === 'active') void check();
+    const sub = AppState.addEventListener('change', (st: AppStateStatus) => {
+      if (st === 'active') void check();
     });
     return () => {
       alive = false;
