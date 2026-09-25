@@ -84,7 +84,7 @@ export async function prepareUserSell(
 
   let q: Awaited<ReturnType<typeof quote>>;
   try {
-    q = await quote({ inSymbolOrMint: stock.address, outSymbolOrMint: 'USDC', amountUnits: units, slippageBps: 50 });
+    q = await quote({ inSymbolOrMint: stock.address, outSymbolOrMint: 'USDC', amountUnits: units, slippageBps: 50, legacy: true });
   } catch (e) {
     throw new SellRefused('no_quote', `No venue would quote a sale of ${stock.symbol} right now (${e instanceof Error ? e.message : String(e)}).`);
   }

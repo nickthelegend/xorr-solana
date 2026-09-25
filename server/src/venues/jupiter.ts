@@ -103,6 +103,16 @@ const JUPITER_APIS = [
 ];
 
 /**
+ * What a swap pays to land on mainnet (2026-09-25): Jupiter's own fee estimate at "high", capped at 0.001 SOL. Without
+ * one, a swap competes on the base fee alone and can sit unconfirmed until its blockhash expires. A fork has no fee
+ * market, so it pays nothing extra.
+ */
+const PRIORITY_FEE =
+  CLUSTER_KEY === 'solana-mainnet'
+    ? { prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: 1_000_000, priorityLevel: 'high' } } }
+    : {};
+
+/**
  * Raised when Jupiter cannot price a pair: no route, or the API could not be reached.
  *
  * Its own class so a caller can tell "we could not find out" from "the swap failed" — the first is a
@@ -130,6 +140,11 @@ export async function quote(params: {
   outSymbolOrMint: string;
   amountUnits: bigint | number;
   slippageBps?: number;
+  /**
+   * Only a route that fits a legacy transaction (2026-09-25): a swap the OWNER signs in the app, whose signer takes a
+   * legacy `Transaction`. On mainnet an unpinned quote is v0, which `buildOwnerSwap` cannot hand to that signer.
+   */
+  legacy?: boolean;
 }): Promise<JupiterQuoteResponse> {
   const inputMint = resolveMint(params.inSymbolOrMint);
   const outputMint = resolveMint(params.outSymbolOrMint);
@@ -182,14 +197,15 @@ export async function quote(params: {
    * transactionVersion"). Every pre-IPO buy fell to the venue vault, which holds no T-Tokens, and failed. A direct
    * Meteora route fits a legacy transaction (842 bytes, measured), so it is pinned the same way the Whirlpool one is.
    */
+  const open = params.legacy ? '&asLegacyTransaction=true' : '';
   const attempts = pinnedDex
     ? [
         ...[...new Set([pinnedDex, 'Meteora DLMM'])].map(
           (dex) => `&dexes=${encodeURIComponent(dex)}&onlyDirectRoutes=true&asLegacyTransaction=true`,
         ),
-        '',
+        open,
       ]
-    : [''];
+    : [open];
 
   let lastError: Error | null = null;
   for (const routePin of attempts) {
@@ -291,6 +307,7 @@ async function routeThroughJupiter(params: {
           userPublicKey: signer.publicKey.toBase58(),
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
+          ...PRIORITY_FEE,
           /*
            * Off mainnet, a legacy transaction (2026-09-19): it names every account itself, where a v0 transaction points
            * at address lookup tables — and Jupiter's choice of table can change between the fork's boot, when its
@@ -374,6 +391,7 @@ export async function buildOwnerSwap(params: {
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
           asLegacyTransaction: true,
+          ...PRIORITY_FEE,
         }),
       });
       if (!res.ok) throw new Error(`Jupiter swap build HTTP ${res.status}: ${await res.text()}`);

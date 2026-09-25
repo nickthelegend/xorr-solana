@@ -30,7 +30,7 @@ const SOLANA_CONFIG: PrivyClientConfig = {
     ethereum: { createOnLogin: 'off' },
     solana: { createOnLogin: 'users-without-wallets' },
   },
-  loginMethods: ['email', 'google', 'twitter', 'wallet'],
+  loginMethods: ['email', 'google', 'twitter', 'github', 'wallet'],
   externalWallets: { solana: { connectors: toSolanaWalletConnectors() } },
   /*
    * The RPC Privy's signing sheet previews a transaction against (2026-09-19). With none configured, signing threw
@@ -64,7 +64,7 @@ export function AppPrivyProvider({ children }: { children: React.ReactNode }) {
         embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },
         // The same ways in as the onboarding screen offers (`src/auth/socialLogins.ts`); each is switched on per app in
         // Privy's dashboard, and one that is not simply does not appear here.
-        loginMethods: ['email', 'google', 'twitter', 'wallet'],
+        loginMethods: ['email', 'google', 'twitter', 'github', 'wallet'],
         // Follows EXPO_PUBLIC_XORR_CHAIN — see src/chain.ts for what hardcoding this cost.
         defaultChain: activeChain,
         supportedChains,
