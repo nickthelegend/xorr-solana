@@ -205,9 +205,14 @@ export default function Deposit() {
                     loading={openingMoonPay}
                     onPress={buyWithMoonPay}
                   />
-                ) : moonPay.data || moonPay.error ? (
+                ) : moonPay.data && !moonPay.data.configured ? (
+                  // Not a fault to report (2026-09-25): there is simply no card route, and the address above is the way in.
                   <Text variant="footnote" color={colors.ink50} align="center">
-                    {moonPay.data ? moonPay.data.detail : errorText(moonPay.error)}
+                    No card deposits here yet — send USDC from any Solana wallet or exchange to this address.
+                  </Text>
+                ) : moonPay.error ? (
+                  <Text variant="footnote" color={colors.ink50} align="center">
+                    {errorText(moonPay.error)}
                   </Text>
                 ) : null}
                 {moonPayError ? (
