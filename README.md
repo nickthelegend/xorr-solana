@@ -12,6 +12,27 @@ on Solana; nobody can watch a market all night. xorr lets an agent do it for you
 - **Website:** https://xorr.finance
 - **Executor health:** https://executor-production-a672.up.railway.app/health
 
+## Hosted on Solana mainnet
+
+Since 2026-09-25 the hosted app runs on **Solana mainnet** with real money — no fork, no test tokens.
+
+| | |
+|---|---|
+| App | https://xorr-solana.vercel.app (web) · iOS/Android v1.0.0 builds |
+| Website | https://xorr.finance |
+| Executor | https://executor-production-a672.up.railway.app/health — `chain: solana-mainnet`, Helius RPC, Pyth and Tessera feeds |
+| Chain access from the app | the executor's `/rpc` relay (allowlisted methods; the RPC key stays on the server), falling back to a public node |
+
+The bot's own accounts — each is public, and each can be checked on Solscan:
+
+| Role | Address | What it can do |
+|---|---|---|
+| Delegate (the permission's key) | [`ACikuhfPnynwUs9yYzGmNybAdRK2AtfMLLovWzdkcSEL`](https://solscan.io/account/ACikuhfPnynwUs9yYzGmNybAdRK2AtfMLLovWzdkcSEL) | move only what an owner approved to it, capped by the token program; revoked by the owner in one tap |
+| Payer | [`6usPSsycKfrcmEc8zxmRmjVvUCGu2Ygf89RHk7peauhc`](https://solscan.io/account/6usPSsycKfrcmEc8zxmRmjVvUCGu2Ygf89RHk7peauhc) | pays network fees and the rent of a user's new token accounts |
+| Venue vault | [`CZ1JQUm7CbTrvUimxzpZZAPRbe65d5SV2R91yjAa82i9`](https://solscan.io/account/CZ1JQUm7CbTrvUimxzpZZAPRbe65d5SV2R91yjAa82i9) | holds USDC only for the instant of a routed buy; pays its own swap fees |
+
+Mainnet transactions from the demo are listed in [docs/MAINNET-LOG.md](docs/MAINNET-LOG.md), each with its Solscan link.
+
 ## What it does
 
 1. **Sign in** with email or Google. Privy creates a Solana wallet that is yours; xorr never sees its key.
