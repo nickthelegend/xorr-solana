@@ -14,7 +14,12 @@ import { Image } from 'expo-image';
 import { colors } from '@/ui';
 import { COIN_FOCUS, HeroFades } from './coinHeroParts';
 
-const POSTER = require('../../assets/landing/hero-poster.webp');
+/*
+ * A new filename for new art (2026-09-25): a release build addresses its images by path, and the image cache keys on
+ * that path, so replacing the file under its old name kept showing the old coin render on a device that had cached it —
+ * across reinstalls. A new name cannot be served from an old cache.
+ */
+const POSTER = require('../../assets/landing/night-shift-poster.webp');
 
 export function CoinHero({ style }: { style?: StyleProp<ViewStyle> }) {
   return (
