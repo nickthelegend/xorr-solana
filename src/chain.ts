@@ -227,7 +227,9 @@ export function depositUri(address: string): string {
 
 /** Said where the code would be. A fork build has no code, and its money is test funds. */
 export const depositQrNote = isSolana
-  ? (money === 'copy' ? 'Solana fork. Test funds, which start over when it restarts each day.' : 'Send only USDC on Solana.')
+  ? (money === 'copy'
+      ? 'Solana fork. Test funds, which start over when it restarts each day.'
+      : 'Send USDC on Solana, and a little SOL (about 0.02) for network fees.')
   : 'Test network. Use test funds.';
 
 /**

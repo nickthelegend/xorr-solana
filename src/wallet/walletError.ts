@@ -59,6 +59,14 @@ export function humanWalletError(e: unknown): string {
    * fork (`walletSignsOnly` in src/chain.ts), so this is the fork wallet's own balance, which the
    * faucet tops up.
    */
+  /*
+   * The same thing on Solana (2026-09-25), which says it in its own words: a wallet that has never held SOL is "an
+   * account … with no record of a prior credit", one that ran dry is short of lamports for the fee. On mainnet there is
+   * no faucet, so the sentence says what to do.
+   */
+  if (/no record of a prior credit|insufficient funds for fee|InsufficientFundsForFee|insufficient lamports/i.test(raw)) {
+    return 'Your wallet has no SOL to pay the network fee, so nothing was sent. Send it a little SOL (about 0.02) and try again.';
+  }
   if (/insufficient funds/i.test(raw)) {
     return 'Your wallet has no ETH to pay the network fee, so the transaction was not sent.';
   }
