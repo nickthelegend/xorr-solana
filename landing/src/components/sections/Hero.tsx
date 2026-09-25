@@ -47,7 +47,7 @@ export function Hero() {
           className="relative h-full w-full [mask-image:radial-gradient(78%_72%_at_50%_42%,#000_48%,transparent_100%)]"
         >
           <div className="absolute inset-0 animate-float-slow motion-reduce:animate-none">
-            {/* The night-shift film's opening scene, silent and looped. Its poster is its own first frame, so nothing jumps. */}
+            {/* The ChatGPT still, animated by Gemini. Its poster is the film's own first frame, so nothing jumps when it starts. */}
             <LoopVideo
               preload="auto"
               poster="/media/hero-poster.webp"

@@ -19,7 +19,7 @@ import { COIN_FOCUS, HeroFades } from './coinHeroParts';
  * that path, so replacing the file under its old name kept showing the old coin render on a device that had cached it —
  * across reinstalls. A new name cannot be served from an old cache.
  */
-const POSTER = require('../../assets/landing/night-shift-poster.webp');
+const POSTER = require('../../assets/landing/coins-poster.webp');
 
 export function CoinHero({ style }: { style?: StyleProp<ViewStyle> }) {
   return (
