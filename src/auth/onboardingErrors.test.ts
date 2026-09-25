@@ -81,3 +81,9 @@ describe('signing in with Google, X or a wallet', () => {
     );
   });
 });
+
+describe('a build the sign-in service does not know (2026-09-25)', () => {
+  it('says sign-in is not set up, not that the address is wrong', () => {
+    expect(codeFailure(new Error('Invalid nativeAppID'))).toBe('Sign-in is not set up for this app yet, so no code was sent.');
+  });
+});

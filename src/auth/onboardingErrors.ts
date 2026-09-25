@@ -37,6 +37,8 @@ export function codeFailure(e: unknown): string {
   // The two Privy refusals a user can actually do something about.
   if (/invalid.*email|email.*invalid/i.test(m)) return 'That email address does not look right.';
   if (/rate.?limit|too many/i.test(m)) return 'Too many codes requested. Wait a minute and try again.';
+  // The sign-in service does not know this build of the app yet (Privy: allowed app identifiers). Not the user's doing.
+  if (/invalid.?native.?app/i.test(m)) return 'Sign-in is not set up for this app yet, so no code was sent.';
   return stated(e, 'The code could not be sent. Check the address and try again.');
 }
 

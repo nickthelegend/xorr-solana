@@ -310,12 +310,18 @@ export default function WalletSetup() {
           However you sign in is how you get back to this wallet.
         </NoteStrip>
 
-        {shownError ? (
-          <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s14 }}>
-            {shownError}
-          </Text>
-        ) : null}
       </Fill>
+
+      {/*
+       * Above the button, outside the filling area (2026-09-25): inside it, on a phone where the steps, the three social
+       * buttons and the email field already fill the screen, the error was pushed below the fold and clipped — a tap
+       * that failed looked like a tap that did nothing ("Invalid nativeAppID" from Privy, never shown).
+       */}
+      {shownError ? (
+        <Text variant="secondarySm" color={colors.down} align="center" style={{ marginBottom: space.s10 }}>
+          {shownError}
+        </Text>
+      ) : null}
 
       {done ? (
         returning ? (
