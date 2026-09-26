@@ -9,6 +9,8 @@ import 'dotenv/config';
 import { PERSONAS, systemPrompt, type PersonaId, type Venue } from './personas.js';
 import { CHAIN_KEY } from '../evm/chains.js';
 import { TOKENS } from '../venues/oneinch.js';
+import { ON_SOLANA } from '../solana/clusters.js';
+import { tradableSymbols } from '../venues/tradable-token.js';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -97,10 +99,18 @@ const REPAIR_HINT: Record<VoiceViolation, string> = {
  * cost an RPC round trip on every message. Naming a token the fork cannot settle is a much smaller
  * error than describing a market that does not exist here at all.
  */
-const VENUE: Venue = {
-  chain: CHAIN_KEY === 'base-sepolia' ? 'Base Sepolia' : 'Base',
-  tradable: Object.keys(TOKENS),
-};
+const VENUE: Venue = ON_SOLANA
+  ? {
+      // On Solana the executor fills xStocks and Tessera's pre-IPO tokens through Jupiter, and nothing else (2026-09-25).
+      chain: 'Solana',
+      router: 'Jupiter',
+      instruments: "tokenized US stocks (Backed's xStocks) and pre-IPO company tokens (Tessera)",
+      tradable: tradableSymbols(),
+    }
+  : {
+      chain: CHAIN_KEY === 'base-sepolia' ? 'Base Sepolia' : 'Base',
+      tradable: Object.keys(TOKENS),
+    };
 
 export async function speak(params: {
   persona: PersonaId;

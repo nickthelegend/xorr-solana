@@ -17,6 +17,7 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
+import { isSolana } from '@/chain';
 import { assetGradient } from '@/design/gradients';
 import {
   AreaChart,
@@ -60,8 +61,18 @@ import { signedMoney, when } from '@/format';
 import { repos } from '@/data';
 import { api } from '@/data/api';
 import { NotSignedIn } from '@/data/apiError';
-import { fetchTimedHistory, fillsKnownFrom, fillsOf, type HistoryRange } from '@/data/marketData';
+import {
+  fetchTimedHistory,
+  fillsKnownFrom,
+  fillsOf,
+  isPreIpoSymbol,
+  isXStockSymbol,
+  type HistoryRange,
+} from '@/data/marketData';
+import { walletTokens } from '@/data/walletTokens';
 import { system } from '@/data/system';
+import { preIpo } from '@/data/preIpo';
+import { compactMoney } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { useLogo } from '@/data/useLogos';
 import { rangeChange } from '@/state/derived';
@@ -81,6 +92,11 @@ import { useNow } from '@/state/useNow';
  * `All` is gone: the price feed keeps no more than a year of history, so there is no all time to draw.
  */
 const RANGES: readonly HistoryRange[] = ['1D', '1W', '1M', '1Y'];
+/**
+ * A Solana share's ranges (2026-09-25). An xStock's history is what this executor has recorded of its route price,
+ * which began in late August, so "past year" would be a month under a year's label.
+ */
+const EQUITY_RANGES: readonly HistoryRange[] = ['1D', '1W', '1M'];
 /**
  * Candles or line, as a visible control.
  *
@@ -120,6 +136,13 @@ export default function AssetDetail() {
   // area chart was only ever a summary of the same data. Both are offered; candles are the
   // default wherever there are real ones to draw.
   const [candleView, setCandleView] = useState(true);
+  /*
+   * An xStock or a pre-IPO token on the Solana build (2026-09-25). Every one of them used to be redirected past this
+   * screen straight into the buy keypad, so tapping a stock never showed its price, chart or holding. They are read
+   * here from their own sources, and traded on their own ticket, `/xstock`.
+   */
+  const equity = isSolana && (isXStockSymbol(symbol ?? '') || isPreIpoSymbol(symbol ?? ''));
+  const ranges = equity ? EQUITY_RANGES : RANGES;
 
   const logo = useLogo(symbol);
   const inst = useAsync(() => repos.markets.getInstrument(symbol!), [symbol]);
@@ -128,6 +151,14 @@ export default function AssetDetail() {
   const held = (positions.data ?? []).find((p) => p.symbol === symbol && p.notional >= DUST_USD);
   // Signed out there is no position to show, which is not a failure. Anything else that stopped the read is.
   const positionUnread = positions.error !== undefined && !(positions.error instanceof NotSignedIn);
+  /*
+   * What the wallet holds of this token, read from the chain as the xStock ticket reads it (2026-09-25). The book has
+   * the cost basis where it recorded one; a holding it has not recorded is still a holding, and shown as one.
+   */
+  const wallet = useAsync(() => (equity ? walletTokens() : Promise.resolve(null)), [equity]);
+  const inWallet = equity
+    ? wallet.data?.tokens.find((t) => t.symbol === symbol && t.units > 0 && (t.usd === null || t.usd >= DUST_USD))
+    : undefined;
 
   // Tokenized equities have a real spot price and no history: they are priced off the route
   // that would fill them, not a candle feed. A real price with no chart is a true state to show.
@@ -191,6 +222,7 @@ export default function AssetDetail() {
    * and says nothing: an unmarked chart is not a claim that nothing filled, and the price is still worth showing.
    */
   const runs = useAsync(() => system.runs(RUNS_WINDOW), []);
+  const activity = useAsync(() => repos.activity.list(), []);
   const fills = useMemo(() => fillsOf(runs.data ?? [], settlementSymbol(symbol ?? '')), [runs.data, symbol]);
   const onLine = useMemo(() => lineMarks(fills, line.times), [fills, line]);
   const inCandles = useMemo(() => candleMarks(fills, spans), [fills, spans]);
@@ -249,11 +281,75 @@ export default function AssetDetail() {
    */
   const cross = useAsync(
     () =>
-      api.get<{ agree: boolean; note: string }>(
-        `/market/crosscheck?symbol=${encodeURIComponent(symbol ?? '')}`,
-      ),
-    [symbol],
+      // Its second source is a route on Base (2026-09-25), which a Solana share never has: nothing to compare.
+      equity
+        ? Promise.resolve(null)
+        : api.get<{ agree: boolean; note: string }>(
+            `/market/crosscheck?symbol=${encodeURIComponent(symbol ?? '')}`,
+          ),
+    [symbol, equity],
   );
+
+  /*
+   * The details under the pills (2026-09-26). The space down to Sell/Buy was empty; these are all reads the app already
+   * makes elsewhere, each shown only when it answered — nothing here is a number the screen made up.
+   * The day's range is its own 1D read (the same cached request the 1D pill makes), so it is a day on every pill.
+   */
+  const dayRead = useAsync(() => fetchTimedHistory(symbol!, '1D'), [symbol]);
+  const dayBars = (dayRead.data ?? []).map((c) => c.bar);
+  const dayLow = dayBars.length ? Math.min(...dayBars.map((b) => b[2])) : undefined;
+  const dayHigh = dayBars.length ? Math.max(...dayBars.map((b) => b[1])) : undefined;
+  const xstock = isSolana && isXStockSymbol(symbol ?? '');
+  /*
+   * By the symbol alone (2026-09-26). A T-Token exists only on Tessera's Solana mints and `/market/preipo` is what
+   * answers for it, so `isSolana` added nothing here but a way to lose the tiles: the price above (`quoteOf`) and the
+   * chart (`fetchRows`) never asked it, so a bundle whose chain key did not say Solana priced SpaceX and showed none
+   * of its details.
+   */
+  const preIpoToken = isPreIpoSymbol(symbol ?? '');
+  const catalogRow = useAsync(
+    () => (xstock ? system.xstocks().then((c) => c.rows.find((r) => r.symbol === symbol) ?? null) : Promise.resolve(null)),
+    [symbol, xstock],
+  );
+  // The page's own note comes with the row (2026-09-26): it is the venue's sentence about what these tokens are.
+  const preIpoRead = useAsync(
+    () =>
+      preIpoToken
+        ? preIpo.list().then((p) => ({ row: p.rows.find((r) => r.symbol === symbol) ?? null, note: p.note }))
+        : Promise.resolve(null),
+    [symbol, preIpoToken],
+  );
+  const stats: { label: string; value: string }[] = [];
+  if (dayLow !== undefined && dayHigh !== undefined) {
+    stats.push({ label: 'Day range', value: `${fmtPrice(dayLow)} – ${fmtPrice(dayHigh)}` });
+  }
+  if (current && hasSeries) stats.push({ label: `Change · ${range}`, value: percent(seriesPct, 2) });
+  const cat = catalogRow.data;
+  if (cat?.price != null && cat.underlyingPrice != null && cat.underlyingPrice > 0) {
+    stats.push({ label: 'Pool vs share', value: `${fmtPrice(cat.price)} · ${fmtPrice(cat.underlyingPrice)}` });
+    stats.push({ label: 'Pool premium', value: percent(((cat.price - cat.underlyingPrice) / cat.underlyingPrice) * 100, 2) });
+  }
+  if (cat?.liquidityUsd != null) stats.push({ label: 'Liquidity', value: compactMoney(cat.liquidityUsd) });
+  if (xstock) stats.push({ label: 'Backed', value: '1:1 by the share' });
+  const pre = preIpoRead.data?.row ?? null;
+  if (pre?.poolUsd != null && pre.markUsd != null) {
+    stats.push({ label: 'Pool vs mark', value: `${fmtPrice(pre.poolUsd)} · ${fmtPrice(pre.markUsd)}` });
+  }
+  if (pre?.spreadPct != null) stats.push({ label: 'Premium to mark', value: percent(pre.spreadPct, 1) });
+  if (pre?.valuationUsd != null) stats.push({ label: 'Valuation', value: compactMoney(pre.valuationUsd) });
+  if (pre?.holders != null) stats.push({ label: 'Holders', value: pre.holders.toLocaleString('en-US') });
+  /*
+   * This wallet's agent trades of this token, newest first, from the activity trail (2026-09-26). `/runs` holds the
+   * strategies' fills, not the autonomous sweep's: Yield Keeper bought AMZNx on its own and this said "No agent has
+   * traded AMZNx yet". The trail records both, each under the agent that traded.
+   */
+  const agentTrades = useMemo(() => {
+    const token = settlementSymbol(symbol ?? '').toUpperCase();
+    return (activity.data ?? [])
+      .filter((r) => r.kind === 'trade' && r.agent !== 'You' && r.agent !== 'xorr' && r.action.toUpperCase().includes(token))
+      .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))
+      .slice(0, 5);
+  }, [activity.data, symbol]);
 
   // The hero reads live SPOT, not the last candle close — a candle series is a history and
   // the number at the top of this screen is a price.
@@ -276,7 +372,15 @@ export default function AssetDetail() {
    */
   // 'checking' is rendered, not guessed through — see useSettleable.
   const settleable = useSettleable(symbol ?? '');
-  const tradable = settleable !== 'no';
+  /*
+   * A Solana share is always offered (2026-09-25): `useSettleable` asks the Base token list, which has no xStock, and
+   * answered "no" for every one. Its own ticket asks this cluster whether it can settle, and says so there.
+   */
+  const tradable = equity || settleable !== 'no';
+  const checking = !equity && settleable === 'checking';
+  /** The ticket each side opens: an xStock's own on Solana, the order ticket everywhere else. */
+  const ticket = (side: 'buy' | 'sell') =>
+    equity ? `/xstock/${symbol}?side=${side}` : `/order/${settlementSymbol(symbol ?? '')}?side=${side}`;
 
   return (
     <Screen gutter="none" sheet>
@@ -305,7 +409,7 @@ export default function AssetDetail() {
             size={26}
           />
           <Text variant="cardTitleLg" numberOfLines={1}>
-            {inst.data?.name ?? symbol}
+            {inst.data?.name ?? spotRead.data?.name ?? symbol}
           </Text>
         </View>
       </View>
@@ -493,7 +597,7 @@ export default function AssetDetail() {
       ) : null}
 
       <PillRow style={{ marginTop: space.s16 }} contentPadding={space.gutter}>
-        {RANGES.map((r) => (
+        {ranges.map((r) => (
           <Pill key={r} label={r} selected={r === range} onPress={() => setRange(r)} />
         ))}
       </PillRow>
@@ -573,6 +677,14 @@ export default function AssetDetail() {
               divider={false}
             />
           </>
+        ) : inWallet ? (
+          <Row
+            title="Your position"
+            value={<Price figure="units">{`${quantity(inWallet.units)} ${symbol}`}</Price>}
+            secondary={inWallet.usd === null ? undefined : money(inWallet.usd)}
+            height={ROW_H}
+            divider={false}
+          />
         ) : positionUnread ? (
           // Not "you hold none": the book did not answer, so this screen cannot say either way.
           <Press
@@ -587,6 +699,85 @@ export default function AssetDetail() {
           </Press>
         ) : null}
       </View>
+      {/* Details (2026-09-26): what fills the space above Sell/Buy, each tile a read that answered. */}
+      {stats.length > 0 ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: space.s8,
+            marginTop: space.s16,
+            paddingHorizontal: space.gutter,
+          }}
+        >
+          {stats.map((st) => (
+            <View
+              key={st.label}
+              style={{
+                flexBasis: '48%',
+                flexGrow: 1,
+                paddingVertical: space.s10,
+                paddingHorizontal: space.s12,
+                borderRadius: radius.tile,
+                backgroundColor: colors.surfaceAlt,
+                borderWidth: 1,
+                borderColor: colors.cardBorder,
+              }}
+            >
+              <Text variant="footnote" color={colors.ink45}>
+                {st.label}
+              </Text>
+              <Text variant="secondary" color={colors.ink} numberOfLines={1} style={{ marginTop: space.s4 }}>
+                {st.value}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      {/*
+        About a pre-IPO token (2026-09-26): only what `/market/preipo` says of it — the company, the sector its issuer
+        files it under, and the venue's own note. Nothing here is written by the app.
+      */}
+      {pre ? (
+        <View style={{ marginTop: space.s16, paddingHorizontal: space.gutter }}>
+          <Text variant="secondarySm" color={colors.ink55} style={{ marginBottom: space.s4 }}>
+            About
+          </Text>
+          <Text variant="secondary" color={colors.ink}>
+            {pre.sector ? `${pre.name} · ${pre.sector}` : pre.name}
+          </Text>
+          {preIpoRead.data?.note ? (
+            <Text variant="footnote" color={colors.ink45} style={{ marginTop: space.s4 }}>
+              {preIpoRead.data.note}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {runs.data ? (
+        <View style={{ marginTop: space.s16, paddingHorizontal: space.gutter }}>
+          <Text variant="secondarySm" color={colors.ink55} style={{ marginBottom: space.s4 }}>
+            {`Agents on ${symbol}`}
+          </Text>
+          {agentTrades.length === 0 ? (
+            <Text variant="footnote" color={colors.ink45}>
+              {`No agent has traded ${symbol} yet.`}
+            </Text>
+          ) : (
+            agentTrades.map((r, i) => (
+              <Row
+                key={r.id}
+                title={`${r.agent} · ${r.action}${r.amount ? ` ${r.amount.replace(/^[+\-−]\s*/, '')}` : ''}`}
+                secondary={r.at ? when(r.at) : r.t}
+                height={ROW_H}
+                divider={i < agentTrades.length - 1}
+                onPress={() => router.push('/activity')}
+              />
+            ))
+          )}
+        </View>
+      ) : null}
+      <View style={{ height: space.s16 }} />
       </ScrollView>
 
       {/*
@@ -603,15 +794,15 @@ export default function AssetDetail() {
               <Button
                 label="Sell"
                 variant="secondary"
-                disabled={settleable === 'checking'}
-                onPress={() => router.push(`/order/${settlementSymbol(symbol ?? '')}?side=sell`)}
+                disabled={checking}
+                onPress={() => router.push(ticket('sell'))}
               />
             }
             right={
               <Button
                 label="Buy"
-                disabled={settleable === 'checking'}
-                onPress={() => router.push(`/order/${settlementSymbol(symbol ?? '')}?side=buy`)}
+                disabled={checking}
+                onPress={() => router.push(ticket('buy'))}
               />
             }
           />

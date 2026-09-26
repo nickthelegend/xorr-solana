@@ -1,4 +1,4 @@
-# xorr — the STOCKLANA video (about 3 minutes, Solana mainnet)
+# xorr — the STOCKLANA video (about 3 minutes, Solana mainnet, agent-first)
 
 **The story in one line:** stocks trade on Solana all night; nobody can watch them. xorr gives the job to an AI agent that
 trades from its own wallet, inside rules you set, and one tap takes every permission back.
@@ -18,17 +18,22 @@ Amounts are small on purpose: the permission, the agent's wallet and its rules a
 
 ## The scenes
 
-| # | Time | Screen | Do this | Say this |
-|---|---|---|---|---|
-| 1 | 0:00 | Film | The night-shift film, as is (`xorr-night-shift.mp4`, 20 s) | *(the film speaks: "Wall Street closes at 4. Solana doesn't.")* |
-| 2 | 0:20 | xorr.finance | Slow scroll: hero → the four agents → "How it works" | "xorr is an AI agent that trades tokenized US stocks for you on Solana — from its own wallet, inside rules you set, and a permission you take back in one tap." |
-| 3 | 0:35 | iPhone | Open xorr → **Get started** → email → code → Home shows your USDC | "I sign in with email — or Google, X, GitHub, or a Solana wallet. Privy gives me a Solana wallet that is mine; xorr never sees its key. This is mainnet, real USDC." |
-| 4 | 0:55 | iPhone | **Let the bot trade** → set **$200 a day** (the minimum) and **1 Day** → read the cards → **Sign this permission** → approve | "Here's the key idea. The bot gets a permission: a daily limit, one day, and a total the chain itself enforces — and it can never move more than the wallet holds. That's all it can ever touch." |
-| 5 | 1:15 | iPhone | Home → **Momentum Scout** → **Hire Momentum Scout** → **Fund** $10 → **Its rules → Edit**: $5 a trade, only NVDAx and TSLAx, 3% max loss → **Save** → **Ask Momentum Scout to look now** | "Every agent gets its own wallet. I put in $10 — the chain stops it there. Its rules: $5 a trade, only these two stocks, a stop 3% under the fill. Now I ask it to look." *(Read its answer: a trade with the receipt, or exactly why not.)* |
-| 6 | 2:05 | iPhone → Solscan | If it traded: tap the receipt's transaction → show it on Solscan | "That's a real Jupiter swap on mainnet." |
-| 7 | 2:15 | iPhone | **Stocks** → **Pre-IPO** → **OpenAI** → Buy **$5** | "Pre-IPO too — OpenAI, tokenised by Tessera. It shows the pool price against Tessera's own mark before I buy. And while Nasdaq is shut, the agent won't enter if the pool has drifted from Pyth's price for the real share." |
-| 8 | 2:35 | iPhone | **Safety** → **Stop all trading** → approve → try a buy → refused | "One tap stops everything, the agent's wallet included — a revoke on the blockchain, and it works even if our server is down. Watch: a buy is refused." |
-| 9 | 2:55 | End card | Last 3 s of the film (XORR · xorr.finance) | "xorr. Your agent, your rules, your money." |
+The story is the agent: you hire it, give it a wallet and rules, and it trades on its own. The manual buy is one short
+scene, there to show the pre-IPO market and the price check.
+
+| # | Screen | What happens | Say this |
+|---|---|---|---|
+| 1 | Film | The night-shift film (`xorr-night-shift.mp4`) | *(the film speaks: "Wall Street closes at 4. Solana doesn't.")* |
+| 2 | xorr.finance on the phone | Hero → "Trading you can hand off" → the gates → "Revoke it in one tap" | "xorr gives your trading to AI agents. They buy tokenized US stocks on Solana from their own wallet, inside rules you set." |
+| 3 | iPhone | Launch → **Get started** → email → code → Home | "Sign in with email, Google, X, GitHub or a Solana wallet. Privy makes a wallet that is mine. This is mainnet." |
+| 4 | iPhone | Home: balance, the four agents, Gainers, a stock and its 1:1 backing | "Four agents ship with the app. Every stock is backed one to one, and the app shows the proof." |
+| 5 | iPhone | **Let the bot trade** → $100 a day, 1 day → **Sign this permission** | "The bot gets one permission: a daily cap and an end date the chain enforces." |
+| 6 | iPhone | **Hire Momentum Scout** → **Its rules**: $10 a trade, any xStock, 3% max loss → **Fund** $10 → Solana Explorer: −10 / +10 USDC | "Its own wallet, its own rules. I put in ten dollars — that is all it can ever spend." |
+| 7 | iPhone | The agent trades by itself: Home says what it bought and why; Activity; the position with its stop and target; the transaction on the explorer | "I didn't press buy. Momentum Scout saw the breakout, bought inside its rules, and set a stop three percent under the fill." |
+| 8 | iPhone | Chat: "Why did you buy that?" | "And it tells me why, in plain words." |
+| 9 | iPhone | Stocks → **Pre-IPO** → OpenAI → Buy $5 (the ticket warns the pool is above Tessera's mark) | "Pre-IPO too — OpenAI, tokenised by Tessera, checked against Tessera's own mark before I buy." |
+| 10 | iPhone | **Safety** → **Stop all trading** → a look is refused | "One tap takes every permission back, the agent's wallet included — on the blockchain, not on our server." |
+| 11 | End card | XORR · xorr.finance | "xorr. Your agent, your rules, your money." |
 
 ## If something goes wrong
 

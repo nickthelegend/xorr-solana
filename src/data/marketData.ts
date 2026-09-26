@@ -260,8 +260,104 @@ export function foldWindow(raw: readonly Bar[], count = CANDLE_COUNT): Bar[] {
   return out;
 }
 
+/** `NVDAx`, `TSLAx` — an xStock, a tokenized share on Solana, priced by the Jupiter route that would fill it. */
+const XSTOCK_SUFFIX = /^[A-Z0-9]{1,8}x$/;
+
+export function isXStockSymbol(symbol: string): boolean {
+  return XSTOCK_SUFFIX.test(symbol);
+}
+
+/** `T-SpaceX`, `T-OpenAI` — a Tessera pre-IPO token, named `T-<Company>` by its issuer. */
+export function isPreIpoSymbol(symbol: string): boolean {
+  return /^T-[A-Za-z0-9]+$/.test(symbol);
+}
+
+/** One of the executor's own recorded prices of an xStock (`/market/stocks/history`). */
+export type ObservedPoint = { at: number; usd: number };
+
+/**
+ * How long a row is when an xStock's recorded prices are bucketed into rows (2026-09-25).
+ *
+ * Chosen so each range folds into its twelve candles the way the crypto feed's rows do, and so the chart timeframes
+ * divide evenly: a day in half-hours, a week in hours, a month or more in four-hour rows.
+ */
+function observedRowMs(days: number): number {
+  /*
+   * Five minutes for a day, not thirty (2026-09-26). A day window is 24h back from now, which is never on a bucket edge,
+   * so thirty-minute rows came to 49 and `foldWindowTimed` cut them five at a time into ten candles — and a day whose
+   * readings began recently (a fresh deployment, a new listing) was one or two half-hour rows, which drew ONE candle.
+   * Five-minute rows still divide an hour, so `candlesOfLength` keeps its hourly candles.
+   */
+  if (days <= 1) return 5 * 60_000;
+  if (days <= 7) return HOUR_MS;
+  return 4 * HOUR_MS;
+}
+
+/**
+ * An xStock's recorded prices, bucketed into OHLC rows, oldest first (2026-09-25).
+ *
+ * The executor records an xStock's price every time it asks the route (half a minute apart at the median, an hour at
+ * the most), and there is no candle feed for these anywhere. So a row is every reading inside one `rowMs` bucket:
+ * first as the open, last as the close, the extremes as high and low. Each row is stamped with the moment its bucket
+ * closes, as the crypto feed stamps its rows, and the newest with its last reading, since that bucket has not closed.
+ * An empty bucket is no row, not a flat one: nothing was read, so nothing is claimed.
+ */
+export function rowsOfReadings(points: readonly ObservedPoint[], rowMs: number): OhlcRow[] {
+  const sorted = points.filter((p) => Number.isFinite(p.at) && p.usd > 0).sort((a, b) => a.at - b.at);
+  if (sorted.length === 0) return [];
+  const last = sorted[sorted.length - 1]!.at;
+  const out: OhlcRow[] = [];
+  let bucket = Number.NaN;
+  let o = 0;
+  let h = 0;
+  let l = 0;
+  let c = 0;
+  const close = () => out.push([Math.min((bucket + 1) * rowMs, last), o, h, l, c]);
+  for (const p of sorted) {
+    const b = Math.floor(p.at / rowMs);
+    if (b !== bucket) {
+      if (!Number.isNaN(bucket)) close();
+      bucket = b;
+      o = h = l = c = p.usd;
+    } else {
+      h = Math.max(h, p.usd);
+      l = Math.min(l, p.usd);
+      c = p.usd;
+    }
+  }
+  close();
+  return out;
+}
+
 /** The feed's rows for a symbol, or null when nothing on this server prices it. */
 async function fetchRows(symbol: string, days: number): Promise<OhlcRow[] | null> {
+  /*
+   * An xStock has no candle feed; its history is what the executor has recorded of its route price (2026-09-25).
+   * It was never asked for here, so the asset screen drew "No chart yet" for every one of them.
+   *
+   * A pre-IPO token has one too (2026-09-26): the executor seeds a thousand hourly bars of each T-Token's pool into the
+   * same table and records its live price beside them, so it is read and folded exactly as an xStock is. This returned
+   * null for every `T-` symbol, which is why the SpaceX, OpenAI and Kalshi screens were a price and nothing else.
+   */
+  const preIpo = isPreIpoSymbol(symbol);
+  if (preIpo || isXStockSymbol(symbol)) {
+    try {
+      const { points } = await getJson<{ points: ObservedPoint[] }>(
+        `/market/stocks/history?symbol=${encodeURIComponent(symbol)}&hours=${days * 24}`,
+        60_000,
+      );
+      // No readings in the window is nothing to draw, which the screen already says as "No chart yet".
+      const observed = rowsOfReadings(points ?? [], observedRowMs(days));
+      return observed.length > 0 ? observed : null;
+    } catch (e) {
+      /*
+       * An executor older than 2026-09-26 refuses a T-Token on that route (`not_an_equity`) but already serves the
+       * same recorded series as rows on `/market/ohlc`, so a pre-IPO token falls through to it below. An xStock's
+       * failure is still the caller's to see.
+       */
+      if (!preIpo) throw e;
+    }
+  }
   const priced = await pricedSymbols();
   if (priced.size > 0 && !priced.has(symbol)) return null;
   const { rows } = await getJson<{ rows: OhlcRow[] }>(

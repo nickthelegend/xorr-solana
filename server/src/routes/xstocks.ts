@@ -239,7 +239,8 @@ xstockRoutes.post('/xstocks/sell/record', async (c) => {
         walletId: w.id,
         agent: 'You',
         action: `Sold ${sold.symbol}`,
-        detail: `${sold.units.toFixed(6)} ${sold.symbol} at $${sold.price.toFixed(2)} against the venue vault, at Jupiter's live quote. You signed it.`,
+        // A Jupiter swap the owner signs (2026-09-24); "against the venue vault" was the fork-era settlement.
+        detail: `${sold.units.toFixed(6)} ${sold.symbol} at $${sold.price.toFixed(2)}, swapped through Jupiter. You signed it.`,
         amount: `$${sold.usd.toFixed(2)}`,
         kind: 'trade',
         signature: body.signature,

@@ -68,6 +68,29 @@ export function agentGradient(name: string): GradientPair {
 }
 
 /**
+ * Letters drawn on a mark, for an instrument no logo registry has an icon for. `ink` is the letters' colour.
+ */
+export type Monogram = { letters: string; ink: string };
+
+/** A symbol's mark: its gradient, and — where no logo exists to draw — the letters that stand for it. */
+export type AssetIdentity = GradientPair & { monogram?: Monogram };
+
+/**
+ * Tessera's pre-IPO tokens, as marks a person can tell apart (2026-09-25).
+ *
+ * None of the three is in the catalogue or in any registry `/market/logos` asks, so each one fell through to the
+ * neutral grey below — and Home's Pre-IPO row, the pre-IPO list and the ticket all drew the same grey sphere for three
+ * different companies. Each now wears its company's own colours with a monogram: SpaceX dark with white letters, OpenAI
+ * white with black, Kalshi green. Letters, not a copied logo: a drawn wordmark would claim an issuer's artwork these
+ * tokens do not come with, and the letters say only which company the token tracks.
+ */
+const T_TOKEN_MARKS: Readonly<Record<string, AssetIdentity>> = {
+  'T-SpaceX': { c1: '#474C55', c2: '#0B0D10', monogram: { letters: 'SX', ink: '#FFFFFF' } },
+  'T-OpenAI': { c1: '#FFFFFF', c2: '#C4C8CE', monogram: { letters: 'AI', ink: '#0B0D10' } },
+  'T-Kalshi': { c1: '#4AE8B4', c2: '#0B9A6C', monogram: { letters: 'K', ink: '#04241A' } },
+};
+
+/**
  * The gradient for a tradable symbol.
  *
  * Every instrument in the catalogue carries its own `c1`/`c2`, and screens were typing a
@@ -77,7 +100,9 @@ export function agentGradient(name: string): GradientPair {
  * A symbol not in the catalogue falls back to a neutral grey rather than borrowing another
  * asset's identity: an unknown mark should not claim to be something it is not.
  */
-export function assetGradient(symbol: string): GradientPair {
+export function assetGradient(symbol: string): AssetIdentity {
+  const token = T_TOKEN_MARKS[symbol];
+  if (token) return token;
   const own = catalogGradient(symbol);
   if (own) return own;
   // An xStock wears its share's colours: `NVDAx` is the catalogue's `NVDAc` on Solana (2026-09-20).

@@ -58,12 +58,17 @@ const NONE: readonly string[] = [];
 
 /**
  * The watchable tokens as tabs, keeping only the tabs with something in them. Crypto first on Base; on Solana the
- * xStocks are what the bot trades and Crypto holds only USDC, so Stocks opens first there (2026-09-20).
+ * xStocks are what the bot trades, so Stocks is the only tab there (2026-09-20, 2026-09-25).
  */
 function groupsOf(symbols: readonly string[]): { label: string; symbols: string[] }[] {
   const crypto = { label: 'Crypto', symbols: symbols.filter((s) => !sharePriced(s)) };
   const stocks = { label: 'Stocks', symbols: symbols.filter((s) => sharePriced(s)) };
-  return (isSolana ? [stocks, crypto] : [crypto, stocks]).filter((g) => g.symbols.length > 0);
+  /*
+   * Stocks only on Solana (2026-09-25). This build sells stocks; its Crypto tab held USDC — the cash a buy spends, not
+   * something to watch — and was the one place the watchlist spoke of crypto at all. One group, so no tab row either.
+   */
+  if (isSolana) return [stocks].filter((g) => g.symbols.length > 0);
+  return [crypto, stocks].filter((g) => g.symbols.length > 0);
 }
 
 export default function Watchlist() {

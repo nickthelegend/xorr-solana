@@ -449,7 +449,14 @@ market.get('/market/classification', async (c) => {
 });
 
 market.get('/market/stocks/history', async (c) => {
-  const asked = equityAsked(c.req.query('symbol'));
+  /*
+   * A Tessera T-Token has a series too (2026-09-26): `market/history.ts` seeds its hourly bars into `price_observations`
+   * under the symbol Tessera writes, and the live readings land beside them. `equityAsked` refused every one as
+   * `not_an_equity`, so a pre-IPO detail screen read "No chart yet" with a thousand bars sitting in the table. Matched
+   * exactly, as `tradableToken` matches them: `t-openai` is not a symbol anybody issued, and stays refused.
+   */
+  const preIpo = TESSERA[c.req.query('symbol')?.trim() ?? ''];
+  const asked = preIpo ? { symbol: preIpo.symbol } : equityAsked(c.req.query('symbol'));
   if ('body' in asked) return c.json(asked.body, asked.status);
   const { symbol } = asked;
   /*

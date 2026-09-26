@@ -18,6 +18,7 @@
  * **A read that failed.** Not knowing is not the same as nothing happening. A failed read says so rather than
  * resolving to a quiet "idle", because "no agent is trading" is itself a claim, and one somebody might act on.
  */
+import { clock } from '@/format';
 
 /** What this needs from a run. A subset of `StrategyRunRow`, so the shape stays testable without the whole type. */
 export type RunLike = {
@@ -78,6 +79,30 @@ export function tradingNow(
   const live = open.filter((r) => age(r) <= STALE_AFTER_MS);
   if (live.length > 0) return { kind: 'trading', runs: live };
   return { kind: 'stuck', runs: open };
+}
+
+/**
+ * The last look's headline, said for the person reading Home (2026-09-25).
+ *
+ * The sweep writes one sentence per outcome, and most of them are already the right sentence: what it bought, or the
+ * setup it looked for and did not find. The cooldown's is not. "Holding off: this wallet traded recently and waits 60
+ * minutes between autonomous entries." is the rule quoted back, cut to one line on Home, and it read like a log entry
+ * on the line somebody looks at to find out whether the agents are working. They are — they are waiting on a rule
+ * the owner chose — so it says that, and says when, from `/agents/preview`'s `cooldownUntil`, the same decision the
+ * sweep's cooldown keys on. Without a time still ahead of now, it promises nothing it cannot keep.
+ *
+ * Every other outcome keeps the server's own words: it is the one that knows what it looked at.
+ */
+export function lastLookHeadline(
+  look: { outcome: string; headline: string },
+  options: { cooldownUntil?: number | null; now?: number } = {},
+): string {
+  if (look.outcome !== 'cooldown') return look.headline;
+  const { cooldownUntil, now = Date.now() } = options;
+  if (typeof cooldownUntil === 'number' && Number.isFinite(cooldownUntil) && cooldownUntil > now) {
+    return `Agents are between trades — the next entry can come after ${clock(cooldownUntil)}`;
+  }
+  return 'Agents are between trades and look again shortly';
 }
 
 /**

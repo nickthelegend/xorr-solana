@@ -100,6 +100,19 @@ export function summaries(
   return [...active, ...all.filter((s) => !s.last)];
 }
 
+/**
+ * The agents you hired first, each group in the order it came (2026-09-25).
+ *
+ * The list is the whole roster — an agent you never hired can still be asked a question — and with every row drawn
+ * alike, someone who had hired nobody read four live conversations and asked why agents they never made had popped up.
+ * The ones allowed to act for you lead, so the top of the list is who works for you; the rest keep the order they were
+ * given (`summaries`' most recent first). Two filters rather than a sort, so the order inside each group is the input's
+ * by construction rather than by the engine's sort happening to be stable.
+ */
+export function hiredFirst<T>(items: readonly T[], isHired: (item: T) => boolean): T[] {
+  return [...items.filter(isHired), ...items.filter((item) => !isHired(item))];
+}
+
 /** Everything new across the agents — the count on the tab bar. */
 export function unreadTotal(list: readonly ConversationSummary[]): number {
   return list.reduce((n, s) => n + s.unread, 0);

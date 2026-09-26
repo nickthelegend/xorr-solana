@@ -47,13 +47,20 @@ export interface TradingTickerProps {
   runs: readonly RunLike[] | undefined;
   /** The read came back unable to answer. Never resolved into "nothing is happening". */
   failed?: boolean;
+  /**
+   * How many lines the sentence may take before it is cut (2026-09-25). One by default, as it always was.
+   *
+   * The last look's sentences run long — what an agent bought and why, or the setup it did not find — and one line cut
+   * them off at the part that said anything. Home passes two.
+   */
+  lines?: number;
   /** For tests and stories; defaults to now. */
   now?: number;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
 
-export function TradingTicker({ runs, failed = false, now, lastLook, style, testID }: TradingTickerProps) {
+export function TradingTicker({ runs, failed = false, now, lastLook, lines = 1, style, testID }: TradingTickerProps) {
   const reduced = useReducedMotion();
   const state = tradingNow(runs, { failed, now });
   const line = tradingLine(state, lastLook);
@@ -98,7 +105,7 @@ export function TradingTicker({ runs, failed = false, now, lastLook, style, test
       <Text
         variant="footnote"
         color={state.kind === 'idle' ? colors.ink45 : colors.ink65}
-        numberOfLines={1}
+        numberOfLines={lines}
         style={{ flex: 1 }}
       >
         {line}

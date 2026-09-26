@@ -112,7 +112,7 @@ export default function PreStocks() {
                 secondary={<MarkLine row={r} />}
                 value={<PoolPrice row={r} />}
                 figure="market"
-                onPress={() => router.push(`/xstock/${r.symbol}`)}
+                onPress={() => router.push(`/asset/${r.symbol}`)}
                 testID={`pre-ipo-${r.symbol}`}
               />
             ))}

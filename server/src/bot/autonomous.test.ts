@@ -7,6 +7,8 @@ const evaluateMock = vi.fn();
 const readPolicyMock = vi.fn();
 /** The personas this wallet hired; every one by default, so a test is about its own subject. */
 let hiredPersonas: string[] = ['momentum-scout', 'earnings-desk', 'yield-keeper', 'drawdown-guard'];
+/** Hired agents whose own wallet was never funded (2026-09-25): they may look, and may not spend. */
+let unfundedPersonas: string[] = [];
 const guardAndSpendMock = vi.fn();
 const armExitsMock = vi.fn();
 const notifyEntryMock = vi.fn();
@@ -53,12 +55,28 @@ vi.mock('../db/index.js', () => ({
   one: (sql: string, params?: unknown[]) => oneMock(sql, params),
   query: (sql: string, params?: unknown[]) =>
     sql.includes('FROM agents WHERE wallet_id')
-      ? Promise.resolve(hiredPersonas.map((persona_id) => ({ persona_id })))
+      ? Promise.resolve(
+          hiredPersonas.map((persona_id) => ({
+            persona_id,
+            id: persona_id,
+            // A funded agent's own wallet; every hired agent has one unless a test says otherwise.
+            wallet_account: unfundedPersonas.includes(persona_id) ? null : `wallet-of-${persona_id}`,
+          })),
+        )
       : queryMock(sql, params),
   // The cycle books its fill inside a transaction; the client is never touched by these tests.
   tx: (fn: (c: unknown) => unknown) => fn({}),
 }));
 vi.mock('../positions/index.js', () => ({ applyFill: (...a: unknown[]) => applyFillMock(...a) }));
+// Each funded agent's wallet: approved, and holding more than any entry these tests size.
+vi.mock('../agents/wallet.js', () => ({
+  readAgentWallet: async (_owner: string, agentId: string) => ({
+    address: `wallet-of-${agentId}`,
+    exists: true,
+    approved: true,
+    usdc: 10_000,
+  }),
+}));
 
 vi.mock('../rules/engine.js', () => ({ evaluate: (...a: unknown[]) => evaluateMock(...a) }));
 vi.mock('../solana/grant.js', () => ({
@@ -152,6 +170,7 @@ describe('autonomous xStocks trading agent', () => {
     queryMock.mockResolvedValue([]);
     oneMock.mockResolvedValue(null);
     hiredPersonas = ['momentum-scout', 'earnings-desk', 'yield-keeper', 'drawdown-guard'];
+    unfundedPersonas = [];
     earningsCalendarMock.mockResolvedValue(null);
     /*
      * 238 against the `readings(200, 240, ...)` band the range tests use, so the default symbol
@@ -427,6 +446,27 @@ describe('autonomous xStocks trading agent', () => {
       const result = await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
       expect(result.executed).toBe(false);
       if (!result.executed) expect(result.reason).toBe('no_setup');
+      expect(guardAndSpendMock).not.toHaveBeenCalled();
+    });
+
+    it('spends nothing for a hired agent whose own wallet was never funded', async () => {
+      // Mainnet, 2026-09-25: hiring Momentum Scout bought $24 of METAx from the owner's main account at once.
+      oneMock.mockResolvedValue({ id: 'wallet-1', address: OWNER, agents_stopped: false });
+      readPolicyMock.mockResolvedValue(policy(1000));
+      evaluateMock.mockResolvedValue({ allowed: true, spentTodayUsd: 0, remainingUsd: 800 });
+      guardAndSpendMock.mockResolvedValue(FILL);
+      queryMock.mockImplementation(async (sql: string) =>
+        sql.includes('price_observations') ? readings(200, 240, 238) : [],
+      );
+      hiredPersonas = ['momentum-scout'];
+      unfundedPersonas = ['momentum-scout'];
+
+      const result = await runAutonomousCycle('wallet-1', { fixedUsd: 25 });
+      expect(result.executed).toBe(false);
+      if (!result.executed) {
+        expect(result.reason).toBe('agent_wallet_empty');
+        expect(result.detail).toMatch(/only from its own wallet/);
+      }
       expect(guardAndSpendMock).not.toHaveBeenCalled();
     });
 

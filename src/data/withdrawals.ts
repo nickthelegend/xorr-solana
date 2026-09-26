@@ -29,6 +29,14 @@ export type WithdrawalAddressBook = {
   addresses: WithdrawalAddress[];
 };
 
+/**
+ * The wallet that first funded this one, read from the chain (2026-09-26) — `GET /wallet/funded-by`. `address: null` is
+ * "nothing in the history qualifies", never "could not read": a failed read is an error.
+ */
+export type FundedBy =
+  | { address: string; signature: string; asset: 'SOL' | 'USDC'; amount: number; at: number | null }
+  | { address: null };
+
 /** The executor refused, and said why. `detail` is written for the person reading it. */
 export type Refusal = { status: 'blocked'; reason: string; detail: string };
 
@@ -133,6 +141,8 @@ export const withdrawals = {
   // A body, not a path: the executor's access log prints paths, and this is where someone keeps their money.
   remove: (address: string) => refusalOr(api.post<RemoveOutcome>('/withdrawal-addresses/remove', { address })),
   check: (address: string) => refusalOr(api.post<CheckOutcome>('/withdrawal-addresses/check', { address })),
+  /* where Return funds sends things back to (2026-09-26) */
+  fundedBy: () => api.get<FundedBy>('/wallet/funded-by'),
 
   /* withdrawing */
   prepareAll: (to: string, token: string) =>

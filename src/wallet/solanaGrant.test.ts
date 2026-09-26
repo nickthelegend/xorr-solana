@@ -4,7 +4,7 @@ import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync 
 
 vi.mock('@/data/api', () => ({ api: {} }));
 vi.mock('./solanaTx', () => ({ solanaConnection: () => ({}) }));
-const { buildGrantTx, buildRevokeTx, grantAllowance } = await import('./solanaGrant');
+const { MAX_TX_BYTES, buildGrantTx, buildRevokeTx, grantAllowance, packGrant, signedSize } = await import('./solanaGrant');
 
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const NVDAX = 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh';
@@ -27,12 +27,35 @@ describe('the grant the owner signs', () => {
       dailyCapUsd: 100,
       durationMs: 86_400_000,
     });
-    expect(tx.instructions).toHaveLength(4);
-    const approve = tx.instructions[3]!;
+    // No account is created for it: the caller passes only accounts that exist, and a buy opens its own.
+    expect(tx.instructions).toHaveLength(3);
+    const approve = tx.instructions[2]!;
     expect(approve.programId.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
     const nvdaxAta = getAssociatedTokenAddressSync(new PublicKey(NVDAX), owner, false, TOKEN_2022_PROGRAM_ID);
     expect(approve.keys[0]!.pubkey.equals(nvdaxAta)).toBe(true);
     expect(approve.keys[2]!.pubkey.toBase58()).toBe(delegate);
+  });
+});
+
+describe('a grant too large for one transaction', () => {
+  it('is split so each part fits, the USDC approval first', () => {
+    // Mainnet on 2026-09-25: every tradable xStock plus agent wallets came to 1659 bytes in one transaction.
+    const sellable = Array.from({ length: 18 }, (_, i) => ({ symbol: `X${i}`, mint: Keypair.generate().publicKey.toBase58(), decimals: 8 }));
+    const agentWallets = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+    const whole = buildGrantTx({ owner, grant: { ...grant, sellable }, dailyCapUsd: 100, durationMs: 86_400_000, agentWallets });
+    expect(signedSize(whole, owner)).toBeGreaterThan(MAX_TX_BYTES);
+
+    const parts = packGrant(whole, owner);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const p of parts) expect(signedSize(p, owner)).toBeLessThanOrEqual(MAX_TX_BYTES);
+    expect(parts.flatMap((p) => p.instructions)).toEqual(whole.instructions);
+    const usdcAta = getAssociatedTokenAddressSync(new PublicKey(USDC), owner, false, TOKEN_PROGRAM_ID);
+    expect(parts[0]!.instructions[1]!.keys[0]!.pubkey.equals(usdcAta)).toBe(true);
+  });
+
+  it('stays one transaction when it fits', () => {
+    const whole = buildGrantTx({ owner, grant, dailyCapUsd: 100, durationMs: 86_400_000 });
+    expect(packGrant(whole, owner)).toHaveLength(1);
   });
 });
 
