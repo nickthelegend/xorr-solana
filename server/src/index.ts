@@ -23,6 +23,7 @@ import { catchup } from './routes/catchup.js';
 import { privyRoutes } from './routes/privy.js';
 import { crosschainRoutes } from './routes/crosschain.js';
 import { tokenRoutes } from './routes/tokens.js';
+import { fundedByRoutes } from './routes/funded-by.js';
 import { historyRoutes } from './routes/history.js';
 import { limitOrderRoutes } from './routes/limit-orders.js';
 import { mirrorRoutes, startMirrorSchedule } from './routes/mirror.js';
@@ -181,6 +182,8 @@ app.route('/', catchup);
 app.route('/', privyRoutes);
 app.route('/', crosschainRoutes);
 app.route('/', tokenRoutes);
+// Where the wallet was first funded from, for Return funds (2026-09-26).
+app.route('/', fundedByRoutes);
 app.route('/', historyRoutes);
 app.route('/', limitOrderRoutes);
 app.route('/', mirrorRoutes);
