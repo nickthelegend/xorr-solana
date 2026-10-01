@@ -560,6 +560,14 @@ describe('activity — screen 15', () => {
     expect(d.activityAmountIsCredit(`${MINUS}$370.02`)).toBe(false);
     expect(d.activityAmountIsCredit('')).toBe(false);
   });
+
+  it('an amount outside Trades is a transfer between your own accounts, not a gain', () => {
+    // "Funded Momentum Scout's wallet · $10.00" is filed under Risk: the money moved, it was not made.
+    expect(d.activityAmountIsTransfer('risk')).toBe(true);
+    expect(d.activityAmountIsTransfer('block')).toBe(true);
+    expect(d.activityAmountIsTransfer('trade')).toBe(false);
+    expect(d.activityAmountIsTransfer('yield')).toBe(false);
+  });
 });
 
 describe('a stored record, as rows — /risk and /strategy/[id]', () => {

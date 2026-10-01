@@ -63,7 +63,7 @@ export default function GrantDelegation() {
   const [localError, setLocalError] = useState<string>();
   // The grant is signed by the USER's own wallet. The executor cannot grant itself
   // permission — that is the whole point of the delegation being on-chain.
-  const { grant: signGrant, busy, error: grantError, ready: canSign } = useGrantDelegation();
+  const { grant: signGrant, busy, error: grantError, ready: canSign, walletStatus, walletError } = useGrantDelegation();
   /*
    * How many signatures this is actually going to ask for.
    *
@@ -256,23 +256,42 @@ export default function GrantDelegation() {
           </NoteStrip>
         ) : null}
 
-        {error ? (
-          <Text variant="secondarySm" color={colors.down} style={{ marginTop: space.s14 }}>
-            {error}
-          </Text>
-        ) : null}
         </ScrollView>
       </Fill>
 
+      {/*
+       * Beside the button, not at the foot of the scroll (2026-09-25): a grant Solana refused as too large said so below
+       * the fold, and the button looked as if it had done nothing.
+       */}
+      {error ? (
+        <Text variant="secondarySm" color={colors.down} align="center" style={{ marginBottom: space.s8 }}>
+          {error}
+        </Text>
+      ) : null}
       {signedOut ? (
         <SignInButton label="Sign in first" />
       ) : (
-        <Button
-          label="Sign this permission"
-          // Loading until the wallet can sign — a tap before then has nothing to sign with.
-          loading={busy || !canSign}
-          onPress={grant}
-        />
+        <>
+          {/*
+           * What the wait is waiting on (2026-09-25). The button only spins until the wallet can sign; on a phone it spun
+           * with nothing to say why, and a wallet Privy could not connect looked like a slow one.
+           */}
+          {!canSign && walletStatus && walletStatus !== 'connected' ? (
+            <Text variant="footnote" color={colors.ink55} align="center" style={{ marginBottom: space.s8 }}>
+              {walletStatus === 'needs-recovery'
+                ? 'Your wallet needs to be recovered on this device before it can sign.'
+                : walletStatus === 'error'
+                  ? `Your wallet could not load: ${walletError ?? 'Privy gave no reason'}.`
+                  : `Your wallet is ${walletStatus.replace(/-/g, ' ')} — it signs as soon as it is connected.`}
+            </Text>
+          ) : null}
+          <Button
+            label="Sign this permission"
+            // Loading until the wallet can sign — a tap before then has nothing to sign with.
+            loading={busy || !canSign}
+            onPress={grant}
+          />
+        </>
       )}
       <Button
         label="Not yet — look around first"

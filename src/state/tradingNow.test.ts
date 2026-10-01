@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { STALE_AFTER_MS, tradingLine, tradingNow, type RunLike } from './tradingNow';
+import { clock } from '@/format';
+import { STALE_AFTER_MS, lastLookHeadline, tradingLine, tradingNow, type RunLike } from './tradingNow';
 
 const NOW = Date.UTC(2026, 8, 17, 12);
 const run = (over: Partial<RunLike> = {}): RunLike => ({
@@ -112,6 +113,46 @@ describe('tradingLine — what the ticker says', () => {
       const line = tradingLine(state) ?? '';
       expect(line).not.toMatch(/is trading/);
       expect(line).not.toMatch(/^No agent is trading right now$/);
+    }
+  });
+});
+
+/*
+ * The cooldown said for a person (2026-09-25). The sweep's own sentence quoted the rule back and was cut to one line on
+ * Home; the rest of the outcomes keep the server's words.
+ */
+describe('lastLookHeadline — the last look, said for a person', () => {
+  const cooldown = {
+    outcome: 'cooldown',
+    headline: 'Holding off: this wallet traded recently and waits 60 minutes between autonomous entries.',
+  };
+
+  it('says when the next entry can come, while the cooldown is still ahead', () => {
+    const until = NOW + 25 * 60_000;
+    expect(lastLookHeadline(cooldown, { cooldownUntil: until, now: NOW })).toBe(
+      `Agents are between trades — the next entry can come after ${clock(until)}`,
+    );
+  });
+
+  it('promises no time it does not have', () => {
+    for (const cooldownUntil of [undefined, null, NOW - 60_000, NOW, Number.NaN]) {
+      expect(lastLookHeadline(cooldown, { cooldownUntil, now: NOW })).toBe(
+        'Agents are between trades and look again shortly',
+      );
+    }
+  });
+
+  it('never quotes the rule back', () => {
+    expect(lastLookHeadline(cooldown, { cooldownUntil: NOW + 60_000, now: NOW })).not.toMatch(/Holding off|minutes/);
+  });
+
+  it('keeps the server\u2019s words for every other outcome', () => {
+    for (const look of [
+      { outcome: 'taken', headline: 'Momentum Scout bought NVDAx: above its 20-day band' },
+      { outcome: 'no_setup', headline: 'Looked at 11 xStocks; none cleared a band.' },
+      { outcome: 'agent_wallet_empty', headline: 'Momentum Scout has nothing in its wallet to trade with.' },
+    ]) {
+      expect(lastLookHeadline(look, { cooldownUntil: NOW + 60_000, now: NOW })).toBe(look.headline);
     }
   });
 });

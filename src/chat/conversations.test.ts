@@ -4,7 +4,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import { voice, type ThreadMessage } from '../bot/message';
-import { attribute, conversationOf, listTime, preview, searchMessages, summaries, unreadTotal } from './conversations';
+import {
+  attribute,
+  conversationOf,
+  hiredFirst,
+  listTime,
+  preview,
+  searchMessages,
+  summaries,
+  unreadTotal,
+} from './conversations';
 
 const at = (h: number, m = 0) => new Date(2026, 8, 15, h, m).getTime();
 
@@ -87,6 +96,16 @@ describe('the list of conversations', () => {
 
   it('shows a proposal as what it is, not as an empty line', () => {
     expect(preview(proposed('p', at(9)))).toBe('Proposed a trade');
+  });
+
+  it('puts the agents you hired first, and keeps each group in the order it came', () => {
+    // Scout spoke last, so `summaries` leads with it; hiring Drawdown Guard and Yield Keeper puts them ahead of it.
+    const messages = [said('a', 'Momentum Scout', 'Watching.', at(12))];
+    const hired = new Set(['Drawdown Guard', 'Yield Keeper']);
+    const list = hiredFirst(summaries(messages, agents, { since: 0, byAgent: {} }), (s) => hired.has(s.agent));
+    expect(list.map((s) => s.agent)).toEqual(['Yield Keeper', 'Drawdown Guard', 'Momentum Scout', 'Earnings Desk']);
+    // Nobody hired changes nothing.
+    expect(hiredFirst(agents, () => false)).toEqual(agents);
   });
 });
 

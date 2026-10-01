@@ -92,9 +92,10 @@ export default function Stocks() {
                  *
                  * These have no market-data feed — the only history that exists is what this
                  * executor recorded by probing, and `/oracle` is the only screen that shows it.
-                 * The asset screen is one tap further and predates this work.
+                 * The asset screen is one tap further and predates this work. On Solana it is the xStock's trade desk,
+                 * with the recorded history as its chart, so a row opens that (2026-09-25).
                  */
-                onPress={() => router.push(`/oracle/${s.symbol}`)}
+                onPress={() => router.push(isSolana ? `/asset/${s.symbol}` : `/oracle/${s.symbol}`)}
                 left={
                   <AssetMark
                     gradient={assetGradient(s.symbol)}

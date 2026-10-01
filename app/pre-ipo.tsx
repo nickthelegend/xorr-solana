@@ -34,6 +34,8 @@ import { assetGradient } from '@/design/gradients';
 import { price as fmtPrice, percent } from '@/format';
 import { useAsync } from '@/data/useAsync';
 import { preIpo, type PreIpoRow } from '@/data/preIpo';
+import { useDesktop } from '@/desktop/useDesktop';
+import { DesktopPreIpo } from '@/desktop/pages/DesktopPreIpo';
 
 /** What the pool asks, or the plain fact that nothing would route it. */
 function PoolPrice({ row }: { row: PreIpoRow }) {
@@ -77,7 +79,7 @@ function MarkLine({ row }: { row: PreIpoRow }) {
   );
 }
 
-export default function PreStocks() {
+function MobilePreStocks() {
   const goBack = useGoBack();
   const router = useRouter();
   const { data, loading, error, reload } = useAsync(() => preIpo.list(), []);
@@ -112,7 +114,7 @@ export default function PreStocks() {
                 secondary={<MarkLine row={r} />}
                 value={<PoolPrice row={r} />}
                 figure="market"
-                onPress={() => router.push(`/xstock/${r.symbol}`)}
+                onPress={() => router.push(`/asset/${r.symbol}`)}
                 testID={`pre-ipo-${r.symbol}`}
               />
             ))}
@@ -138,4 +140,9 @@ export default function PreStocks() {
       </Fill>
     </Screen>
   );
+}
+
+/** The route: the desktop layout from the desktop width up on web, the phone screen below it (2026-10-01). */
+export default function PreStocksRoute() {
+  return useDesktop() ? <DesktopPreIpo /> : <MobilePreStocks />;
 }

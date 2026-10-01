@@ -37,13 +37,20 @@ import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { useRefreshControl } from '@/ui/useRefreshControl';
 import { errorText } from '@/data/apiError';
+import { useDesktop } from '@/desktop/useDesktop';
+import { DesktopAgents } from '@/desktop/pages/DesktopAgents';
 
 /** screens.md gives this one: 40pt, radius 20. Taller than a filter pill — it is a decision. */
 const HIRE_H = 40;
 /** The + that makes an agent: a round control the size of the back button beside the title. */
 const NEW_BUTTON = 36;
 
+/** The desktop web draws the roster as a grid at laptop widths (2026-10-01); the phone layout is unchanged. */
 export default function Roster() {
+  return useDesktop() ? <DesktopAgents /> : <MobileRoster />;
+}
+
+function MobileRoster() {
   const router = useRouter();
   const goBack = useGoBack();
   const { data, loading, error: readError, reload } = useAsync(() => repos.bot.listAgents(), []);

@@ -11,6 +11,7 @@ import { COINGECKO_IDS } from '../market/ids.js';
 import { leaderboard } from '../agents/leaderboard.js';
 import { PERSONAS } from '../bot/personas.js';
 import { speak } from '../bot/llm.js';
+import { xStockCatalog } from '../venues/xstocks-catalog.js';
 import { TONE_INSTRUCTIONS, type ToneId } from '../bot/tone.js';
 import { briefing } from '../news/feed.js';
 import { propose } from '../bot/propose.js';
@@ -543,6 +544,35 @@ extra.post('/proposals/:id/decide', async (c) => {
 
 // ── The bot's voice ──────────────────────────────────────────────────────────
 
+/**
+ * Today's movers among the xStocks, named without a figure, for an agent asked what it is watching (2026-09-25).
+ *
+ * The model knows nothing about today, so asked "what are you watching" it made up a tape — on Solana, an ETH breakout.
+ * This hands it the real one from the same feed the Gainers tab reads (cached thirty seconds), as names only: the voice
+ * gate rejects any figure, and the app shows the numbers itself. Slow or down, the question goes without it.
+ */
+async function solanaTape(): Promise<string> {
+  if (!ON_SOLANA) return '';
+  try {
+    const rows = await Promise.race([
+      xStockCatalog(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('slow')), 2_500)),
+    ]);
+    const moved = rows
+      .filter((r): r is typeof r & { change24hPct: number } => r.change24hPct !== null)
+      .sort((a, b) => b.change24hPct - a.change24hPct);
+    const up = moved.filter((r) => r.change24hPct > 0).slice(0, 3).map((r) => r.symbol);
+    const down = moved.filter((r) => r.change24hPct < 0).slice(-3).reverse().map((r) => r.symbol);
+    if (!up.length && !down.length) return '';
+    return (
+      ` Today's tape, from the live feed: ${up.length ? `rising most, ${up.join(', ')}` : 'nothing is rising'};` +
+      ` ${down.length ? `falling most, ${down.join(', ')}` : 'nothing is falling'}. Speak only about names you trade.`
+    );
+  } catch {
+    return '';
+  }
+}
+
 extra.post('/bot/say', async (c) => {
   const body = z
     .object({
@@ -555,7 +585,7 @@ extra.post('/bot/say', async (c) => {
   const out = await speak({
     persona: body.persona,
     toneInstruction: TONE_INSTRUCTIONS[body.tone as ToneId],
-    situation: body.situation,
+    situation: body.situation + (await solanaTape()),
   });
 
   if (out.ok) return c.json({ text: out.text, model: out.model, source: 'model' });

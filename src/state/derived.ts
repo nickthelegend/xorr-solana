@@ -676,6 +676,18 @@ export function activityDot(kind: string): ActivityDot {
 export function activityAmountIsCredit(amount: string): boolean {
   return amount !== '' && !amount.startsWith(MINUS);
 }
+/**
+ * Whether a row's amount is money moved between your own accounts rather than a trade's (2026-09-25).
+ *
+ * The executor writes amounts unsigned, so `activityAmountIsCredit` calls every one of them a credit — right enough for
+ * a buy or a sale, and wrong for "Funded Momentum Scout's wallet": $10 went from your wallet to your agent's, and drawn
+ * in profit green it read as $10 made. Only the rows filed under Trades move money into or out of a position. An amount
+ * on any other row — funding an agent's wallet or taking money back from it, a deposit — changed where your money sits,
+ * not how much of it there is, so it is drawn in plain ink; and a blocked row moved nothing at all.
+ */
+export function activityAmountIsTransfer(kind: string): boolean {
+  return !(activityFilterKinds(1) ?? []).includes(kind);
+}
 
 // ── Chart projection helpers used by derived screens ─────────────────────────
 

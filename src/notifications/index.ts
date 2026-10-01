@@ -13,12 +13,21 @@ import { api } from '../data/api';
 
 export { MUTABLE, routeFor, type AlertKind } from './routes';
 
+/**
+ * The `kind` on the local banner the app posts itself when a hired agent trades (2026-09-26).
+ *
+ * Not an executor alert kind: `useAgentTradeAlerts` fires it because APNs is not configured and the server's push
+ * never reaches the phone. `deepRouteFor` treats an unknown kind by what it carried — the row, else `/activity`.
+ */
+export const AGENT_TRADE_KIND = 'agent-trade';
+
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
+  handleNotification: async (notification) => ({
     shouldShowBanner: true,
     shouldShowList: true,
-    // copy.md's restraint applies to sound too: a trading app that pings all day gets muted.
-    shouldPlaySound: false,
+    // copy.md's restraint applies to sound too: a trading app that pings all day gets muted. An agent spending the
+    // owner's money is the exception (2026-09-26) — it is rare, paced by the sweep's cooldown, and the one to hear.
+    shouldPlaySound: notification.request.content.data?.kind === AGENT_TRADE_KIND,
     shouldSetBadge: true,
   }),
 });

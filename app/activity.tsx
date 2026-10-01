@@ -3,96 +3,60 @@
  *
  * Filter pills All / Trades / Risk / Blocked. Rows: an 8pt classification dot (up acted /
  * warn risk / down blocked), action + detail + "{agent} · {time}", the on-chain receipt
- * where there is one, and a right-aligned amount (up for credits, ink55 for debits).
+ * where there is one, and a right-aligned amount (up for credits, ink55 for debits, plain ink
+ * for money moved between your own accounts).
  *
  * "The structured trail is the compliance artifact, so it stays a first-class action" — the
- * exports really export (PLAN.md 12.11); they are not decorative buttons.
+ * exports really export (PLAN.md 12.11); they are not decorative buttons. They sit at the end
+ * of the trail, not pinned under it (`ExportSection`).
  *
  * [G41] The `yield` row was orphaned by the original filter map; state/derived.ts folds it
  * into Trades so every row is reachable from a tab.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Linking, ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   BackButton,
-  Button,
   EmptyList,
   ErrorState,
+  Eyebrow,
   Fill,
   LoadingRows,
   Pill,
   PillRow,
   Press,
   Price,
+  Row,
   Screen,
   Text,
   colors,
   divider,
   noteDotColor,
   radius,
+  size,
   space,
 } from '@/ui';
 import {
   ACTIVITY_FILTERS,
   activityAmountIsCredit,
+  activityAmountIsTransfer,
   activityDot,
   filterActivity,
 } from '@/state/derived';
 import { repos } from '@/data';
-import { exportRecords } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
-import { deliverFile } from '@/export/deliver';
+import { EXPORTS, EXPORT_ORDER, useActivityExports, type ExportKind } from '@/export/activityExports';
+import { useDesktop } from '@/desktop/useDesktop';
+import { DesktopActivity } from '@/desktop/pages/DesktopActivity';
 import { useRefreshControl } from '@/ui/useRefreshControl';
 import { useStore } from '@/state/store';
 import { useGoBack } from '@/nav/useGoBack';
-import { errorText } from '@/data/apiError';
 import { plainAction, plainDetail } from '@/format/activity';
 import { stamp } from '@/format';
 
 const DOT = 8;
-
-type ExportKind = 'fills' | 'disposals' | 'trail';
-
-/**
- * The three documents this screen can hand over, and what each one is for.
- *
- * They are not variations of one file. Each answers a different question for a different reader,
- * and the empty sentence differs for the same reason — "no trades yet" and "nothing sold yet" are
- * different facts about the same wallet.
- *
- *   fills     — a receipt. What moved, when, at what price, on which transaction. ONLY runs that
- *               settled and carry a signature: a receipt for something that did not happen is not
- *               a weaker receipt, it is a false one.
- *   disposals — the tax document. Sales with cost basis, average cost stated in the file rather
- *               than assumed, because a jurisdiction that wants FIFO needs to be told this is not it.
- *   trail     — the compliance artifact. EVERY row, blocked runs included, hash-chained. The
- *               blocked ones are the point: they are where the safety layer did its job.
- */
-const EXPORTS: Record<
-  ExportKind,
-  { label: string; filename: string; empty: string; read: () => Promise<string> }
-> = {
-  fills: {
-    label: 'Receipts (CSV)',
-    filename: 'xorr-fills.csv',
-    empty: 'Nothing has settled yet, so there are no receipts.',
-    read: () => repos.activity.exportFills(),
-  },
-  disposals: {
-    label: 'Disposals (CSV)',
-    filename: 'xorr-disposals.csv',
-    empty: 'Nothing sold yet, so there is nothing to report.',
-    read: () => repos.activity.exportDisposals(),
-  },
-  trail: {
-    label: 'Export audit trail',
-    filename: 'xorr-audit.csv',
-    empty: 'Nothing to export yet.',
-    read: () => repos.activity.exportTrail('csv'),
-  },
-};
 
 /** What an empty filter says while the trail itself has rows, by the index of `ACTIVITY_FILTERS`. */
 const NONE_UNDER: Readonly<Record<number, string>> = {
@@ -134,7 +98,12 @@ function ExplorerLink({ explorer }: { explorer: string }) {
   );
 }
 
+/** The desktop web draws the trail as a table at laptop widths (2026-10-01); the phone layout is unchanged. */
 export default function Activity() {
+  return useDesktop() ? <DesktopActivity /> : <MobileActivity />;
+}
+
+function MobileActivity() {
   const goBack = useGoBack();
   const router = useRouter();
   const actFilter = useStore((s) => s.actFilter);
@@ -145,10 +114,8 @@ export default function Activity() {
   useFreshOnReturn(trail);
   // Pulling down is the gesture people already try on a list of things that keep changing.
   const refresh = useRefreshControl(reload);
-  /** Which of the three files is being fetched, if any. One at a time: they share one note. */
-  const [exportingWhich, setExportingWhich] = useState<ExportKind>();
-  /** A failure, or an empty file said as one. Kept apart so "Nothing to export yet." is not reported as a failed export. */
-  const [exportNote, setExportNote] = useState<{ text: string; failed: boolean }>();
+  /** The three files, fetched and delivered by the same code the desktop page uses (`src/export/activityExports.ts`). */
+  const { exportingWhich, exportNote, exportFile } = useActivityExports();
 
   /*
    * The row a notification asked for.
@@ -203,38 +170,6 @@ export default function Activity() {
     [],
   );
 
-  /**
-   * One file out of the app, delivered the way `/export` delivers it: a download in a browser, a share sheet on a phone.
-   *
-   * This called `Share.share`, which Chrome rejects outright — the exact failure `/export` was fixed for, one screen
-   * over. The two now share `deliverFile`, and the same refusal to hand over a file with no records in it.
-   *
-   * Three files, because there are three questions and one document cannot answer them all — see
-   * `EXPORTS` below for which is which.
-   */
-  async function exportFile(which: ExportKind) {
-    const file = EXPORTS[which];
-    setExportingWhich(which);
-    setExportNote(undefined);
-    try {
-      // `read`, not `fetch`: `repositories.test.ts` bans the literal token in a screen, and the
-      // rule is worth more than the name — every call here goes through the data layer.
-      const csv = await file.read();
-      if (exportRecords(csv, 'csv') === 0) {
-        setExportNote({ text: file.empty, failed: false });
-        return;
-      }
-      const out = await deliverFile(file.filename, csv);
-      // A dismissed share sheet is a change of mind, which `deliverFile` words as "Cancelled." — not a failure to report.
-      if (!out.ok && out.reason !== 'Cancelled.') setExportNote({ text: `Export failed: ${out.reason}`, failed: true });
-    } catch (e) {
-      // On the screen, not in a console nobody reads. An export that silently fails is
-      // worse than none: the user walks away believing they have the record.
-      setExportNote({ text: `Export failed: ${errorText(e)}`, failed: true });
-    } finally {
-      setExportingWhich(undefined);
-    }
-  }
 
   return (
     <Screen>
@@ -273,25 +208,34 @@ export default function Activity() {
           <LoadingRows count={5} height={72} />
         ) : error ? (
           <ErrorState error={error} onRetry={reload} />
-        ) : rows.length === 0 ? (
-          (data ?? []).length > 0 ? (
-            /* The trail has rows, just none of this kind: "Nothing yet." and a push to start buying would deny the rest. */
-            <EmptyList list="activity" text={NONE_UNDER[showing] ?? 'Nothing here.'} />
-          ) : (
-            <EmptyList list="activity" />
-          )
+        ) : (data ?? []).length === 0 ? (
+          <EmptyList list="activity" />
         ) : (
           <ScrollView
             ref={scroller}
             refreshControl={refresh.control}
             showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: space.s20 }}
             // The reader has taken over. The mark has done its job and stops following them.
             onScrollBeginDrag={() => askedFor && setReleased(askedFor)}
           >
             {/* A pull that failed says so, over the rows it could not replace. A success says nothing. */}
             {refresh.notice}
+            {rows.length === 0 ? (
+              /* The trail has rows, just none of this kind: "Nothing yet." and a push to start buying would deny the rest. */
+              <EmptyList list="activity" text={NONE_UNDER[showing] ?? 'Nothing here.'} />
+            ) : null}
             {rows.map((r) => {
-              const credit = activityAmountIsCredit(r.amount);
+              /*
+                Green for a trade's money only (2026-09-25). Funding an agent's wallet, or taking money back from it,
+                moves money between your own accounts: in profit green "$10.00" read as ten dollars made. Those rows are
+                drawn in plain ink; a trade keeps the credit/debit colours it always had.
+              */
+              const amountColor = activityAmountIsTransfer(r.kind)
+                ? colors.ink
+                : activityAmountIsCredit(r.amount)
+                  ? colors.up
+                  : colors.ink55;
               return (
                 /*
                   Every row opens its own explanation, including the ones with nothing to explain.
@@ -351,61 +295,72 @@ export default function Activity() {
                   </View>
                   {r.amount ? (
                     // What moved, in dollars or in a token's units — "$1,234.56 USDC" — hides while balances are hidden.
-                    <Price color={credit ? colors.up : colors.ink55} figure="units">
+                    <Price color={amountColor} figure="units">
                       {r.amount}
                     </Price>
                   ) : null}
                 </Press>
               );
             })}
+            <ExportSection busy={exportingWhich} note={exportNote} onExport={(which) => void exportFile(which)} />
           </ScrollView>
         )}
       </Fill>
+    </Screen>
+  );
+}
 
-      {exportNote ? (
+/**
+ * The three files, at the end of the trail rather than pinned under it (2026-09-25).
+ *
+ * Three full-width buttons stood under the list for good and took a quarter of a phone's screen from the one thing this
+ * screen is for. They are still three — each file answers a different question for a different reader (see `EXPORTS`)
+ * — but as rows after the last event, each saying what is in it, so the feed gets the whole screen and the files are
+ * where someone who has read to the end reaches for them. One file at a time: they share one note, said under them.
+ */
+function ExportSection({
+  busy,
+  note,
+  onExport,
+}: {
+  busy: ExportKind | undefined;
+  note: { text: string; failed: boolean } | undefined;
+  onExport: (which: ExportKind) => void;
+}) {
+  return (
+    <View style={{ marginTop: space.s26 }}>
+      <Eyebrow>Export</Eyebrow>
+      <View style={{ marginTop: space.s4 }}>
+        {EXPORT_ORDER.map((kind, i) => (
+          <Row
+            key={kind}
+            title={EXPORTS[kind].label}
+            secondary={EXPORTS[kind].what}
+            height={size.row}
+            divider={i < EXPORT_ORDER.length - 1}
+            // While one is on its way the others wait: a second tap would overwrite the first one's note.
+            onPress={busy ? undefined : () => onExport(kind)}
+            right={
+              busy === kind ? (
+                <ActivityIndicator size="small" color={colors.ink55} />
+              ) : (
+                <Text variant="footnote" color={colors.ink55}>
+                  CSV ›
+                </Text>
+              )
+            }
+          />
+        ))}
+      </View>
+      {note ? (
         <Text
           variant="secondarySm"
-          color={exportNote.failed ? colors.down : colors.warn}
-          align="center"
+          color={note.failed ? colors.down : colors.warn}
           style={{ marginTop: space.s10 }}
         >
-          {exportNote.text}
+          {note.text}
         </Text>
       ) : null}
-
-      {/*
-        Three documents, so three buttons. Folding any two together would produce a file that is
-        the wrong shape for both jobs — an accountant does not want blocked runs, a compliance
-        reviewer does not want cost basis, and someone asking "what did I buy" wants neither.
-
-        Plain rows: `ButtonRow` is the secondary/affirmative pair for a decision, and these are
-        peers rather than a choice between them.
-      */}
-      <View style={{ flexDirection: 'row', gap: space.s10, marginTop: space.s14 }}>
-        <Button
-          label={EXPORTS.fills.label}
-          variant="ghost"
-          loading={exportingWhich === 'fills'}
-          onPress={() => exportFile('fills')}
-          style={{ flex: 1 }}
-        />
-        <Button
-          label={EXPORTS.disposals.label}
-          variant="ghost"
-          loading={exportingWhich === 'disposals'}
-          onPress={() => exportFile('disposals')}
-          style={{ flex: 1 }}
-        />
-      </View>
-      <View style={{ flexDirection: 'row', marginTop: space.s10 }}>
-        <Button
-          label={EXPORTS.trail.label}
-          variant="ghost"
-          loading={exportingWhich === 'trail'}
-          onPress={() => exportFile('trail')}
-          style={{ flex: 1 }}
-        />
-      </View>
-    </Screen>
+    </View>
   );
 }

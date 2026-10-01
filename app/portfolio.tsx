@@ -41,7 +41,10 @@ import {
 import { assetGradient } from '@/design/gradients';
 import { logoProps, useLogos } from '@/data/useLogos';
 import { useSignedOut } from '@/auth/useSignedOut';
-import { PositionCard, PositionCardSkeleton, type PositionLevel } from '@/ui/PositionCard';
+import { PositionCard, PositionCardSkeleton } from '@/ui/PositionCard';
+import { exitLevels } from '@/strategies/exitLevels';
+import { useDesktop } from '@/desktop/useDesktop';
+import { DesktopPortfolio } from '@/desktop/pages/DesktopPortfolio';
 import { AllocationDonut } from '@/ui/charts/AllocationDonut';
 import { TimelineNotYet, ValueTimeline } from '@/ui/charts/ValueTimeline';
 import { continuityWindowMs, netInvestedSteps, observedRuns, recordedCount } from '@/ui/charts/timeline';
@@ -55,7 +58,6 @@ import { repos } from '@/data';
 import { system, type SectorClassification } from '@/data/system';
 import { useAsync } from '@/data/useAsync';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
-import type { Strategy } from '@/data/types';
 import { driftSentence, holdingDrift, timelineChange } from '@/state/derived';
 
 const GRAPH_H = 150;
@@ -130,27 +132,12 @@ function useClosesBySymbol(symbolsKey: string, timeframe: '1H' | '4H'): Record<s
 /** One empty map, so "nothing answered yet" keeps the same identity across renders. */
 const NO_CLOSES: Record<string, number[] | null> = {};
 
-/** Take profit and stop loss on a symbol, from the exit rules set on it — and nothing when there are none. */
-function exitLevels(strategies: readonly Strategy[], symbol: string, entry: number): PositionLevel[] {
-  const rule = strategies.find(
-    (s) => s.kind === 'exit-rules' && s.symbol === symbol && (s.state === 'live' || s.state === 'watch'),
-  );
-  if (!rule) return [];
-  const levels: PositionLevel[] = [];
-  const tp = Math.abs(Number(rule.params.takeProfitPct ?? 0));
-  const sl = Math.abs(Number(rule.params.stopLossPct ?? 0));
-  if (tp > 0) {
-    const value = entry * (1 + tp / 100);
-    levels.push({ label: 'TP', value, formatted: fmtPrice(value), tone: 'target' });
-  }
-  if (sl > 0) {
-    const value = entry * (1 - sl / 100);
-    levels.push({ label: 'SL', value, formatted: fmtPrice(value), tone: 'stop' });
-  }
-  return levels;
+/** The desktop web draws its own wide layout at laptop widths (2026-10-01); the phone layout is unchanged. */
+export default function Portfolio() {
+  return useDesktop() ? <DesktopPortfolio /> : <MobilePortfolio />;
 }
 
-export default function Portfolio() {
+function MobilePortfolio() {
   const goBack = useGoBack();
   const router = useRouter();
   const balance = useAsync(() => repos.portfolio.balance(), []);

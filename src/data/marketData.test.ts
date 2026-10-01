@@ -20,6 +20,7 @@ import {
   foldWindow,
   isStockSymbol,
   resetPricedSymbols,
+  rowsOfReadings,
   type OhlcRow,
 } from './marketData';
 import type { Bar } from './types';
@@ -186,8 +187,102 @@ describe('what each pill and range asks the executor for', () => {
     expect(ohlcDays()).toEqual([]);
   });
 
+  it('reads an xStock’s history from its recorded prices (2026-09-25)', async () => {
+    const end = Date.UTC(2026, 8, 14, 12);
+    const points = Array.from({ length: 48 * 4 }, (_, i) => ({ at: end - MIN - (48 * 4 - 1 - i) * 7.5 * MIN, usd: 100 + i }));
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      const body = url.includes('/market/stocks/history') ? { symbol: 'NVDAx', points } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const day = await fetchHistory('NVDAx', '1D');
+    expect(asked.some((u) => u.includes('/market/stocks/history?symbol=NVDAx&hours=24'))).toBe(true);
+    expect(ohlcDays()).toEqual([]);
+    expect(day).toHaveLength(12);
+    expect(day![11]![3]).toBe(100 + 48 * 4 - 1);
+  });
+
+  /*
+   * A T-Token's seeded hourly bars and live readings are recorded the same way (2026-09-26); this returned null for every
+   * `T-` symbol, so the pre-IPO screens drew no chart at all.
+   */
+  it('reads a pre-IPO token’s history from the same recorded prices, folded the same way (2026-09-26)', async () => {
+    const end = Date.UTC(2026, 8, 25, 12);
+    const points = Array.from({ length: 7 * 24 }, (_, i) => ({ at: end - (7 * 24 - 1 - i) * HOUR, usd: 400 + i }));
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      const body = url.includes('/market/stocks/history') ? { symbol: 'T-SpaceX', points } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const week = await fetchHistory('T-SpaceX', '1W');
+    expect(asked.some((u) => u.includes('/market/stocks/history?symbol=T-SpaceX&hours=168'))).toBe(true);
+    expect(ohlcDays()).toEqual([]);
+    expect(week).toHaveLength(12);
+    expect(week![11]![3]).toBe(400 + 7 * 24 - 1);
+  });
+
+  it('falls back to the recorded rows on /market/ohlc when an older executor refuses a T-Token (2026-09-26)', async () => {
+    const t0 = Date.UTC(2026, 8, 25, 0);
+    const rows = Array.from({ length: 24 }, (_, i) => [t0 + (i + 1) * HOUR, 420 + i, 421 + i, 419 + i, 420.5 + i]);
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      asked.push(url);
+      if (url.includes('/market/stocks/history')) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'not_an_equity' }), { status: 404 }));
+      }
+      const body = url.includes('/market/symbols') ? ['T-OpenAI'] : url.includes('/market/ohlc') ? { rows } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const day = await fetchHistory('T-OpenAI', '1D');
+    expect(ohlcDays()).toEqual([1]);
+    expect(day).toHaveLength(12);
+  });
+
+  it('folds an xStock’s day into twelve candles, and a day that began recently into more than one (2026-09-26)', async () => {
+    // A reading every half minute for the last 24h, the window starting off a bucket edge as `now − 24h` always does.
+    const end = Date.UTC(2026, 8, 14, 12, 7, 13);
+    const day = Array.from({ length: 2880 }, (_, i) => ({ at: end - (2879 - i) * 30_000, usd: 100 + i / 100 }));
+    // Readings for only the last fifty minutes: thirty-minute rows made this one or two candles.
+    const fresh = day.slice(-100);
+    let points = day;
+    vi.mocked(globalThis.fetch).mockImplementation((input: RequestInfo | URL) => {
+      const body = String(input).includes('/market/stocks/history') ? { symbol: 'NVDAx', points } : {};
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    });
+    const whole = await fetchHistory('NVDAx', '1D');
+    expect(whole).toHaveLength(12);
+    expect(whole![0]![0]).toBe(day[0]!.usd);
+    expect(whole![11]![3]).toBe(day[2879]!.usd);
+    clearMarketDataCache();
+    points = fresh;
+    expect((await fetchHistory('NVDAx', '1D'))!.length).toBeGreaterThanOrEqual(10);
+  });
+
   it('knows a tokenized share by its suffix, and nothing else as one', () => {
     expect(isStockSymbol('NVDAc')).toBe(true);
     for (const s of ['BTC', 'CBBTC', 'WETH', 'SPYx']) expect(isStockSymbol(s)).toBe(false);
+  });
+});
+
+describe('an xStock’s recorded prices as rows (2026-09-25)', () => {
+  it('buckets readings by time: first as open, last as close, stamped when the bucket closes', () => {
+    const t0 = Date.UTC(2026, 8, 14, 12);
+    const out = rowsOfReadings(
+      [
+        { at: t0 + 1 * MIN, usd: 10 },
+        { at: t0 + 10 * MIN, usd: 12 },
+        { at: t0 + 20 * MIN, usd: 9 },
+        // Nothing read in the next half hour: no row, not a flat one.
+        { at: t0 + 65 * MIN, usd: 11 },
+      ],
+      30 * MIN,
+    );
+    expect(out).toEqual([
+      [t0 + 30 * MIN, 10, 12, 9, 9],
+      [t0 + 65 * MIN, 11, 11, 11, 11],
+    ]);
+    expect(rowsOfReadings([], 30 * MIN)).toEqual([]);
   });
 });

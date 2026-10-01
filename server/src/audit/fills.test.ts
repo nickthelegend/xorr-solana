@@ -49,11 +49,34 @@ describe('what the query will and will not return', () => {
 
   it('reads the time the fill finished, not the time it was claimed', () => {
     expect(FILLS_SQL).toContain('r.finished_at   AS at');
-    expect(FILLS_SQL).toContain('ORDER BY r.finished_at ASC');
   });
 
   it('reads the venue, so the file cannot call a vault settlement a Jupiter swap', () => {
     expect(FILLS_SQL).toContain('r.venue');
+  });
+
+  /*
+   * An autonomous agent's entry and the owner's own trades are not strategy runs. They settle all the same, and the
+   * audit trail's signed `trade` row is their record (2026-10-01): the demo wallet had ten signed trades on Activity
+   * and a receipts file that said nothing had settled.
+   */
+  it('also takes the trail’s signed trades that were not strategy runs', () => {
+    expect(FILLS_SQL).toContain('FROM audit_log a');
+    expect(FILLS_SQL).toContain("a.kind = 'trade'");
+    expect(FILLS_SQL).toContain('a.signature IS NOT NULL');
+    expect(FILLS_SQL).toContain('a.wallet_id = $1');
+  });
+
+  it('takes from the trail only a row that bought or sold, never a deposit or a send', () => {
+    expect(FILLS_SQL).toContain("(a.action LIKE 'Bought %' OR a.action LIKE 'Sold %')");
+  });
+
+  it('never writes a strategy’s fill twice', () => {
+    expect(FILLS_SQL).toContain('NOT EXISTS (SELECT 1 FROM runs WHERE runs.signature = a.signature)');
+  });
+
+  it('orders both sources together by when they settled', () => {
+    expect(FILLS_SQL).toMatch(/UNION ALL[\s\S]*ORDER BY at ASC`?$/);
   });
 });
 

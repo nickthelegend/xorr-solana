@@ -48,7 +48,7 @@
  */
 import React from 'react';
 import { Image } from 'expo-image';
-import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   cancelAnimation,
   ReduceMotion,
@@ -67,8 +67,11 @@ import Svg, {
   RadialGradient,
   Rect,
   Stop,
+  Text as SvgText,
 } from 'react-native-svg';
 import { agentGlyph, pathData, type GlyphShape } from '../design/agentGlyph';
+import type { Monogram } from '../design/gradients';
+import { FONTS } from './fonts';
 import { timing, useReducedMotion } from './motion';
 import { Placeholder } from './States';
 import { Text, Value } from './Text';
@@ -429,8 +432,24 @@ export function AgentOrb({
 }
 
 /**
+ * A monogram's letters, as a share of the mark: one letter fills more of the circle than two do.
+ * Inter's capitals stand 0.727 of the font size, so half of that below the centre puts them in the middle optically.
+ */
+const MONOGRAM_SCALE = { one: 0.46, more: 0.36 } as const;
+const CAP_HEIGHT = 0.727;
+/** The ring's depth: `ink28` at half, enough to close a near-black circle on the sheet without outlining a white one. */
+const MONOGRAM_RING_OPACITY = 0.5;
+
+/**
  * Asset marks reuse the orb recipe at list-row scale — same gradient, no face, no bloom.
  * `data/markets.json` carries a `c1`/`c2` for every instrument.
+ *
+ * ## A monogram (2026-09-25)
+ *
+ * A gradient that carries a `monogram` (`assetGradient` gives one to each Tessera pre-IPO token) draws its letters on
+ * the sphere. The letters are the mark itself, not a stand-in for a logo on its way, so the mark has no skeleton: it
+ * draws at once, and a logo that does resolve still lands on top of it. A hairline rings it, so a near-black mark stays
+ * a circle on the dark sheet.
  */
 export function AssetMark({
   gradient,
@@ -440,7 +459,8 @@ export function AssetMark({
   style,
   testID,
 }: {
-  gradient: Gradient;
+  /** The mark's colours, and the letters to draw on it where it has some (`assetGradient`). */
+  gradient: Gradient & { readonly monogram?: Monogram };
   size?: number;
   /**
    * The asset's real logo, from `/market/logos`. Null keeps the gradient.
@@ -465,6 +485,7 @@ export function AssetMark({
 }) {
   const uid = React.useId().replace(/[^a-zA-Z0-9]/g, '');
   const gradientId = `mark-g-${uid}`;
+  const monogram = gradient.monogram;
   // A logo that 404s or is malformed falls back to the gradient rather than leaving a hole. Kept per address, so a mark
   // handed a different logo tries it rather than inheriting the last one's failure.
   const [failedUri, setFailedUri] = React.useState<string>();
@@ -477,7 +498,8 @@ export function AssetMark({
    * `pending` exists to prevent, one step later. The block is one step lighter than the sheet a list sits on — drawn in
    * the sheet's own grey it was invisible there, and a row whose logo was still coming looked like a row with none.
    */
-  const waiting = (pending && !showLogo) || (showLogo && drawnUri !== uri);
+  const waiting = !monogram && ((pending && !showLogo) || (showLogo && drawnUri !== uri));
+  const letterSize = monogram ? size * (monogram.letters.length > 1 ? MONOGRAM_SCALE.more : MONOGRAM_SCALE.one) : 0;
 
   return (
     <View testID={testID} style={[{ width: size, height: size }, style]}>
@@ -497,6 +519,29 @@ export function AssetMark({
             </RadialGradient>
           </Defs>
           <Circle cx={size / 2} cy={size / 2} r={size / 2} fill={`url(#${gradientId})`} />
+          {monogram ? (
+            <>
+              <Circle
+                cx={size / 2}
+                cy={size / 2}
+                r={size / 2 - StyleSheet.hairlineWidth / 2}
+                fill="none"
+                stroke={colors.ink28}
+                strokeOpacity={MONOGRAM_RING_OPACITY}
+                strokeWidth={StyleSheet.hairlineWidth}
+              />
+              <SvgText
+                x={size / 2}
+                y={size / 2 + (letterSize * CAP_HEIGHT) / 2}
+                textAnchor="middle"
+                fontFamily={FONTS['800']}
+                fontSize={letterSize}
+                fill={monogram.ink}
+              >
+                {monogram.letters}
+              </SvgText>
+            </>
+          ) : null}
         </Svg>
       )}
       {showLogo ? (

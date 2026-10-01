@@ -836,7 +836,21 @@ export async function runAutonomousCycle(
     sizeUsd = sized.usd;
   }
   let agentWallet: { address: string; name: string } | undefined;
-  if (agentRow?.wallet_account) {
+  /*
+   * An agent spends only from its own wallet (2026-09-25). One with none fell through to the owner's main account: on
+   * mainnet, Momentum Scout bought $24 of METAx from the main balance the moment it was hired — before its wallet held
+   * anything, and before the rules being typed were saved — while the screen said it "trades from this wallet alone".
+   * Hired is not funded: until the owner puts money in its wallet, it looks and says so, and spends nothing.
+   */
+  if (!agentRow?.wallet_account) {
+    return {
+      executed: false,
+      reason: 'agent_wallet_empty',
+      detail: `${bestSetup.symbol} reads as a setup, but ${agentName} trades only from its own wallet and has none yet. Fund it to let it trade.`,
+      looks,
+    };
+  }
+  {
     const held = await readAgentWallet(wallet.address, agentRow.id).catch(() => null);
     if (!held || !held.exists || !held.approved) {
       return {

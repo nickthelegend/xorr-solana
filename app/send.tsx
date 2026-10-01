@@ -14,14 +14,14 @@
  * addresses its clock says are usable can be chosen here, a pending one says when it will be, and
  * `useWithdraw` asks the executor again immediately before a signature is requested.
  */
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import { getAccountLenForMint, getMint } from '@solana/spl-token';
 import { parseUnits } from 'viem';
 import { buildSplTransfer, prepareForSigning, solanaConnection, tokenProgramOf } from '@/wallet/solanaTx';
 import { useSolanaSigner } from '@/wallet/solanaSigner';
 import React, { useMemo, useState } from 'react';
 import { TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import {
   BackButton,
@@ -46,7 +46,8 @@ import {
 } from '@/ui';
 import { useSignedOut } from '@/auth/useSignedOut';
 import { useAllowlist, usableFromText, usableIn } from '@/wallet/allowlist';
-import { useWithdraw } from '@/wallet/useWithdraw';
+import { NATIVE_SOL, SOL_FEE_RESERVE, useWithdraw } from '@/wallet/useWithdraw';
+import { walletTokens } from '@/data/walletTokens';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { useDebounced } from '@/data/useDebounced';
@@ -59,9 +60,22 @@ import { formatEther, type Address } from 'viem';
 import { shortAddress } from '@/format';
 import { NetworkChip } from '@/networks/NetworkChip';
 import { isSolana } from '@/chain';
-import { isSolanaAddress } from '@/wallet/allowlist';
+import { isSolanaAddress, sameAddress } from '@/wallet/allowlist';
 
 const FIELD_H = 52;
+
+/*
+ * Native SOL, sendable on the Solana build (2026-09-26) for Return funds. It is not on `/market/watchable` — that list
+ * is mints — so it is added here, spelled the way `/wallet/tokens` spells it. A send of SOL leaves this much behind, so
+ * the wallet can still pay for the transactions that follow it.
+ */
+const SOL_TOKEN = { symbol: 'SOL', address: NATIVE_SOL, decimals: 9 } as const;
+
+/** A link's amount, when it is a plain positive decimal; anything else opens the field empty. */
+function linkedAmount(raw: string | string[] | undefined): string {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  return /^\d+(\.\d+)?$/.test(v) && Number(v) > 0 ? v : '';
+}
 
 export default function Send() {
   const router = useRouter();
@@ -74,8 +88,16 @@ export default function Send() {
     loading: listLoading,
     error: listError,
   } = useAllowlist();
-  const [chosen, setChosen] = useState<string>();
-  const [amount, setAmount] = useState('');
+  /*
+   * A link can open Send prefilled (2026-09-26): `/send?to=…&asset=USDC|SOL&amount=…`, which Return funds uses. `to`
+   * only ever PRESELECTS — the destination still has to be a usable address on the allowlist, checked below and again
+   * by the executor before anything is signed. A `to` that is not usable selects nothing rather than falling back to
+   * another address.
+   */
+  const params = useLocalSearchParams<{ to?: string; asset?: string; amount?: string }>();
+  const linkedTo = typeof params.to === 'string' && params.to.trim() ? params.to.trim() : undefined;
+  const [chosen, setChosen] = useState<string | undefined>(linkedTo);
+  const [amount, setAmount] = useState(() => linkedAmount(params.amount));
   const { withdraw, busy, error, txHash } = useWithdraw();
 
   const balance = useAsync(() => repos.portfolio.balance(), []);
@@ -85,20 +107,32 @@ export default function Send() {
    * ERC-20 transfers.
    */
   const listed = useAsync(() => system.watchable(), []);
-  const [symbol, setSymbol] = useState('USDC');
-  const sendable = (listed.data ?? []).filter((t) => t.symbol !== 'ETH');
+  const [symbol, setSymbol] = useState(() => (isSolana && params.asset === 'SOL' ? 'SOL' : 'USDC'));
+  const sendable: { symbol: string; address: string; decimals: number }[] = [
+    ...(listed.data ?? []).filter((t) => t.symbol !== 'ETH'),
+    ...(isSolana && listed.data ? [SOL_TOKEN] : []),
+  ];
   const token = sendable.find((t) => t.symbol === symbol);
+  // The wallet's SOL, read from its own account (2026-09-26): the portfolio balance lists cash and stocks, not gas.
+  const solHeld = useAsync(
+    async () => (isSolana ? ((await walletTokens()).tokens.find((t) => t.native)?.units ?? 0) : undefined),
+    [],
+  );
 
   // Cash for USDC and the chain's holding for anything else; undefined while it is unknown, never a zero.
-  const held = swapSpendable(balance.data, symbol);
+  const held = symbol === 'SOL' ? solHeld.data : swapSpendable(balance.data, symbol);
+  const heldLoading = symbol === 'SOL' ? solHeld.loading : balance.loading;
   /*
    * Only a usable address can be the destination. Chosen by address, not by position, so a list read
    * again — an address that became usable, or one removed elsewhere — cannot move the selection onto
    * a different card.
    */
-  const entry = usable.find((a) => a.address === chosen) ?? usable[0];
+  const entry = chosen ? usable.find((a) => sameAddress(a.address, chosen)) : usable[0];
+  const linkedNotUsable = Boolean(linkedTo && chosen === linkedTo && !entry && !listLoading);
   const typed = Number(amount);
   const overBalance = held !== undefined && typed > held;
+  // Never send the last of the SOL: it pays for every transaction after this one.
+  const solShort = symbol === 'SOL' && held !== undefined && !overBalance && typed > held - SOL_FEE_RESERVE + 1e-9;
 
   const problem = useMemo(() => {
     if (listLoading) return undefined;
@@ -106,14 +140,16 @@ export default function Send() {
     if (listError && addresses.length === 0) return undefined;
     if (addresses.length === 0) return 'Add an address first.';
     if (usable.length === 0) return 'No address is unlocked yet.';
+    if (linkedNotUsable) return 'That address is not usable on your allowlist yet.';
     if (!entry) return 'Choose a destination.';
     if (!amount) return undefined;
     // A token list that could not be read says so once, where the pills go; one that did has pills to choose from.
-    if (listed.data && !listed.data.some((t) => t.symbol === symbol && t.symbol !== 'ETH')) return 'Choose a token.';
+    if (listed.data && !sendable.some((t) => t.symbol === symbol)) return 'Choose a token.';
     if (!(typed > 0)) return 'Enter an amount above zero.';
     if (overBalance) return 'More than you hold.';
+    if (solShort) return `Leave ${SOL_FEE_RESERVE} SOL behind to pay network fees.`;
     return undefined;
-  }, [listLoading, listError, addresses.length, usable.length, entry, amount, listed.data, symbol, typed, overBalance]);
+  }, [listLoading, listError, addresses.length, usable.length, entry, linkedNotUsable, amount, listed.data, symbol, typed, overBalance, solShort]);
 
   /*
    * What the send costs you in gas (PLAN.md 3.13), asked of your own wallet, which pays it — nothing here goes
@@ -137,6 +173,15 @@ export default function Send() {
       if (!solanaSigner.address) return undefined;
       const conn = solanaConnection();
       const owner = new PublicKey(solanaSigner.address);
+      if (token.address === NATIVE_SOL) {
+        // Native SOL (2026-09-26): one System transfer, no token account to open.
+        const tx = new Transaction().add(
+          SystemProgram.transfer({ fromPubkey: owner, toPubkey: new PublicKey(entry.address), lamports: parseUnits(settledAmount, 9) }),
+        );
+        await prepareForSigning(conn, tx, owner);
+        const feeLamports = (await conn.getFeeForMessage(tx.compileMessage(), 'confirmed')).value;
+        return feeLamports === null ? undefined : { solanaLamports: feeLamports, opensAccount: false };
+      }
       const mint = new PublicKey(token.address);
       const program = await tokenProgramOf(conn, mint);
       const mintInfo = await getMint(conn, mint, 'confirmed', program);
@@ -179,7 +224,7 @@ export default function Send() {
         ? Number(formatEther(fee.data.gas * fee.data.gasPrice)) * ethPrice.price
         : undefined;
 
-  const ready = Boolean(entry) && typed > 0 && !overBalance && Boolean(token);
+  const ready = Boolean(entry) && typed > 0 && !overBalance && !solShort && Boolean(token);
   const signedOut = useSignedOut();
 
   const header = (
@@ -241,6 +286,12 @@ export default function Send() {
                   showRadio={false}
                 />
               ))}
+              {/* A linked destination that cannot be sent to yet is named, never swapped for another (2026-09-26). */}
+              {linkedNotUsable && linkedTo ? (
+                <Text variant="secondarySm" color={colors.down}>
+                  {shortAddress(linkedTo)} is not a usable address on your allowlist yet. Add it, or choose one above.
+                </Text>
+              ) : null}
               {/* Pending addresses are shown, and cannot be chosen: when each becomes usable is the executor's answer. */}
               {pending.map((a) => (
                 <Text key={a.address} variant="secondarySm" color={colors.ink55}>
@@ -330,7 +381,7 @@ export default function Send() {
               appeared where a dash had been.
             */}
             <Price variant="footnote" figure="units">
-              {held !== undefined ? `${quantity(held)} ${symbol}` : balance.loading ? '· · ·' : '—'}
+              {held !== undefined ? `${quantity(held)} ${symbol}` : heldLoading ? '· · ·' : '—'}
             </Price>
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: space.s6 }}>
@@ -373,7 +424,13 @@ export default function Send() {
         onPress={() => {
           if (!token) return;
           // The balance on screen is read again once the send lands, rather than left showing what was there before.
-          void withdraw({ token, entry, allowlist: usable, amount }).then(() => balance.reload(), () => undefined);
+          void withdraw({ token, entry, allowlist: usable, amount }).then(
+            () => {
+              balance.reload();
+              solHeld.reload();
+            },
+            () => undefined,
+          );
         }}
       />
       <Press

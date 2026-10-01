@@ -1,0 +1,50 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-mainnet",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "set -a; . ./.env; set +a; export EXPO_PUBLIC_XORR_CHAIN=solana-mainnet EXPO_PUBLIC_API_URL=https://executor-production-a672.up.railway.app EXPO_PUBLIC_CHAIN_RPC=https://executor-production-a672.up.railway.app/rpc EXPO_PUBLIC_SOLANA_RPC=https://executor-production-a672.up.railway.app/rpc EXPO_PUBLIC_CHAIN_RPC_FALLBACK=https://solana-rpc.publicnode.com EXPO_PUBLIC_CHAIN_WS=wss://solana-rpc.publicnode.com; exec npx expo start --web --port 8093"
+      ],
+      "port": 8093
+    },
+    {
+      "name": "executor-solana",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "set -a; . ./.env; . ./.env.fork; set +a; export XORR_CHAIN=solana-fork PORT=8788 DATABASE_URL=postgres://$USER@localhost:5432/xorr_solana PATH=$HOME/.local/share/solana/install/active_release/bin:$PATH; cd server && exec npx tsx watch src/index.ts"
+      ],
+      "port": 8788
+    },
+    {
+      "name": "web-solana",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "set -a; . ./.env; set +a; export EXPO_PUBLIC_XORR_CHAIN=solana-fork EXPO_PUBLIC_API_URL=http://localhost:8788 EXPO_PUBLIC_CHAIN_RPC=http://127.0.0.1:8899; exec npx expo start --web --port 8090"
+      ],
+      "port": 8090
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd landing && exec npx next start -p 3055"
+      ],
+      "port": 3055
+    },
+    {
+      "name": "nickui-playground",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd '/Volumes/Extreme SSD/Projects/nickui/apps/playground' && exec npx expo start --web --port 8099"
+      ],
+      "port": 8099
+    }
+  ]
+}

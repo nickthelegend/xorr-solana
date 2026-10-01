@@ -12,7 +12,8 @@
  *
  * ## What counts as a real recorded fill
  *
- * A `strategy_runs` row that reached `filled` AND carries a signature. Both halves matter:
+ * A `strategy_runs` row that reached `filled` AND carries a signature — or, for a trade that was not
+ * a strategy run, the audit trail's signed `trade` row (see `FILLS_SQL`). Both halves matter:
  *
  *   - `status = 'filled'` excludes `pending`, `failed`, `blocked` and `skipped`. A blocked run is a
  *     real and important record — it is the moment a cap did its job — and it belongs on the audit
@@ -28,7 +29,7 @@
 
 /** One settled fill, as the executor recorded it. Every field is read, none is derived. */
 export type FillRow = {
-  /** The run's own id, so a row in the file can be found again in the trail. */
+  /** The run's own id, or `audit-<seq>` for a trade that was not a run, so a row in the file can be found again in the trail. */
   runId: string;
   /** When it finished, not when it was claimed. */
   at: Date;
@@ -52,18 +53,39 @@ export type FillRow = {
 /**
  * The SQL for the rows above, as one string so the route and its test cannot disagree about it.
  *
- * Scoped to the caller's wallet through the strategy that owns the run — `strategy_runs` has no
- * `wallet_id` of its own, and joining is what keeps one account's receipts out of another's file.
+ * Two sources, because two kinds of trade settle here (2026-10-01).
+ *
+ *   - A scheduled strategy's run. Scoped to the caller's wallet through the strategy that owns it —
+ *     `strategy_runs` has no `wallet_id` of its own, and joining is what keeps one account's receipts
+ *     out of another's file.
+ *   - Everything else that settled: an autonomous agent's entry, the owner's own buy or sale on the
+ *     ticket, a stop or a target firing, a close. None of those is a strategy run. Each writes one
+ *     `trade` row to the audit trail with the transaction's signature, and that row is the record.
+ *     Before this the file read runs alone, so a wallet whose every trade was an agent's or the
+ *     owner's got "no settled fills recorded" beside an Activity list of ten signed trades.
+ *
+ * From the trail only a row that says it bought or sold something AND carries a signature counts — a
+ * deposit, a send to an allowlisted address or a blocked attempt is not a fill. A trail row whose
+ * signature a run already accounts for is left out, so a strategy's fill is never on the file twice.
+ *
+ * Units, price and dollars come from the row's payload where the writer put them there, and otherwise
+ * from the figures the same writer printed into the row's detail and amount ("0.104 AAPLx at $252.30",
+ * "$26.24"). Where neither has a figure the cell stays empty, as for a run that was not measured.
+ *
+ * The venue is read from the detail first. The owner's sale on the ticket became a Jupiter swap the owner signs on
+ * 2026-09-24 and its detail says so, but its payload kept the fork-era `venue-vault` until 2026-10-01; the trail is
+ * append-only, so those rows cannot be corrected, and the file must not call a Jupiter swap a vault settlement.
  */
 export const FILLS_SQL = `
+  WITH runs AS (
   SELECT r.id            AS "runId",
          r.finished_at   AS at,
          s.symbol        AS symbol,
          r.side          AS side,
          s.label         AS strategy,
-         r.units         AS units,
-         r.price         AS price,
-         r.usd           AS usd,
+         r.units::text   AS units,
+         r.price::text   AS price,
+         r.usd::text     AS usd,
          r.venue         AS venue,
          r.signature     AS signature
     FROM strategy_runs r
@@ -72,7 +94,33 @@ export const FILLS_SQL = `
      AND r.status = 'filled'
      AND r.signature IS NOT NULL
      AND r.finished_at IS NOT NULL
-   ORDER BY r.finished_at ASC`;
+  ),
+  trail AS (
+  SELECT 'audit-' || a.seq AS "runId",
+         a.at            AS at,
+         COALESCE(a.payload->>'symbol', substring(a.action from '^(?:Bought|Sold)(?: all)? ([^ ]+)')) AS symbol,
+         COALESCE(a.payload->>'side', CASE WHEN a.action LIKE 'Sold %' THEN 'sell' ELSE 'buy' END) AS side,
+         a.agent         AS strategy,
+         COALESCE(a.payload->>'units', substring(a.detail from '([0-9]+[.][0-9]+) [^ ]+ (?:at|for) ')) AS units,
+         COALESCE(a.payload->>'price', substring(a.detail from ' at [$]([0-9]+(?:[.][0-9]+)?)')) AS price,
+         COALESCE(a.payload->>'usd',
+                  NULLIF(replace(substring(a.amount from '[$]([0-9.,]+)'), ',', ''), ''),
+                  substring(a.detail from ' for [$]([0-9]+(?:[.][0-9]+)?)')) AS usd,
+         CASE WHEN a.detail LIKE '%through Jupiter%' THEN 'jupiter-route'
+              WHEN a.detail LIKE '%through the venue vault%' THEN 'venue-vault'
+              ELSE a.payload->>'venue' END AS venue,
+         a.signature     AS signature
+    FROM audit_log a
+   WHERE a.wallet_id = $1
+     AND a.kind = 'trade'
+     AND a.signature IS NOT NULL
+     AND (a.action LIKE 'Bought %' OR a.action LIKE 'Sold %')
+     AND NOT EXISTS (SELECT 1 FROM runs WHERE runs.signature = a.signature)
+  )
+  SELECT * FROM runs
+  UNION ALL
+  SELECT * FROM trail
+   ORDER BY at ASC`;
 
 const COLUMNS = [
   'date',

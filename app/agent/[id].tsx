@@ -15,13 +15,13 @@
  * can be created, so those two say they have nothing to add. The full list is still one tap away, from
  * the card's own header: this page is how people reach it.
  */
-import React, { useState } from 'react';
+import React from 'react';
 import { isSolana } from '@/chain';
 import { Linking, ScrollView, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useGoBack } from '@/nav/useGoBack';
 import { spendPhrase } from '@/strategies/spend';
-import { system, type AgentLookOutcome, type AgentPolicy } from '@/data/system';
+import { system, type AgentPolicy } from '@/data/system';
 import { useFreshOnReturn } from '@/data/useFreshOnReturn';
 import {
   AgentOrb,
@@ -50,40 +50,21 @@ import { repos } from '@/data';
 import { errorText } from '@/data/apiError';
 import { winRate } from '@/state/derived';
 import { labelFigure, setupFor } from '@/strategies/ladder';
-import type { StrategyKind } from '@/data/types';
-import { CHAT_AGENTS } from '@/chat/agents';
-
-/** The strategy kind each agent's mandate covers. See the header comment. */
-const MANDATE_KINDS: Readonly<Record<string, readonly StrategyKind[]>> = {
-  'Momentum Scout': ['momentum'],
-  'Earnings Desk': ['event-driven'],
-  'Yield Keeper': ['yield-rotation'],
-  'Drawdown Guard': ['exit-rules'],
-};
-
-const STATE_LABEL: Readonly<Record<string, string>> = {
-  live: 'Live',
-  watch: 'Watching',
-  paused: 'Paused',
-  draft: 'Draft',
-  ended: 'Ended',
-};
+import { agentKinds, agentStrategiesOf, policyLines, STATE_LABEL, useHireAgent, useLookNow } from '@/agents/useAgentActions';
+import { useDesktop } from '@/desktop/useDesktop';
+import { DesktopAgent } from '@/desktop/pages/DesktopAgent';
 
 const ORB = 84 as const;
 
+/** The desktop web draws its own two-column page at laptop widths (2026-10-01); the phone layout is unchanged. */
 export default function AgentDetail() {
+  return useDesktop() ? <DesktopAgent /> : <MobileAgentDetail />;
+}
+
+function MobileAgentDetail() {
   const goBack = useGoBack();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [hiring, setHiring] = useState(false);
-  const [hireError, setHireError] = useState<string>();
-  /*
-   * A hire that went through ON THIS VISIT, for the orb's `filled` beat.
-   *
-   * Not `agent.hired`: that is true for every visit afterwards, and an orb that pops every time the page
-   * opens is celebrating something that happened last week. The beat belongs to the moment it lands.
-   */
-  const [justHired, setJustHired] = useState(false);
 
   // `listAgents` throws when /agents cannot answer, so a failed read reaches the ErrorState below
   // rather than passing for an agent with a record of zeros. Signed out, that asks for a sign-in.
@@ -91,44 +72,11 @@ export default function AgentDetail() {
   const strategies = useAsync(() => repos.strategies.list(), []);
 
   const agent = (agents.data ?? []).find((a) => a.id === id || a.personaId === id);
-  // An agent someone made runs the kind of strategy the one it works like does.
-  const mandateOf = agent?.custom ? CHAT_AGENTS.find((a) => a.id === agent.style)?.name : agent?.name;
-  const kinds = mandateOf ? (MANDATE_KINDS[mandateOf] ?? []) : [];
-  // Plain: the React Compiler memoizes this itself, and could not preserve a hand-written memo keyed
-  // on a joined string.
-  /*
-   * An exit an agent armed on its own entry is that agent's, whatever the kind mandate says (2026-09-23): Momentum
-   * Scout read "Nothing running yet" beside ten trades and five live exits, which were drawn under Drawdown Guard — an
-   * agent nobody had hired. `params.armedBy` is the executor's record of who armed it; the kind mapping decides the rest.
-   */
-  const mine = (strategies.data ?? []).filter((s) => {
-    if (s.state === 'ended') return false;
-    if (agent?.custom) return s.agentId === agent.id;
-    const armedBy = typeof s.params?.armedBy === 'string' ? s.params.armedBy : undefined;
-    return armedBy ? armedBy === agent?.name : kinds.includes(s.kind);
-  });
-  const setup = setupFor(kinds);
-
-  const hire = async () => {
-    if (!agent) return;
-    setHiring(true);
-    setHireError(undefined);
-    try {
-      await repos.bot.hire(agent.personaId ?? agent.id);
-      setJustHired(true);
-      agents.reload();
-    } catch (e) {
-      /*
-       * The server's sentence, under the button that asked.
-       *
-       * There was no catch: a refused hire stopped the spinner and changed nothing else, which reads
-       * as a hire that went through — until the chip still says NOT HIRED.
-       */
-      setHireError(errorText(e));
-    } finally {
-      setHiring(false);
-    }
-  };
+  // Which strategies are its, and the hire itself, are shared with the desktop page (`src/agents/useAgentActions.ts`).
+  // Plain: the React Compiler memoizes this itself.
+  const mine = agentStrategiesOf(agent, strategies.data ?? []);
+  const setup = setupFor(agentKinds(agent));
+  const { hire, hiring, hireError, justHired } = useHireAgent(agent, agents.reload);
 
   return (
     <Screen gutter="none">
@@ -373,21 +321,7 @@ function AgentWalletCard({ agentId, name }: { agentId: string; name: string }) {
  * either the fill — symbol, size, price, where it filled, the transaction — or the reason it took nothing.
  */
 function LookNow({ agentId, name }: { agentId: string; name: string }) {
-  const [busy, setBusy] = useState(false);
-  const [out, setOut] = useState<AgentLookOutcome>();
-  const [error, setError] = useState<string>();
-  async function look() {
-    setBusy(true);
-    setError(undefined);
-    setOut(undefined);
-    try {
-      setOut(await system.agentLook(agentId));
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const { look, busy, out, error } = useLookNow(agentId);
   return (
     <View style={{ gap: space.s8 }}>
       <Button label={busy ? `${name} is looking` : `Ask ${name} to look now`} variant="ghost" loading={busy} onPress={() => void look()} testID="agent-look" />
@@ -417,13 +351,7 @@ function LookNow({ agentId, name }: { agentId: string; name: string }) {
 /** The agent's rules, in words, and the door to change them. */
 function AgentRulesCard({ agentId, name, policy }: { agentId: string; name: string; policy: AgentPolicy }) {
   const router = useRouter();
-  const lines = [
-    policy.maxUsdPerTrade ? `Up to $${policy.maxUsdPerTrade} a trade` : null,
-    policy.maxUsdPerDay ? `Up to $${policy.maxUsdPerDay} a day` : null,
-    policy.symbols?.length ? `Only ${policy.symbols.join(', ')}` : null,
-    policy.allowOffHours === false ? 'Only while Nasdaq is open' : null,
-    policy.maxLossPct ? `Stop no more than ${policy.maxLossPct}% under the fill` : null,
-  ].filter((l): l is string => l !== null);
+  const lines = policyLines(policy);
   return (
     <Press
       onPress={() => router.push(`/agent/policy?id=${encodeURIComponent(agentId)}`)}

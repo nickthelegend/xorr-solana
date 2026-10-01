@@ -9,6 +9,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 
+/*
+ * Each test imports the route's whole module graph after `vi.resetModules()`. A cold import of that graph from a slow
+ * disk passed vitest's 5s default on its own (2026-10-01): the test timed out on loading, not on anything it checks.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 const h = vi.hoisted(() => ({
   getJson: vi.fn(),
   staleValue: vi.fn(),

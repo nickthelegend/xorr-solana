@@ -1,9 +1,9 @@
 /**
  * The bot's permission on Solana, as the owner signs it (2026-09-19).
  *
- * Granting is one transaction the owner's own wallet signs: create their USDC token account if it does not exist yet,
+ * Granting is a transaction the owner's own wallet signs: create their USDC token account if it does not exist yet,
  * then an SPL `ApproveChecked` naming the executor's delegate key for the whole allowance — the daily cap for every day
- * the grant runs. That allowance is the ceiling the chain itself enforces; the daily cap and the end date are held and
+ * the grant runs. When the sell approvals do not fit beside it, they follow in further transactions (`packGrant`). That allowance is the ceiling the chain itself enforces; the daily cap and the end date are held and
  * enforced by the executor, which records them only after reading the chain (`server/src/solana/grant.ts`).
  *
  * Stopping is the owner's SPL `Revoke` on the same account: the chain drops the delegate, and from that block the bot
@@ -77,20 +77,51 @@ export function buildGrantTx(params: {
       [],
       TOKEN_PROGRAM_ID,
     ),
-    // Selling: one approval per xStock this cluster holds, on the owner's Token-2022 account (created if absent).
-    ...(params.grant.sellable ?? []).flatMap((x) => {
+    /*
+     * Selling: one approval per xStock in `sellable`, on the owner's Token-2022 account. The caller passes only the
+     * accounts that already exist (`grantOnSolana`). Creating the rest here was how the fork did it, and on mainnet it
+     * is fifteen-odd accounts of rent — more SOL than a new wallet holds — in a transaction too large to send
+     * (2026-09-25: 1659 bytes against Solana's 1232). A buy opens its own account, and the next grant approves it.
+     */
+    ...(params.grant.sellable ?? []).map((x) => {
       const xMint = new PublicKey(x.mint);
       const xAta = getAssociatedTokenAddressSync(xMint, params.owner, false, TOKEN_2022_PROGRAM_ID);
-      return [
-        createAssociatedTokenAccountIdempotentInstruction(params.owner, xAta, params.owner, xMint, TOKEN_2022_PROGRAM_ID),
-        createApproveCheckedInstruction(xAta, xMint, delegate, params.owner, ANY_AMOUNT, x.decimals, [], TOKEN_2022_PROGRAM_ID),
-      ];
+      return createApproveCheckedInstruction(xAta, xMint, delegate, params.owner, ANY_AMOUNT, x.decimals, [], TOKEN_2022_PROGRAM_ID);
     }),
     // Each agent wallet, at whatever it holds: its contents are its budget, and the chain stops it there.
     ...(params.agentWallets ?? []).map((account) =>
       createApproveCheckedInstruction(account, mint, delegate, params.owner, ANY_AMOUNT, params.grant.decimals, [], TOKEN_PROGRAM_ID),
     ),
   );
+}
+
+/** The most a signed transaction may weigh: Solana's packet limit. */
+export const MAX_TX_BYTES = 1232;
+
+/** A transaction's size once the owner, its one signer, has signed it. Measured on a copy with a placeholder blockhash. */
+export function signedSize(tx: Transaction, owner: PublicKey): number {
+  const probe = new Transaction({ feePayer: owner, recentBlockhash: PublicKey.default.toBase58() }).add(...tx.instructions);
+  return 1 + 64 + probe.serializeMessage().length;
+}
+
+/**
+ * The grant as transactions that each fit, instructions kept in order. The first carries the USDC approval — the one
+ * the executor reads back and records — and whatever fits beside it; each further one carries the next sell approvals.
+ */
+export function packGrant(tx: Transaction, owner: PublicKey): Transaction[] {
+  const out: Transaction[] = [];
+  let current = new Transaction();
+  for (const ix of tx.instructions) {
+    const next = new Transaction().add(...current.instructions, ix);
+    if (current.instructions.length > 0 && signedSize(next, owner) > MAX_TX_BYTES) {
+      out.push(current);
+      current = new Transaction().add(ix);
+    } else {
+      current = next;
+    }
+  }
+  if (current.instructions.length > 0) out.push(current);
+  return out;
 }
 
 /** A token account of the owner's that names a delegate, and the program that owns it. */
@@ -140,18 +171,30 @@ export async function grantOnSolana(params: {
   const agentWallets = await api
     .get<{ address: string; exists: boolean }[]>('/agents/wallets')
     .then((ws) => ws.filter((w) => w.exists).map((w) => new PublicKey(w.address)), () => []);
-  const tx = buildGrantTx({
-    owner: new PublicKey(params.owner),
-    grant,
-    dailyCapUsd: params.dailyCapUsd,
-    durationMs: params.durationMs,
-    agentWallets,
-  });
-  const signature = await params.signAndSend(tx);
-  // Remembered on this device, so the stop can find every approval even with the executor down.
-  await rememberApproved(params.owner, tx);
-  await api.post('/delegation/record', { signature, dailyCapUsd: params.dailyCapUsd, expiresAt });
-  return signature;
+  const owner = new PublicKey(params.owner);
+  // Sell approvals only on the xStock accounts the owner already has; one read for all of them. None read, none approved.
+  const sellable = grant.sellable ?? [];
+  const accounts = sellable.map((x) => getAssociatedTokenAddressSync(new PublicKey(x.mint), owner, false, TOKEN_2022_PROGRAM_ID));
+  const infos = accounts.length
+    ? await solanaConnection().getMultipleAccountsInfo(accounts, 'confirmed').catch(() => [])
+    : [];
+  const held = sellable.filter((_, i) => !!infos[i]);
+  const txs = packGrant(
+    buildGrantTx({ owner, grant: { ...grant, sellable: held }, dailyCapUsd: params.dailyCapUsd, durationMs: params.durationMs, agentWallets }),
+    owner,
+  );
+  let signature: string | undefined;
+  for (const tx of txs) {
+    const sig = await params.signAndSend(tx);
+    // Remembered on this device, so the stop can find every approval even with the executor down.
+    await rememberApproved(params.owner, tx);
+    if (!signature) {
+      // The first holds the USDC approval: recorded as soon as it lands, so a later one failing leaves a grant that is on.
+      signature = sig;
+      await api.post('/delegation/record', { signature, dailyCapUsd: params.dailyCapUsd, expiresAt });
+    }
+  }
+  return signature!;
 }
 
 /**

@@ -21,6 +21,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BackHandler, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useDesktop } from '@/desktop/useDesktop';
 import { usePathname, useRouter, type Href } from 'expo-router';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -74,6 +75,7 @@ export function ChatSheet({ open, onClose }: ChatSheetProps) {
   // Before anything below reads a colour: the room this draw is in.
   applyChatTheme(room);
   const insets = useSafeAreaInsets();
+  const desktop = useDesktop();
   const reduced = useReducedMotion();
   /*
    * The travel distance is read per render, not captured once at module load.
@@ -267,18 +269,33 @@ export function ChatSheet({ open, onClose }: ChatSheetProps) {
       <Animated.View
         accessibilityViewIsModal
         style={[
-          {
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top,
-            bottom: 0,
-            // The room's own ground, so the handle zone above the list is part of it.
-            backgroundColor: chat.groundTop,
-            borderTopLeftRadius: RADIUS,
-            borderTopRightRadius: RADIUS,
-            overflow: 'hidden',
-          },
+          desktop
+            ? {
+                // On the desktop web app the conversations are a panel at the right edge, not a sheet the width of a
+                // laptop screen (2026-10-01).
+                position: 'absolute',
+                right: 20,
+                top: 84,
+                bottom: 20,
+                width: 460,
+                backgroundColor: chat.groundTop,
+                borderRadius: RADIUS,
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.08)',
+                overflow: 'hidden',
+              }
+            : {
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top,
+                bottom: 0,
+                // The room's own ground, so the handle zone above the list is part of it.
+                backgroundColor: chat.groundTop,
+                borderTopLeftRadius: RADIUS,
+                borderTopRightRadius: RADIUS,
+                overflow: 'hidden',
+              },
           slide,
         ]}
       >

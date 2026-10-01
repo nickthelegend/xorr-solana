@@ -23,6 +23,7 @@ import { catchup } from './routes/catchup.js';
 import { privyRoutes } from './routes/privy.js';
 import { crosschainRoutes } from './routes/crosschain.js';
 import { tokenRoutes } from './routes/tokens.js';
+import { fundedByRoutes } from './routes/funded-by.js';
 import { historyRoutes } from './routes/history.js';
 import { limitOrderRoutes } from './routes/limit-orders.js';
 import { mirrorRoutes, startMirrorSchedule } from './routes/mirror.js';
@@ -108,7 +109,9 @@ app.use('*', async (c, next) => {
   // preflight rejects every authenticated request and the whole app looks logged-out.
   // `idempotency-key` and `x-request-id` are ours; without them here the browser preflight
   // strips exactly the two headers that make a retry safe and a failure traceable.
-  c.header('access-control-allow-headers', 'content-type,authorization,idempotency-key,x-request-id');
+  // `solana-client` is web3.js's own header on every JSON-RPC call (2026-10-01): without it the browser refused every
+  // read the web app sent to the /rpc relay, and fell back to a public node that cannot serve the indexed reads.
+  c.header('access-control-allow-headers', 'content-type,authorization,idempotency-key,x-request-id,solana-client');
   c.header('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   c.header('access-control-expose-headers', 'x-request-id,idempotent-replay,retry-after');
 });
@@ -181,6 +184,8 @@ app.route('/', catchup);
 app.route('/', privyRoutes);
 app.route('/', crosschainRoutes);
 app.route('/', tokenRoutes);
+// Where the wallet was first funded from, for Return funds (2026-09-26).
+app.route('/', fundedByRoutes);
 app.route('/', historyRoutes);
 app.route('/', limitOrderRoutes);
 app.route('/', mirrorRoutes);

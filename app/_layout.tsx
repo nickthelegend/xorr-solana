@@ -3,6 +3,7 @@
  * Don't author custom ones."
  */
 import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { Stack, router, usePathname } from 'expo-router';
 import { hiddenOn, solanaRedirect } from '@/nav/solanaRoutes';
 import { useFonts } from 'expo-font';
@@ -12,13 +13,25 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppPrivyProvider } from '@/auth/PrivyProvider';
 import { PhoneFrame, colors } from '@/ui';
+import { DesktopShell } from '@/desktop/DesktopShell';
+import { useDesktop } from '@/desktop/useDesktop';
 import { useRegisterDevice } from '@/notifications/useRegisterDevice';
 import { useNotificationRoute } from '@/notifications/useNotificationRoute';
+import { useAgentTradeAlerts } from '@/notifications/useAgentTradeAlerts';
 import { useHydrateWallet } from '@/wallet/useHydrateWallet';
 import { useHydrateDelegation } from '@/wallet/useHydrateDelegation';
 import { ReachabilityProvider } from '@/net/Reachability';
 import { ChatSheet } from '@/chat/ChatSheet';
 import { useChatDrawer } from '@/chat/chatDrawer';
+
+/*
+ * The page under the app is the app's black on the web (2026-10-01). Expo's page leaves html and body unpainted, so an
+ * overscroll — Safari's rubber band on a phone, or a focus that scrolls the document — showed white behind it.
+ */
+if (Platform.OS === 'web' && typeof document !== 'undefined') {
+  document.documentElement.style.backgroundColor = colors.bg;
+  document.body.style.backgroundColor = colors.bg;
+}
 
 /**
  * Hold the splash until the typefaces are ready.
@@ -37,6 +50,18 @@ void SplashScreen.preventAutoHideAsync().catch(() => undefined);
  */
 function DeviceRegistration() {
   useRegisterDevice();
+  return null;
+}
+
+/**
+ * A banner when a hired agent trades, fired by the app itself (2026-09-26).
+ *
+ * The executor's push cannot reach this build — no APNs credentials — so while the app is open it watches the same
+ * `/agents/last-look` Home does and posts a local notification for a trade it has not seen. Beside DeviceRegistration
+ * for the same reason: it keys on the signed-in wallet. Renders nothing.
+ */
+function AgentTradeAlerts() {
+  useAgentTradeAlerts();
   return null;
 }
 
@@ -71,9 +96,13 @@ function SolanaRouteGuard() {
  * 400 in the network tab on its way out, asking the executor about a Base-only screen. Hidden routes render nothing for
  * the frame or two the redirect takes. Routes that merely MOVE — `/swap` to the xStocks market — keep rendering, because
  * there the destination is the point and a blank flash would be the only thing the user saw.
+ *
+ * The hidden screen's body is blanked, not the navigator (2026-09-25). It used to unmount the whole Stack, and with no
+ * navigator mounted the guard's `router.replace` had nothing to handle it: `/movers`, `/history`, `/compare` and the
+ * rest opened a black screen with no title and no way back, forever, instead of reaching `/not-here`.
  */
-function useHiddenHere(): boolean {
-  return hiddenOn(usePathname());
+function hiddenScreenLayout({ route, children }: { route: { name: string }; children: React.ReactElement }): React.ReactElement {
+  return hiddenOn(`/${route.name}`) ? <></> : children;
 }
 
 function NotificationRouting() {
@@ -146,6 +175,7 @@ export default function RootLayout() {
         <ReachabilityProvider>
         <WalletHydration />
         <DeviceRegistration />
+        <AgentTradeAlerts />
         {/* The app is true-black by design; the OS theme never gets to change it. */}
         <StatusBar style="light" />
         {/*
@@ -153,13 +183,12 @@ export default function RootLayout() {
           both position themselves against their parent, and a per-screen fix would have left them
           spanning the whole window.
         */}
-        <PhoneFrame>
+        <Frame overlay={<ChatDrawer />}>
         <AppRoutes />
         {/* After the Stack, so `useRouter` resolves against a mounted navigator. */}
         <NotificationRouting />
         <SolanaRouteGuard />
-        <ChatDrawer />
-        </PhoneFrame>
+        </Frame>
         </ReachabilityProvider>
       </SafeAreaProvider>
       </AppPrivyProvider>
@@ -167,11 +196,28 @@ export default function RootLayout() {
   );
 }
 
+/**
+ * A laptop-sized browser window gets the desktop web app — sidebar, top bar, wide pages; anything narrower keeps the
+ * phone layout in its column (2026-10-01). See `src/desktop/useDesktop.ts`.
+ */
+function Frame({ children, overlay }: { children: React.ReactNode; overlay: React.ReactNode }) {
+  const desktop = useDesktop();
+  // The chat drawer rides over the whole window on desktop, not inside a page's panel; on a phone it stays in the column.
+  return desktop ? (
+    <DesktopShell overlay={overlay}>{children}</DesktopShell>
+  ) : (
+    <PhoneFrame>
+      {children}
+      {overlay}
+    </PhoneFrame>
+  );
+}
+
 /** The navigator itself, so a hidden route can render nothing while the guard navigates away. */
 function AppRoutes() {
-  if (useHiddenHere()) return null;
   return (
         <Stack
+          screenLayout={hiddenScreenLayout}
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: colors.bg },

@@ -25,7 +25,7 @@
  */
 import React from 'react';
 import { Keyboard, Platform, View, type StyleProp, type ViewStyle } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, space } from './tokens';
 
 /** The breathing room design.md folds into its 54px top padding. */
@@ -70,12 +70,23 @@ export function Screen({
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const asSheet = sheet && Platform.OS === 'ios';
+  /*
+   * The top inset measured where the screen actually is, natively, not taken from the window (2026-09-25).
+   *
+   * A screen pushed from inside a sheet — Activity or Safety opened from Profile, Pre-IPO from Home — is in that sheet
+   * too, below the status bar, but nothing told it so: it added the window's inset and opened a ~60pt empty band above
+   * every title. The native SafeAreaView asks UIKit how much of this view the status bar really covers, which inside a
+   * sheet is nothing. Web keeps the window's inset, which is what it always had.
+   */
+  const measured = Platform.OS !== 'web' && !asSheet;
 
   const paddingHorizontal =
     gutter === 'none' ? 0 : gutter === 'sheet' ? space.sheetGutter : space.gutter;
 
+  const Shell = measured ? SafeAreaView : View;
   return (
-    <View
+    <Shell
+      {...(measured ? { edges: { top: 'additive', bottom: 'off', left: 'off', right: 'off' } as const } : {})}
       testID={testID}
       /*
        * Responder negotiation runs deepest-first, so this is only asked about a touch that no
@@ -90,7 +101,7 @@ export function Screen({
         {
           flex: 1,
           backgroundColor: light ? colors.sheet.bg : colors.bg,
-          paddingTop: asSheet ? space.s8 : insets.top + TOP_BREATHING_ROOM,
+          paddingTop: asSheet ? space.s8 : measured ? TOP_BREATHING_ROOM : insets.top + TOP_BREATHING_ROOM,
           paddingBottom: tabBar ? 0 : Math.max(insets.bottom, space.s26),
           paddingHorizontal,
         },
@@ -110,7 +121,7 @@ export function Screen({
         />
       ) : null}
       {children}
-    </View>
+    </Shell>
   );
 }
 

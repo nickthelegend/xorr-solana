@@ -4,6 +4,7 @@
  * Mark + "{symbol} {side}" + leverage chip. Eyebrow + P&L 46/700, "{pct} on {notional} held".
  * The held token's price over a range, with the user's own buys and sells marked where they filled.
  * Stat card: Entry / Mark / Size / Liquidation (down) / Funding paid (U+2212).
+ * A spot holding drops the side, the chip, Liquidation and Funding paid (2026-09-25, `isSpot`).
  * Close card: percentage + a 6pt fill bar + 25/50/75/100 pills + "Realises X and frees Y."
  * Edit TP/SL (flex:1) / "Close {n}%" (flex:1.3, white).
  *
@@ -79,6 +80,19 @@ const RANGES: readonly HistoryRange[] = ['1D', '1W', '1M', '1Y'];
 const CHART_H = 132;
 /** The most runs `/runs` answers with, and so the reach of the marks: a fill older than the oldest of them is not drawn. */
 const RUNS_WINDOW = 200;
+
+/**
+ * A holding of the token itself, not a levered contract on it (2026-09-25).
+ *
+ * Every position on Solana is spot: an xStock or a pre-IPO token bought with USDC and held in the owner's own wallet.
+ * The stat card was drawn for Base perps, and under every stock it printed "Funding paid — None — spot": a perpetual-
+ * futures term, answered with an apology for not being one. The header said "TSLAx long" of shares nobody can be
+ * short. A spot position has no side, no leverage, no liquidation and no funding, so none of them is drawn. On Base a
+ * position is spot when nothing about it is levered and nothing has been paid to hold it.
+ */
+function isSpot(p: { leverage: number; liquidation: number; fundingPaid: number }): boolean {
+  return isSolana || (p.leverage <= 1 && p.liquidation <= 0 && p.fundingPaid === 0);
+}
 
 export default function PositionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -222,9 +236,9 @@ export default function PositionScreen() {
         <BackButton onPress={() => goBack()} />
         {p ? <AssetMark gradient={assetGradient(p.symbol)} {...logo} size={26} /> : null}
         <Text variant="cardTitle" numberOfLines={1}>
-          {p ? `${p.symbol} ${p.side}` : 'Position'}
+          {p ? (isSpot(p) ? p.symbol : `${p.symbol} ${p.side}`) : 'Position'}
         </Text>
-        {p && p.leverage > 1 ? <Tag label={`${p.leverage}x lev`} small /> : null}
+        {p && !isSpot(p) && p.leverage > 1 ? <Tag label={`${p.leverage}x lev`} small /> : null}
       </View>
       {p?.feed === 'unavailable' ? <Tag label="No feed" small tone="warn" /> : null}
     </View>
@@ -260,6 +274,8 @@ export default function PositionScreen() {
 
   const flat = p.units <= 0;
   const drift = holdingDrift(p);
+  /** Liquidation and funding are a levered position's; a spot holding's card ends at its size. */
+  const spot = isSpot(p);
 
   return (
     <Screen>
@@ -320,8 +336,14 @@ export default function PositionScreen() {
             {/* Prices stay while balances are hidden; the size, and what funding has cost, are the person's. */}
             <Row title="Entry" value={fmtPrice(p.entry)} figure="market" height={STAT_ROW} />
             <Row title="Mark" value={fmtPrice(p.mark)} figure="market" height={STAT_ROW} />
-            <Row title="Size" value={`${quantity(p.units)} ${p.symbol}`} figure="units" height={STAT_ROW} />
-            {p.liquidation > 0 ? (
+            <Row
+              title="Size"
+              value={`${quantity(p.units)} ${p.symbol}`}
+              figure="units"
+              height={STAT_ROW}
+              divider={!spot}
+            />
+            {!spot && p.liquidation > 0 ? (
               <Row
                 title="Liquidation"
                 value={
@@ -332,16 +354,18 @@ export default function PositionScreen() {
                 height={STAT_ROW}
               />
             ) : null}
-            <Row
-              title="Funding paid"
-              value={
-                <Price color={colors.ink55}>
-                  {p.fundingPaid === 0 ? 'None — spot' : signedMoney(-p.fundingPaid)}
-                </Price>
-              }
-              height={STAT_ROW}
-              divider={false}
-            />
+            {spot ? null : (
+              <Row
+                title="Funding paid"
+                value={
+                  <Price color={colors.ink55}>
+                    {p.fundingPaid === 0 ? 'None' : signedMoney(-p.fundingPaid)}
+                  </Price>
+                }
+                height={STAT_ROW}
+                divider={false}
+              />
+            )}
           </SheetCard>
 
           {drift ? (
@@ -444,7 +468,8 @@ export default function PositionScreen() {
                   <Text variant="secondarySm" color={colors.ink}>
                     {signedMoney(realise)}
                   </Text>{' '}
-                  and frees{' '}
+                  {/* A quoted sale pays USDC into the wallet; "frees" is margin's word, and a spot sale has none (2026-09-25). */}
+                  {quoted ? 'and pays you' : 'and frees'}{' '}
                   <Text variant="secondarySm" color={colors.ink}>
                     {money(free)}
                   </Text>

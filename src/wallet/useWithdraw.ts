@@ -19,7 +19,7 @@
  */
 import { useCallback, useState } from 'react';
 import { parseUnits, type Address, type Hex } from 'viem';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import { useGrantDelegation } from '@/auth/useGrantDelegation';
 import { isSolana } from '@/chain';
 import { isSolanaAddress, sameAddress, type AllowlistEntry } from './allowlist';
@@ -29,6 +29,11 @@ import { ApiError, errorText } from '@/data/apiError';
 import { withdrawals } from '@/data/withdrawals';
 import { useSolanaSigner } from './solanaSigner';
 import { buildSplTransfer, solanaConnection } from './solanaTx';
+
+/** SOL's address as `/wallet/tokens` gives it: native SOL has no mint (2026-09-26). */
+export const NATIVE_SOL = 'native';
+/** What a send of SOL leaves behind, so the wallet can still pay for the transactions after it (2026-09-26). */
+export const SOL_FEE_RESERVE = 0.002;
 
 export class NotAllowlisted extends Error {
   constructor(detail = 'That address is not on your allowlist.') {
@@ -101,14 +106,27 @@ export function useWithdraw() {
            * from the typed string in the token's own decimals, never through a float.
            */
           if (!solanaSigner.address) throw new Error('Your wallet is not ready yet. Give it a moment.');
-          const tx = await buildSplTransfer({
-            conn: solanaConnection(),
-            owner: new PublicKey(solanaSigner.address),
-            mint: new PublicKey(token.address),
-            destination: new PublicKey(entry.address),
-            amountRaw: parseUnits(amount, token.decimals),
-            decimals: token.decimals,
-          });
+          /*
+           * Native SOL (2026-09-26), for Return funds: a plain System transfer, the owner signing, to the same
+           * allowlisted destination the executor just approved. `native` is how `/wallet/tokens` spells SOL's address —
+           * it has no mint, so the SPL path below cannot send it.
+           */
+          const tx = token.address === NATIVE_SOL
+            ? new Transaction().add(
+                SystemProgram.transfer({
+                  fromPubkey: new PublicKey(solanaSigner.address),
+                  toPubkey: new PublicKey(entry.address),
+                  lamports: parseUnits(amount, 9),
+                }),
+              )
+            : await buildSplTransfer({
+                conn: solanaConnection(),
+                owner: new PublicKey(solanaSigner.address),
+                mint: new PublicKey(token.address),
+                destination: new PublicKey(entry.address),
+                amountRaw: parseUnits(amount, token.decimals),
+                decimals: token.decimals,
+              });
           hash = await solanaSigner.signAndSend(tx);
         } else {
           // In the token's own decimals, from the typed string — never through a float.

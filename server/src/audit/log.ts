@@ -12,6 +12,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { one, pool, query, tx } from '../db/index.js';
+// The receipts file's cell (2026-10-01): it writes `at` as an ISO instant. `String(date)` wrote
+// "Fri Sep 25 2026 13:57:41 GMT+0000 (Coordinated Universal Time)", which no spreadsheet reads as a time.
+import { csvCell } from './fills.js';
 
 export type AuditKind = 'trade' | 'risk' | 'block' | 'yield';
 
@@ -288,10 +291,6 @@ const CSV_COLUMNS = [
   'hash',
 ] as const;
 
-function csvCell(v: unknown): string {
-  const s = v === null || v === undefined ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
 
 export async function exportTrail(walletId: string, format: 'csv' | 'json'): Promise<string> {
   const rows = await query<AuditRow>(

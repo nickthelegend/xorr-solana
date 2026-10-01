@@ -159,7 +159,7 @@ xstockRoutes.post('/xstocks/buy', async (c) => {
     amount: `$${outcome.usd.toFixed(2)}`,
     kind: 'trade',
     signature: outcome.signature,
-    payload: { orderId, venue: outcome.venue, slot: outcome.slot },
+    payload: { orderId, venue: outcome.venue, slot: outcome.slot, side: 'buy', symbol: outcome.symbol, units: outcome.filledUnits, price: outcome.fillPrice, usd: outcome.usd },
   }).catch((e) => log.error('[xstocks/buy] failed to write the audit row:', e));
 
   await notifyEntry({
@@ -239,11 +239,14 @@ xstockRoutes.post('/xstocks/sell/record', async (c) => {
         walletId: w.id,
         agent: 'You',
         action: `Sold ${sold.symbol}`,
-        detail: `${sold.units.toFixed(6)} ${sold.symbol} at $${sold.price.toFixed(2)} against the venue vault, at Jupiter's live quote. You signed it.`,
+        // A Jupiter swap the owner signs (2026-09-24); "against the venue vault" was the fork-era settlement.
+        detail: `${sold.units.toFixed(6)} ${sold.symbol} at $${sold.price.toFixed(2)}, swapped through Jupiter. You signed it.`,
         amount: `$${sold.usd.toFixed(2)}`,
         kind: 'trade',
         signature: body.signature,
-        payload: { orderId, venue: 'venue-vault', slot: sold.slot, side: 'sell' },
+        // `jupiter-route`, as the detail says: the payload kept the fork-era `venue-vault` until 2026-10-01, and the
+        // receipts file reads it.
+        payload: { orderId, venue: 'jupiter-route', slot: sold.slot, side: 'sell', symbol: sold.symbol, units: sold.units, price: sold.price, usd: sold.usd },
       },
       client,
     );

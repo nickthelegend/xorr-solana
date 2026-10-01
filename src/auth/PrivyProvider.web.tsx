@@ -53,6 +53,12 @@ const SOLANA_CONFIG: PrivyClientConfig = {
     accentColor: colors.ink,
     showWalletLoginFirst: false,
     walletChainType: 'solana-only',
+    /*
+     * Solana wallets only (2026-10-01). Privy's default list carries `coinbase_wallet` and `base_account`, and listing
+     * them builds their EVM SDKs at startup even under `solana-only`: Coinbase's opener-policy check then sent a HEAD for
+     * the page on every load, which the navigation aborted — two failed requests per page for wallets this app cannot use.
+     */
+    walletList: ['detected_solana_wallets', 'phantom', 'solflare', 'backpack', 'jupiter'],
   },
 };
 

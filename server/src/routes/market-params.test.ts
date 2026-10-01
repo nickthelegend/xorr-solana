@@ -155,6 +155,32 @@ describe('GET /market/stocks/history', () => {
     expect(vi.mocked(query).mock.calls[0]![1]).toEqual(['NVDAc', String(24 * 365)]);
     expect(r.body.points).toEqual([{ at: Date.parse('2026-09-13T10:00:00Z'), usd: 181.5 }]);
   });
+
+  /*
+   * The T-Tokens have seeded bars in `price_observations` and were refused as `not_an_equity` (2026-09-26), so every
+   * pre-IPO detail screen read "No chart yet". Served under the exact symbol Tessera writes; a case-folded one is not
+   * a symbol anybody issued and stays refused.
+   */
+  it('serves a Tessera T-Token by its exact symbol, in the same shape, and still refuses a case-folded one', async () => {
+    vi.mocked(query).mockResolvedValueOnce([
+      { at: new Date('2026-09-25T10:00:00Z'), usd: '421.5' },
+      { at: new Date('2026-09-25T11:00:00Z'), usd: '423' },
+    ] as never);
+    const r = await call('/market/stocks/history?symbol=T-SpaceX&hours=168');
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(vi.mocked(query).mock.calls[0]![1]).toEqual(['T-SpaceX', '168']);
+    expect(r.body.symbol).toBe('T-SpaceX');
+    expect(r.body.points).toEqual([
+      { at: Date.parse('2026-09-25T10:00:00Z'), usd: 421.5 },
+      { at: Date.parse('2026-09-25T11:00:00Z'), usd: 423 },
+    ]);
+    expect(r.body.observedSince).toBe(Date.parse('2026-09-25T10:00:00Z'));
+    expect(r.body.note).toContain('2 readings');
+
+    refused(await call('/market/stocks/history?symbol=t-spacex'), 404, 'not_an_equity');
+    refused(await call('/market/stocks/history?symbol=T-Nope'), 404, 'not_an_equity');
+    expect(query).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('GET /basename and GET /market/crosscheck', () => {

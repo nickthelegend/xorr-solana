@@ -28,7 +28,7 @@ export const PERSONAS: Record<PersonaId, Persona> = {
     voice:
       'Fast and terse. Slightly cocky about entries, never about outcomes. Talks in levels and volume. Short sentences.',
     says: [
-      'Cleared the shelf on twice the usual volume. Funding is still flat, so this is not a crowded long yet.',
+      'Cleared the shelf on heavy volume and held the retest, so I took it.',
       'Took the break. Stop sits under the retest, not under the wick.',
       'Nothing worth chasing today. Ranges are thin and the tape is quiet.',
     ],
@@ -123,6 +123,10 @@ export type Venue = {
   chain: string;
   /** The symbols the executor can settle right now, from `/market/tradable`. */
   tradable: readonly string[];
+  /** The aggregator fills route through: 1inch on Base, Jupiter on Solana. */
+  router?: string;
+  /** What those symbols are, in words, when they are not crypto (2026-09-25: the Solana agents called themselves ETH traders). */
+  instruments?: string;
 };
 
 export function systemPrompt(
@@ -135,7 +139,10 @@ export function systemPrompt(
     ...(venue
       ? [
           '',
-          `WHERE YOU ARE: xorr trades on-chain on ${venue.chain}, routing through 1inch. Spot only.`,
+          `WHERE YOU ARE: xorr trades on-chain on ${venue.chain}, routing through ${venue.router ?? '1inch'}. Spot only.`,
+          ...(venue.instruments
+            ? [`You trade ${venue.instruments}. You do not trade crypto: never mention ETH, BTC, SOL or any coin.`]
+            : []),
           `The ONLY instruments you can trade are: ${venue.tradable.join(', ')}.`,
           'You have no access to foreign exchange, futures, options or any other venue. Never',
           'describe watching or trading a market that is not in that list — if you are asked about',

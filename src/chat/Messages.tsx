@@ -9,6 +9,13 @@
  *
  * Nothing here is written for the screen. The rows are the thread (`conversations.ts`); who is added comes from the
  * executor's `/agents`, and the + makes an agent of your own (`app/agent/new.tsx`), which joins the four here.
+ *
+ * Hired or not, said on every agent (2026-09-25). The list is the whole roster, so an agent you never hired can still be
+ * asked a question — but every row was drawn alike, and someone who had hired nobody read four live conversations and
+ * asked why agents they never made had popped up. Now the roster's own `hired` flag decides how each is drawn: a hired
+ * agent carries a green "Hired" tag in the list and a green ring across the top, and leads both; one you have not hired
+ * is drawn quieter, with a "Not hired" tag. Until the roster has answered nothing is marked either way, rather than
+ * every agent flashing "Not hired" on the way in.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, TextInput, View, type TextStyle } from 'react-native';
@@ -16,7 +23,7 @@ import type { Href } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Icon } from '@/design/Icon';
 import { agentGradient } from '@/design/gradients';
-import { AgentOrb, Press, Text, signIn, space } from '@/ui';
+import { AgentOrb, Press, Tag, Text, alpha, radius, signIn, space } from '@/ui';
 import { repos } from '@/data';
 import { useAsync } from '@/data/useAsync';
 import { usePrivyIdentity } from '@/auth/usePrivyIdentity';
@@ -26,7 +33,7 @@ import { useNow } from '@/state/useNow';
 import { useThread } from '@/bot/thread';
 import type { ThreadMessage } from '@/bot/message';
 import { useChatAgents, useMadeAgents, type ChatAgent } from './agents';
-import { listTime, searchMessages, summaries, type ConversationSummary } from './conversations';
+import { hiredFirst, listTime, searchMessages, summaries, type ConversationSummary } from './conversations';
 import { GLASS, GlassButton } from './parts';
 import { useChatRoom, useChatTheme } from './chatTheme';
 import { chat, chatShadow, chatType } from './theme';
@@ -34,6 +41,20 @@ import { chat, chatShadow, chatType } from './theme';
 const AVATAR = GLASS;
 const ORB = 56 as const;
 const ORB_TILE = 84;
+/**
+ * The narrowest an orb's tile gets so the whole row fits on screen (2026-09-25): the ringed orb, and a name on two lines.
+ *
+ * At 84 the four agents and "New agent" are 444pt on a 402pt phone, so the row came to rest with the last tile cut
+ * through its middle — "New ag". Where every tile fits at this width or wider they share the row instead; only a row
+ * too long for that (agents of your own added) scrolls, and it ends on the same padding it starts with.
+ */
+const ORB_TILE_MIN = 70;
+/** The hired ring around an orb across the top, and the gap between it and the orb. */
+const RING = 2;
+const RING_GAP = 2;
+const RINGED = ORB + 2 * (RING + RING_GAP);
+/** How far an agent you have not hired recedes: still legible, plainly not one working for you. */
+const NOT_HIRED_OPACITY = 0.45;
 /**
  * A row's orb — a conversation, a search result, an agent to add: the smallest size the orb is drawn at. The same face
  * in every list, so an agent is one character wherever it appears.
@@ -76,22 +97,27 @@ export function Messages({ onClose, onOpen, onOpenScreen, footerInset }: Message
   const { room, following } = useChatRoom();
   const pickRoom = useChatTheme((s) => s.pick);
   const [query, setQuery] = useState('');
+  /** The orb row's own width — the drawer's, which on a wide browser is not the window's. */
+  const [rowWidth, setRowWidth] = useState(0);
 
   useEffect(() => {
     if (roster.data) remember(roster.data);
   }, [roster.data, remember]);
 
   const names = useMemo(() => agents.map((a) => a.name), [agents]);
-  const list = useMemo(() => summaries(messages, names, read), [messages, names, read]);
   const added = useMemo(
     () => new Set((roster.data ?? []).filter((a) => a.hired).map((a) => a.name)),
     [roster.data],
   );
-  // Added agents first across the top: they are the ones allowed to act for you.
-  const featured = useMemo(
-    () => [...agents].sort((a, b) => Number(added.has(b.name)) - Number(added.has(a.name))),
-    [agents, added],
+  // Hired agents first, in the list and across the top: they are the ones allowed to act for you.
+  const list = useMemo(
+    () => hiredFirst(summaries(messages, names, read), (s) => added.has(s.agent)),
+    [messages, names, read, added],
   );
+  const featured = useMemo(() => hiredFirst(agents, (a) => added.has(a.name)), [agents, added]);
+  /** Hired, not hired — or not known yet, while the roster is on its way or could not be read. */
+  const hiredOf = (agent: string): boolean | undefined => (roster.data ? added.has(agent) : undefined);
+  const tile = tileWidth(rowWidth, featured.length + 1);
   const initial = (name?.replace(/^@/, '') ?? address?.replace(/^0x/i, '') ?? '').charAt(0).toUpperCase();
 
   /* The drawer goes down first, so the screen it opens is not underneath it. */
@@ -172,42 +198,62 @@ export function Messages({ onClose, onOpen, onOpenScreen, footerInset }: Message
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              onLayout={(e) => setRowWidth(e.nativeEvent.layout.width)}
               contentContainerStyle={{ paddingHorizontal: space.s12, paddingTop: space.s14, paddingBottom: space.s18 }}
             >
-              {featured.map((agent) => (
-                <Press
-                  key={agent.id}
-                  onPress={() => onOpen(agent.name)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${agent.name}. Open the conversation`}
-                  style={{ width: ORB_TILE, alignItems: 'center', gap: space.s8 }}
-                >
-                  <AgentOrb gradient={agentGradient(agent.name)} size={ORB} face identity={agent.name} />
-                  <Text color={chat.inkSoft} style={chatType.small} align="center" numberOfLines={2}>
-                    {agent.name}
-                  </Text>
-                </Press>
-              ))}
+              {featured.map((agent) => {
+                const hired = hiredOf(agent.name);
+                return (
+                  <Press
+                    key={agent.id}
+                    onPress={() => onOpen(agent.name)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${agent.name}${hireWords(hired)}. Open the conversation`}
+                    style={{ width: tile, alignItems: 'center', gap: space.s6 }}
+                  >
+                    {/* The ring the list's "Hired" tag stands for; every orb sits in the same box, so the row stays level. */}
+                    <View style={[RING_BOX, { borderColor: hired ? chat.up : 'transparent' }]}>
+                      <AgentOrb
+                        gradient={agentGradient(agent.name)}
+                        size={ORB}
+                        face
+                        identity={agent.name}
+                        style={hired === false ? { opacity: NOT_HIRED_OPACITY } : undefined}
+                      />
+                    </View>
+                    <Text
+                      color={hired === false ? chat.muted : chat.inkSoft}
+                      style={chatType.small}
+                      align="center"
+                      numberOfLines={2}
+                    >
+                      {agent.name}
+                    </Text>
+                  </Press>
+                );
+              })}
               {/* The last orb makes a new one, where the agents are. */}
               <Press
                 onPress={signedOut ? goSignIn : makeAgent}
                 accessibilityRole="button"
                 accessibilityLabel="New agent. Make one of your own"
-                style={{ width: ORB_TILE, alignItems: 'center', gap: space.s8 }}
+                style={{ width: tile, alignItems: 'center', gap: space.s6 }}
               >
-                <View
-                  style={{
-                    width: ORB,
-                    height: ORB,
-                    borderRadius: ORB / 2,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: chat.glass,
-                    borderWidth: 1,
-                    borderColor: chat.glassBorder,
-                  }}
-                >
-                  <Icon name="plus" size={22} color={chat.accentDeep} strokeWidth={2.2} />
+                <View style={[RING_BOX, { borderColor: 'transparent' }]}>
+                  <View
+                    style={{
+                      width: ORB,
+                      height: ORB,
+                      borderRadius: ORB / 2,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: chat.glass,
+                      borderWidth: 1,
+                      borderColor: chat.glassBorder,
+                    }}
+                  >
+                    <Icon name="plus" size={22} color={chat.accentDeep} strokeWidth={2.2} />
+                  </View>
                 </View>
                 <Text color={chat.inkSoft} style={chatType.small} align="center" numberOfLines={2}>
                   New agent
@@ -223,6 +269,7 @@ export function Messages({ onClose, onOpen, onOpenScreen, footerInset }: Message
                   key={summary.agent}
                   summary={summary}
                   role={roleOf(agents, summary.agent)}
+                  hired={hiredOf(summary.agent)}
                   now={now}
                   onPress={() => onOpen(summary.agent)}
                 />
@@ -244,19 +291,66 @@ const HEADER = {
   paddingBottom: space.s6,
 } as const;
 
+/** The box every orb across the top sits in: a hired one's ring shows, anyone else's is transparent. */
+const RING_BOX = {
+  width: RINGED,
+  height: RINGED,
+  borderRadius: RINGED / 2,
+  borderWidth: RING,
+  alignItems: 'center',
+  justifyContent: 'center',
+} as const;
+
+/**
+ * How wide each tile across the top is. The full 84 where the row has room for it; shared evenly where every tile fits
+ * at `ORB_TILE_MIN` or wider, so the last one is never cut through its name; 84 again, scrolling, where even that is too
+ * wide. Before the row has been measured, 84.
+ */
+function tileWidth(rowWidth: number, count: number): number {
+  const room = rowWidth - 2 * space.s12;
+  if (rowWidth <= 0 || count * ORB_TILE <= room || count * ORB_TILE_MIN > room) return ORB_TILE;
+  return Math.floor(room / count);
+}
+
+/** What a screen reader hears after an agent's name, where the roster has said. */
+function hireWords(hired: boolean | undefined): string {
+  return hired === undefined ? '' : hired ? ', hired' : ', not hired';
+}
+
+/**
+ * Hired or not, in words beside the name. Green is the roster's own colour for "Hired" (`hiredBg` in the tokens) — a
+ * state, never a P&L reading — in the room's green so it holds on white and on black; "Not hired" asks for nothing.
+ */
+function HireTag({ hired }: { hired: boolean }) {
+  return (
+    <Tag
+      label={hired ? 'Hired' : 'Not hired'}
+      small
+      radius={radius.full}
+      colors={hired ? { bg: alpha(chat.up, 0.14), fg: chat.up } : { bg: chat.glass, fg: chat.muted }}
+      style={{ alignSelf: 'center', flexShrink: 0 }}
+    />
+  );
+}
+
 function roleOf(agents: readonly ChatAgent[], name: string): string {
   return agents.find((a) => a.name === name)?.role ?? '';
 }
 
-/** One conversation: the agent, its last line, when it moved, and a mark when something in it is new. */
+/**
+ * One conversation: the agent, its last line, when it moved, and a mark when something in it is new — and whether it
+ * is hired, as a tag by the name; one you have not hired is drawn quieter. Unmarked while that is not known.
+ */
 function ConversationRow({
   summary,
   role,
+  hired,
   now,
   onPress,
 }: {
   summary: ConversationSummary;
   role: string;
+  hired?: boolean;
   now: number;
   onPress: () => void;
 }) {
@@ -266,12 +360,21 @@ function ConversationRow({
     <Press
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${agent}${unread > 0 ? `, ${unread} new` : ''}. ${line}`}
+      accessibilityLabel={`${agent}${hireWords(hired)}${unread > 0 ? `, ${unread} new` : ''}. ${line}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: space.s12, paddingLeft: space.gutter }}
     >
       <View>
-        {/* The same face as the orb across the top, smaller: an agent is one character wherever it appears. */}
-        <AgentOrb gradient={agentGradient(agent)} size={ROW_ORB} face identity={agent} />
+        {/*
+          The same face as the orb across the top, smaller: an agent is one character wherever it appears. Only the orb
+          recedes for one not hired — the new-message dot beside it keeps its full colour.
+        */}
+        <AgentOrb
+          gradient={agentGradient(agent)}
+          size={ROW_ORB}
+          face
+          identity={agent}
+          style={hired === false ? { opacity: NOT_HIRED_OPACITY } : undefined}
+        />
         {unread > 0 ? (
           <View
             style={{
@@ -297,10 +400,16 @@ function ConversationRow({
           borderBottomColor: chat.hairline,
         }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: space.s8 }}>
-          <Text color={chat.ink} style={[chatType.rowTitle, { flex: 1 }]} numberOfLines={1}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.s8 }}>
+          <Text
+            color={hired === false ? chat.inkSoft : chat.ink}
+            style={[chatType.rowTitle, { flexShrink: 1 }]}
+            numberOfLines={1}
+          >
             {agent}
           </Text>
+          {hired !== undefined ? <HireTag hired={hired} /> : null}
+          <View style={{ flex: 1 }} />
           {last ? (
             <Text color={unread > 0 ? chat.accentDeep : chat.muted} style={chatType.small}>
               {listTime(last.at, now)}

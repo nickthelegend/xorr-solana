@@ -81,3 +81,35 @@ export function differences(
     .map((line, i) => ({ label: line.label, before: a[i]?.value ?? '', after: line.value }))
     .filter((d) => d.before !== d.after);
 }
+
+/**
+ * A change as one short phrase, with the words both sides share said once (2026-09-25).
+ *
+ * "75th percentile and above → 65th percentile and above" is wider than a phone, and as a row's value it pushed the
+ * setting's own name off the screen and was cut off itself. The shared words are not the change — the numbers are — so
+ * they are said once around it: "75th → 65th", then "percentile and above". Whole words only, so "$25" and "$50" share
+ * nothing rather than a "$", and "1 day" and "3 days" stay whole; each side always keeps at least one word of its own.
+ */
+export function changePhrase(
+  before: string,
+  after: string,
+): { lead: string; before: string; after: string; tail: string } {
+  const a = before.split(' ');
+  const b = after.split(' ');
+  let lead = 0;
+  while (lead < a.length - 1 && lead < b.length - 1 && a[lead] === b[lead]) lead++;
+  let tail = 0;
+  while (
+    tail < a.length - 1 - lead &&
+    tail < b.length - 1 - lead &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+  return {
+    lead: a.slice(0, lead).join(' '),
+    before: a.slice(lead, a.length - tail).join(' '),
+    after: b.slice(lead, b.length - tail).join(' '),
+    tail: a.slice(a.length - tail).join(' '),
+  };
+}

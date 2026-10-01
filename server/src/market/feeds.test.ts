@@ -16,6 +16,12 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+/*
+ * Each test imports the route's whole module graph after `vi.resetModules()`. A cold import of that graph from a slow
+ * disk passed vitest's 5s default on its own (2026-10-01): the test timed out on loading, not on anything it checks.
+ */
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock('../db/index.js', () => ({ query: vi.fn(), one: vi.fn() }));
 
 const { feedFor, priceable } = await import('./feeds.js');

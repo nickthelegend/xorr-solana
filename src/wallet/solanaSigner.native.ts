@@ -20,6 +20,10 @@ import {
 export type SolanaSigner = {
   address?: string;
   ready: boolean;
+  /** Privy's own word for where the wallet is (`connecting`, `needs-recovery`, …), so a wait can say what it waits on. */
+  status?: string;
+  /** What Privy said when the wallet failed to load — shown, not swallowed, so a stuck wallet says why. */
+  error?: string;
   /** Pass `prepared` for a transaction the executor built and co-signed; see solanaSigner.web.ts. */
   signAndSend: (tx: Transaction, prepared?: Prepared) => Promise<string>;
 };
@@ -47,5 +51,11 @@ export function useSolanaSigner(): SolanaSigner {
     [wallet, address],
   );
 
-  return { address, ready: solana.status === 'connected' && !!wallet, signAndSend };
+  return {
+    address,
+    ready: solana.status === 'connected' && !!wallet,
+    status: solana.status,
+    error: solana.status === 'error' ? solana.error : undefined,
+    signAndSend,
+  };
 }
