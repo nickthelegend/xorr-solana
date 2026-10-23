@@ -52,9 +52,11 @@ export const PUBLIC_PATHS: readonly string[] = [
   '/deposit/moonpay/webhook',
   // The app's chain calls, relayed so the RPC key stays on the server (server/src/routes/rpcRelay.ts).
   '/rpc',
+  // The xorr.finance waitlist (server/src/routes/waitlist.ts), public so a visitor can join before having an account.
+  '/waitlist',
 ];
 
-export const PUBLIC_PREFIXES: readonly string[] = ['/perp/', '/strategies/library'];
+export const PUBLIC_PREFIXES: readonly string[] = ['/perp/', '/strategies/library', '/waitlist/'];
 
 /** Does this path need a session? Query strings are ignored; the server routes on the path. */
 export function isPublicPath(path: string): boolean {

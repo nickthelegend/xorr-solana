@@ -122,6 +122,9 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
    * down and restarts it, turning a busy minute into an outage and killing in-flight runs.
    */
   if (path === '/health' || path === '/metrics') return next();
+  // The waitlist limits per address itself (`routes/waitlist.ts`): counted here, every landing-page visitor would share
+  // the one anonymous bucket the app's public market reads depend on.
+  if (path === '/waitlist' || path.startsWith('/waitlist/')) return next();
 
   const who = callerId(c);
   const limit = limitFor(path);
