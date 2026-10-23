@@ -6,6 +6,8 @@ export const SITE_URL = "https://xorr.finance";
 
 export const GITHUB_URL = "https://github.com/nickthelegend/xorr-solana";
 
-/** Applications go to the founder's WhatsApp, with a resume and links. */
-export const HIRING_WHATSAPP = "niveshgajengi";
-export const HIRING_PHONE_DISPLAY = "@niveshgajengi";
+/**
+ * Applications go to WhatsApp by username (2026-10-24): wa.me/<username> opens a chat without a phone number anywhere on
+ * the page.
+ */
+export const HIRING_WHATSAPP_USERNAME = "niveshgajengi";

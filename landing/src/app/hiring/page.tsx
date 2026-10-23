@@ -5,7 +5,7 @@ import { Reveal } from "@/components/motion/Reveal";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { HIRING_PHONE_DISPLAY, HIRING_WHATSAPP } from "@/lib/links";
+import { HIRING_WHATSAPP_USERNAME } from "@/lib/links";
 
 export const metadata: Metadata = {
   title: "We're hiring — xorr",
@@ -42,11 +42,12 @@ const ROLES = [
   },
 ];
 
+/** A WhatsApp chat with the founder, by username, with the message started for them. */
 function applyLink(role?: string) {
   const text = role
     ? `Hi! I'd like to apply to xorr for the ${role} role. Here's my resume and links:`
     : "Hi! I'd like to work on xorr. Here's my resume and links:";
-  return `https://wa.me/${HIRING_WHATSAPP}?text=${encodeURIComponent(text)}`;
+  return `https://wa.me/${HIRING_WHATSAPP_USERNAME}?text=${encodeURIComponent(text)}`;
 }
 
 export default function Hiring() {
@@ -94,8 +95,8 @@ export default function Hiring() {
           </Reveal>
           <Reveal immediate delay={1.05}>
             <p className="mt-4 text-[13px] text-ink/45">
-              DM <span className="whitespace-nowrap tabular-nums text-ink/75">{HIRING_PHONE_DISPLAY}</span> with your resume, GitHub or
-              portfolio, and one thing you shipped that you are proud of.
+              Message <span className="text-ink/75">@{HIRING_WHATSAPP_USERNAME}</span> on WhatsApp with your resume, GitHub or portfolio,
+              and one thing you shipped that you are proud of.
             </p>
           </Reveal>
         </section>
@@ -138,8 +139,7 @@ export default function Hiring() {
             <div className="rounded-[24px] border border-lime/20 bg-[linear-gradient(150deg,rgba(200,245,60,0.08),rgba(13,216,126,0.03))] p-6 text-center md:p-8">
               <p className="font-display text-[clamp(1.2rem,2vw,1.45rem)] font-medium tracking-[-0.02em]">Not on the list?</p>
               <p className="mx-auto mt-2 max-w-lg text-[14.5px] leading-relaxed text-ink/60">
-                If you can make xorr better, write anyway. Same number,{" "}
-                <span className="whitespace-nowrap">{HIRING_PHONE_DISPLAY}</span>, with your resume and links.
+                If you can make xorr better, write anyway: send your resume and links on WhatsApp.
               </p>
               <a
                 href={applyLink()}
