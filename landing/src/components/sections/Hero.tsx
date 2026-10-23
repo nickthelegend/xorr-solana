@@ -1,14 +1,16 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
 import { useRef, type ReactNode } from "react";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { LoopVideo } from "@/components/motion/LoopVideo";
 import { Reveal } from "@/components/motion/Reveal";
-import { CtaPill } from "@/components/ui/CtaPill";
 import { Icon } from "@/components/ui/Icon";
 import { XorrMark } from "@/components/XorrMark";
+import { Waitlist } from "@/components/waitlist/Waitlist";
+import { APP_URL } from "@/lib/links";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -90,13 +92,34 @@ export function Hero() {
 
       <motion.div
         style={{ y: copyY, opacity: copyOpacity }}
-        className="relative z-10 mt-auto flex w-full flex-col items-center px-6 pb-[max(56px,9vh)] text-center"
+        className="relative z-10 mt-auto flex w-full flex-col items-center px-6 pb-[max(56px,9vh)] pt-10 text-center"
       >
+        <Reveal immediate delay={0.35} className="mb-6">
+          <Link
+            href="/hiring"
+            className="group inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 py-1 pl-1 pr-3.5 text-[12.5px] text-ink/90 backdrop-blur-md transition-colors duration-200 hover:border-white/20 hover:text-ink"
+          >
+            <span className="rounded-full bg-lime px-2 py-0.5 text-[11px] font-semibold text-[#0c1003]">New</span>
+            We&apos;re hiring
+            <Icon name="arrowUpRight" className="size-3.5 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+          </Link>
+        </Reveal>
         <h1 className="text-balance font-display text-[clamp(2.6rem,6vw,5.4rem)] font-medium leading-[1.02] tracking-[-0.045em] text-ink">
           <BlurWords immediate delay={0.55} text={"A bot that trades while you\nget on with your life"} />
         </h1>
-        <Reveal immediate delay={1.3} className="mt-9">
-          <CtaPill />
+        <Reveal immediate delay={1.3} className="mt-9 flex w-full justify-center">
+          <Waitlist />
+        </Reveal>
+        <Reveal immediate delay={1.6} className="mt-5 flex items-center gap-5 text-[13px] text-ink/55">
+          <a href="#watch" className="inline-flex items-center gap-1.5 transition-colors duration-200 hover:text-ink">
+            <Icon name="play" className="size-3" strokeWidth={0} fill="currentColor" />
+            Watch the demo
+          </a>
+          <span aria-hidden className="h-3 w-px bg-white/15" />
+          <a href={APP_URL} className="inline-flex items-center gap-1 transition-colors duration-200 hover:text-ink">
+            Open the app
+            <Icon name="arrowUpRight" className="size-3.5" />
+          </a>
         </Reveal>
       </motion.div>
     </section>

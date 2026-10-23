@@ -1,6 +1,7 @@
 import { SmoothScroll } from "@/components/SmoothScroll";
 import { Cta } from "@/components/sections/Cta";
 import { Features } from "@/components/sections/Features";
+import { Films } from "@/components/sections/Films";
 import { Hero } from "@/components/sections/Hero";
 import { Overview } from "@/components/sections/Overview";
 import { Solution } from "@/components/sections/Solution";
@@ -14,6 +15,7 @@ export default function Home() {
         first={
           <div className="mx-2 mt-2 overflow-hidden rounded-[32px] border border-white/[0.06] bg-[#060608] sm:mx-3 sm:mt-3">
             <Hero />
+            <Films />
             <Overview />
           </div>
         }

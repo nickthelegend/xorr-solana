@@ -43,7 +43,7 @@ export function Overview() {
         <Card delay={0.1} className="flex min-h-[420px] flex-col">
           <Arc className="-left-36 top-[58%]" />
           <p className="relative max-w-[21rem] p-7 font-display text-[17px] leading-snug text-ink/90 md:p-9">
-            Every trade clears the same gates: your daily cap, the agent's own rules, a live Jupiter quote, and a
+            Every trade clears the same gates: your daily cap, the agent&apos;s own rules, a live Jupiter quote, and a
             permission that expires on its own.
           </p>
           <RuleTracks className="mt-auto w-full" />

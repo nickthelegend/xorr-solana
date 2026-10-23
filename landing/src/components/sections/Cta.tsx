@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
 import { useRef } from "react";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { Reveal } from "@/components/motion/Reveal";
-import { CtaPill } from "@/components/ui/CtaPill";
+import { Waitlist } from "@/components/waitlist/Waitlist";
 import { Icon } from "@/components/ui/Icon";
 import { XorrMark } from "@/components/XorrMark";
 import { APP_URL, GITHUB_URL } from "@/lib/links";
@@ -80,10 +81,10 @@ export function Cta() {
           <BlurWords text="Let the bot do the watching" />
         </h2>
         <Reveal delay={0.35}>
-          <p className="mt-4 text-[15px] text-ink/60">Your wallet, your keys, and a bot that trades inside the limits you set.</p>
+          <p className="mt-4 text-[15px] text-ink/60">Your wallet, your keys, and a bot that trades inside the limits you set. Get in line.</p>
         </Reveal>
-        <Reveal delay={0.5} className="mt-9">
-          <CtaPill />
+        <Reveal delay={0.5} className="mt-9 flex w-full justify-center">
+          <Waitlist />
         </Reveal>
       </div>
 
@@ -96,9 +97,14 @@ export function Cta() {
         >
           <Icon name="github" className="size-4" />
         </a>
-        <a href={APP_URL} className="transition-colors duration-200 hover:text-ink">
-          Open the app
-        </a>
+        <nav className="flex items-center gap-6">
+          <Link href="/hiring" className="transition-colors duration-200 hover:text-ink">
+            We&apos;re hiring
+          </Link>
+          <a href={APP_URL} className="transition-colors duration-200 hover:text-ink">
+            Open the app
+          </a>
+        </nav>
       </footer>
     </section>
   );

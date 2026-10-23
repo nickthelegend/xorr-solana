@@ -12,6 +12,10 @@ export type IconName =
   | "receipt"
   | "lock"
   | "wave"
+  | "play"
+  | "copy"
+  | "check"
+  | "users"
   | "github";
 
 /** 24px stroke glyphs. Exported so SVG scenes can place them without a nested component. */
@@ -65,6 +69,20 @@ export const ICON_PATHS: Record<Exclude<IconName, "github">, ReactNode> = {
     </>
   ),
   wave: <path d="M8.5 16.5a6 6 0 0 0 0-9M12 19a9.5 9.5 0 0 0 0-14M15.5 21.5a13 13 0 0 0 0-19" />,
+  play: <path d="M7 4.5v15l12.5-7.5L7 4.5Z" />,
+  copy: (
+    <>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+    </>
+  ),
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  users: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" />
+    </>
+  ),
 };
 
 type IconProps = { name: IconName } & Omit<SVGProps<SVGSVGElement>, "name">;
