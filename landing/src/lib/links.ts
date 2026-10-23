@@ -1,9 +1,6 @@
 /** The hosted app. "Open the app" goes here; xorr-solana.vercel.app redirects to it (2026-10-23). */
 export const APP_URL = "https://app.xorr.finance";
 
-/** The executor: the waitlist lives in its Postgres (server/src/routes/waitlist.ts). */
-export const API_URL = process.env.NEXT_PUBLIC_XORR_API ?? "https://executor-production-a672.up.railway.app";
-
 /** Where a page points someone who wants to share it. */
 export const SITE_URL = "https://xorr.finance";
 

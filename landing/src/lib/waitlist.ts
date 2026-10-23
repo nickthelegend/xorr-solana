@@ -1,9 +1,8 @@
-import { API_URL } from "@/lib/links";
 
 /** Your place in line, as the executor answers it. */
 export type Place = { refCode: string; referrals: number; position: number; total: number; already?: boolean };
 
-/** Places one referral moves you up. Mirrors BOOST_PER_REFERRAL in server/src/routes/waitlist.ts. */
+/** Places one referral moves you up. The server ranks with this same constant (src/lib/waitlist-server.ts). */
 export const BOOST_PER_REFERRAL = 10;
 
 const STORE_KEY = "xorr.waitlist.code";
@@ -17,12 +16,12 @@ async function read<T>(res: Response): Promise<T> {
 }
 
 export async function waitlistTotal(): Promise<number> {
-  const { total } = await read<{ total: number }>(await fetch(`${API_URL}/waitlist`));
+  const { total } = await read<{ total: number }>(await fetch("/api/waitlist"));
   return total;
 }
 
 export async function joinWaitlist(email: string, ref: string | null, website: string): Promise<Place> {
-  const res = await fetch(`${API_URL}/waitlist`, {
+  const res = await fetch("/api/waitlist", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, ref: ref ?? undefined, website }),
@@ -33,7 +32,7 @@ export async function joinWaitlist(email: string, ref: string | null, website: s
 }
 
 export async function placeFor(code: string): Promise<Place | null> {
-  const res = await fetch(`${API_URL}/waitlist/${encodeURIComponent(code)}`);
+  const res = await fetch(`/api/waitlist/${encodeURIComponent(code)}`);
   if (res.status === 404) return null;
   return read<Place>(res);
 }
