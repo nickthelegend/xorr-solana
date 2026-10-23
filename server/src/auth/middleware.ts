@@ -33,7 +33,6 @@ const PUBLIC_PATHS = new Set([
   // gating it means an unauthenticated visitor sees an equity with a number and no shape.
   '/market/stocks/history',
   '/yield/supply',
-  '/waitlist',
   /*
    * The verification console.
    *
@@ -81,8 +80,7 @@ const PUBLIC_PATHS = new Set([
  * making a reader sign in to look at a catalogue of results would be theatre. Note it is a prefix
  * under `/strategies`, which is NOT public: that one is the caller's own live strategies.
  */
-// The xorr.finance waitlist (2026-10-23): a visitor joining the line has no account yet.
-const PUBLIC_PREFIXES = ['/perp/', '/strategies/library', '/waitlist/'];
+const PUBLIC_PREFIXES = ['/perp/', '/strategies/library'];
 
 /**
  * The public surface, published.
