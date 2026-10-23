@@ -45,5 +45,5 @@ scene, there to show the pre-IPO market and the price check.
 ## Don't
 
 - Don't explain tech words (SPL, delegate, CPI, Token-2022). Say "permission", "wallet", "the blockchain".
-- Don't open any Base screen or app.xorr.finance — that is the Base app. The Solana app is https://xorr-solana.vercel.app.
+- The Solana app is https://app.xorr.finance (since 2026-10-23; the Base app moved to https://xorr-eth.vercel.app).
 - Don't go over 3 minutes. Cut scene 6 first.

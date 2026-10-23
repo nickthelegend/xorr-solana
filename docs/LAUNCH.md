@@ -6,7 +6,7 @@ Written 2026-09-23. What exists, what each store needs, and what only the owner 
 
 | | State |
 |---|---|
-| Web | https://xorr-solana.vercel.app — hosted, **Solana mainnet**, `main`; website https://xorr.finance |
+| Web | https://app.xorr.finance (xorr-solana.vercel.app redirects there) — hosted, **Solana mainnet**, `main`; website https://xorr.finance |
 | iOS | v1.0.0 (build 1), bundle `finance.xorr.app`. Release build runs on the iOS simulator against the hosted mainnet executor. |
 | Android | v1.0.0 (versionCode 1), package `finance.xorr.app`. Release APK runs on the emulator against the same stack. |
 | Build config | `eas.json`: `simulator`, `preview` (internal install), `production` (store) — all pointed at the hosted Solana stack |

@@ -7,7 +7,7 @@
 **Built for [STOCKLANA](https://hackathons.solana.com/hackathons/stocklana).** Tokenized US stocks trade around the clock
 on Solana; nobody can watch a market all night. xorr lets an agent do it for you — without ever holding your money.
 
-- **Live app:** https://xorr-solana.vercel.app — **Solana mainnet, real money.** Sign in with email, Google, X, GitHub
+- **Live app:** https://app.xorr.finance — **Solana mainnet, real money.** Sign in with email, Google, X, GitHub
   or a Solana wallet; bring your own SOL (fees) and USDC. Every transaction is on mainnet and on Solscan.
 - **Website:** https://xorr.finance
 - **Executor health:** https://executor-production-a672.up.railway.app/health
@@ -18,7 +18,7 @@ Since 2026-09-25 the hosted app runs on **Solana mainnet** with real money — n
 
 | | |
 |---|---|
-| App | https://xorr-solana.vercel.app (web) · iOS/Android v1.0.0 builds |
+| App | https://app.xorr.finance (web) · iOS/Android v1.0.0 builds |
 | Website | https://xorr.finance |
 | Executor | https://executor-production-a672.up.railway.app/health — `chain: solana-mainnet`, Helius RPC, Pyth and Tessera feeds |
 | Chain access from the app | the executor's `/rpc` relay (allowlisted methods; the RPC key stays on the server), falling back to a public node |

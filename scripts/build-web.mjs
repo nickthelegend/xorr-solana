@@ -333,6 +333,19 @@ writeFileSync(
   join(OUT, 'vercel.json'),
   JSON.stringify(
     {
+      /*
+       * The app lives at app.xorr.finance (2026-10-23). The Vercel URL it used to be shared on sends people there, path
+       * and query kept. Matched on the host, so this project's preview deployments still open as themselves. A 307
+       * while the domain move settles; make it permanent once it has.
+       */
+      redirects: [
+        {
+          source: '/:path*',
+          has: [{ type: 'host', value: 'xorr-solana.vercel.app' }],
+          destination: 'https://app.xorr.finance/:path*',
+          permanent: false,
+        },
+      ],
       rewrites: [{ source: '/(.*)', destination: '/index.html' }],
       headers: [
         {
