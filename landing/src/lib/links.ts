@@ -7,7 +7,7 @@ export const SITE_URL = "https://xorr.finance";
 export const GITHUB_URL = "https://github.com/nickthelegend/xorr-solana";
 
 /**
- * Applications go to WhatsApp by username (2026-10-24): wa.me/<username> opens a chat without a phone number anywhere on
- * the page.
+ * Applications go to Telegram (2026-10-24): t.me/<username>?text= opens a chat with the message started, and no phone
+ * number appears anywhere on the site.
  */
-export const HIRING_WHATSAPP_USERNAME = "niveshgajengi";
+export const HIRING_TELEGRAM = "nickthelegend88";

@@ -5,12 +5,12 @@ import { Reveal } from "@/components/motion/Reveal";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { Badge } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { HIRING_WHATSAPP_USERNAME } from "@/lib/links";
+import { HIRING_TELEGRAM } from "@/lib/links";
 
 export const metadata: Metadata = {
   title: "We're hiring — xorr",
   description:
-    "xorr builds AI agents that trade tokenized US stocks on Solana. We're hiring engineers, a designer and a growth lead. Send your resume on WhatsApp.",
+    "xorr builds AI agents that trade tokenized US stocks on Solana. We're hiring engineers, a designer and a growth lead. Send your resume on Telegram.",
   alternates: { canonical: "/hiring" },
 };
 
@@ -42,12 +42,12 @@ const ROLES = [
   },
 ];
 
-/** A WhatsApp chat with the founder, by username, with the message started for them. */
+/** A Telegram chat with the founder, with the message started for them. */
 function applyLink(role?: string) {
   const text = role
     ? `Hi! I'd like to apply to xorr for the ${role} role. Here's my resume and links:`
     : "Hi! I'd like to work on xorr. Here's my resume and links:";
-  return `https://wa.me/${HIRING_WHATSAPP_USERNAME}?text=${encodeURIComponent(text)}`;
+  return `https://t.me/${HIRING_TELEGRAM}?text=${encodeURIComponent(text)}`;
 }
 
 export default function Hiring() {
@@ -89,13 +89,13 @@ export default function Hiring() {
               rel="noopener noreferrer"
               className="group inline-flex h-[52px] items-center gap-2 rounded-full bg-ink px-6 text-[15px] font-medium text-[#07080a] shadow-[0_20px_50px_-20px_rgba(200,245,60,0.6)] transition-[background-color,transform] duration-150 ease-out hover:bg-white active:scale-[0.97]"
             >
-              Send your resume on WhatsApp
+              Send your resume on Telegram
               <Icon name="arrowUpRight" className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" strokeWidth={2} />
             </a>
           </Reveal>
           <Reveal immediate delay={1.05}>
             <p className="mt-4 text-[13px] text-ink/45">
-              Message <span className="text-ink/75">@{HIRING_WHATSAPP_USERNAME}</span> on WhatsApp with your resume, GitHub or portfolio,
+              Message <span className="text-ink/75">@{HIRING_TELEGRAM}</span> on Telegram with your resume, GitHub or portfolio,
               and one thing you shipped that you are proud of.
             </p>
           </Reveal>
@@ -139,7 +139,7 @@ export default function Hiring() {
             <div className="rounded-[24px] border border-lime/20 bg-[linear-gradient(150deg,rgba(200,245,60,0.08),rgba(13,216,126,0.03))] p-6 text-center md:p-8">
               <p className="font-display text-[clamp(1.2rem,2vw,1.45rem)] font-medium tracking-[-0.02em]">Not on the list?</p>
               <p className="mx-auto mt-2 max-w-lg text-[14.5px] leading-relaxed text-ink/60">
-                If you can make xorr better, write anyway: send your resume and links on WhatsApp.
+                If you can make xorr better, write anyway: send your resume and links on Telegram.
               </p>
               <a
                 href={applyLink()}
@@ -147,7 +147,7 @@ export default function Hiring() {
                 rel="noopener noreferrer"
                 className="mt-5 inline-flex h-11 items-center gap-1.5 rounded-full bg-ink px-5 text-[14px] font-medium text-[#07080a] transition-colors duration-200 hover:bg-white"
               >
-                Message us on WhatsApp
+                Message us on Telegram
                 <Icon name="arrowUpRight" className="size-4" strokeWidth={2} />
               </a>
             </div>
