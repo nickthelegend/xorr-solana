@@ -10,7 +10,7 @@ import { HIRING_TELEGRAM } from "@/lib/links";
 export const metadata: Metadata = {
   title: "We're hiring — xorr",
   description:
-    "xorr builds AI agents that trade tokenized US stocks on Solana. We're hiring engineers, a designer and a growth lead. Send your resume on Telegram.",
+    "xorr builds AI agents that trade tokenized US stocks and perps on Solana. We're hiring engineers, a designer and a growth lead. Send your resume on Telegram.",
   alternates: { canonical: "/hiring" },
 };
 
@@ -18,7 +18,7 @@ const ROLES = [
   {
     title: "Founding Engineer, Solana",
     tags: ["Rust", "Anchor", "Jupiter"],
-    body: "On-chain permissions, agent wallets, swaps through Jupiter and the pre-IPO pools. You have shipped a program to mainnet.",
+    body: "On-chain permissions, agent wallets, perps, swaps through Jupiter and the pre-IPO pools. You have shipped a program to mainnet.",
   },
   {
     title: "Full-stack Engineer",
@@ -78,8 +78,9 @@ export default function Hiring() {
           </h1>
           <Reveal immediate delay={0.7}>
             <p className="mt-5 max-w-xl text-[16px] leading-relaxed text-ink/60">
-              xorr runs AI agents that trade tokenized US stocks on Solana, each from its own wallet and inside rules the
-              owner sets. It is live on mainnet. We are a small team and we want a few more people who ship.
+              xorr runs AI agents that trade tokenized US stocks and perps on Solana, each from its own wallet and inside
+              rules the owner sets. We won the Stocklana hackathon and we&apos;re still building: a small team that wants a few
+              more people who ship.
             </p>
           </Reveal>
           <Reveal immediate delay={0.9} className="mt-9">

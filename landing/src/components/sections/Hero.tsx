@@ -94,7 +94,11 @@ export function Hero() {
         style={{ y: copyY, opacity: copyOpacity }}
         className="relative z-10 mt-auto flex w-full flex-col items-center px-6 pb-[max(56px,9vh)] pt-10 text-center"
       >
-        <Reveal immediate delay={0.35} className="mb-6">
+        <Reveal immediate delay={0.35} className="mb-6 flex flex-wrap items-center justify-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-lime/30 bg-black/55 py-1 pl-1 pr-3.5 text-[12.5px] text-ink/90 backdrop-blur-md">
+            <span className="rounded-full bg-[linear-gradient(135deg,#e6ff94,#c8f53c)] px-2 py-0.5 text-[11px] font-semibold text-[#0c1003]">Winner</span>
+            Stocklana hackathon
+          </span>
           <Link
             href="/hiring"
             className="group inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 py-1 pl-1 pr-3.5 text-[12.5px] text-ink/90 backdrop-blur-md transition-colors duration-200 hover:border-white/20 hover:text-ink"

@@ -15,7 +15,7 @@ const jakarta = Plus_Jakarta_Sans({
 });
 
 const description =
-  "AI agents that trade tokenized US stocks on Solana for you — each from its own wallet, inside rules you set and an on-chain permission you revoke in one tap. Non-custodial.";
+  "AI agents that trade tokenized US stocks and perps on Solana for you — each from its own wallet, inside rules you set and an on-chain permission you revoke in one tap. Non-custodial.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://xorr.finance"),

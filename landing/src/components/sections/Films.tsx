@@ -24,7 +24,7 @@ const FILMS = [
     length: "5:13",
     src: "/media/demo.mp4",
     poster: "/media/demo-poster.webp",
-    title: "xorr, start to finish, on Solana mainnet",
+    title: "xorr, start to finish: our Stocklana hackathon build",
   },
 ] as const;
 
@@ -56,7 +56,7 @@ export function Films() {
         </h2>
         <Reveal delay={0.3}>
           <p className="mt-4 max-w-md text-[15px] leading-relaxed text-ink/55">
-            Twenty seconds of why, then five minutes of the real thing: agents buying tokenized stocks on Solana mainnet.
+            Twenty seconds of why, then five minutes of the build that won the Stocklana hackathon: agents trading tokenized stocks on Solana.
           </p>
         </Reveal>
 

@@ -240,7 +240,7 @@ function Counter({ value, from, className, duration = 1.2 }: { value: number; fr
 function PlaceCard({ place, total, celebrate }: { place: Place; total: number; celebrate: boolean }) {
   const link = shareLink(place.refCode);
   const [copied, setCopied] = useState(false);
-  const text = `I'm #${place.position} in line for xorr: AI agents that trade tokenized US stocks on Solana. Jump the line with my link:`;
+  const text = `I'm #${place.position} in line for xorr: AI agents that trade tokenized US stocks and perps on Solana. Jump the line with my link:`;
 
   async function copy() {
     try {

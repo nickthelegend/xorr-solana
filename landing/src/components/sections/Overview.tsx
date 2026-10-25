@@ -20,7 +20,7 @@ export function Overview() {
         </h2>
         <Reveal delay={0.35}>
           <p className="mt-4 max-w-md text-[15px] leading-relaxed text-ink/55">
-            Tokenized US stocks on Solana: agents that buy through Jupiter, stops that hold, and a one-tap stop — all inside a permission you control.
+            Tokenized US stocks and perps on Solana: agents that trade through Jupiter, stops that hold, and a one-tap stop — all inside a permission you control.
           </p>
         </Reveal>
       </div>
