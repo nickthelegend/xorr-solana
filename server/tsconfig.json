@@ -29,5 +29,5 @@
    * `demo-autonomous-agent.ts` reaches into a dozen modules the agent owns, and the first thing a
    * reviewer does with it is run it — which is the wrong moment to find out a signature moved.
    */
-  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "api/**/*.ts"]
 }

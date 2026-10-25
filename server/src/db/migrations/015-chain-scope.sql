@@ -28,9 +28,15 @@ ALTER TABLE positions     ALTER COLUMN chain SET DEFAULT current_setting('xorr.c
 
 -- A session that does not set the chain itself — a psql prompt, or a new connection from the previous
 -- executor while a deploy drains it — gets the database's own: the chain of whoever migrated it.
+--
+-- Best effort (2026-10-25): a managed Postgres (Neon) does not let the database owner set a custom parameter on the
+-- database, which needs superuser from Postgres 15. The executor sets the chain on every connection itself, so the
+-- database default only serves an ad-hoc session; refusing the whole migration over it would leave no schema at all.
 DO $$
 BEGIN
   EXECUTE format('ALTER DATABASE %I SET xorr.chain_key = %L', current_database(), current_setting('xorr.chain_key'));
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'xorr.chain_key not set as a database default (no privilege); connections set it themselves';
 END
 $$;
 

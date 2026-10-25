@@ -8,8 +8,14 @@ const CHAIN_KEY = ON_SOLANA ? activeClusterKey() : EVM_CHAIN_KEY;
 
 const { Pool } = pg;
 
+/*
+ * Neon's direct URL first, when the Neon integration provides one (2026-10-25). Its `DATABASE_URL` is the pooled
+ * endpoint, and the pooler refuses the startup option below ("unsupported startup parameter in options").
+ */
 export const DATABASE_URL =
-  process.env.DATABASE_URL ?? `postgres://${process.env.USER ?? 'postgres'}@localhost:5432/xorr`;
+  process.env.DATABASE_URL_UNPOOLED ??
+  process.env.DATABASE_URL ??
+  `postgres://${process.env.USER ?? 'postgres'}@localhost:5432/xorr`;
 
 /*
  * Every connection says which chain it serves (PLAN.md 2.6).

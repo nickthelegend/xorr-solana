@@ -1,0 +1,25 @@
+# The executor's scheduler on Vercel (2026-10-25).
+#
+# A Vercel function has no long-running process to keep `startScheduler()`'s interval alive, so this calls the same tick
+# over HTTP every five minutes: strategies due, agent sweeps, alerts. `POST /ops/tick` is operator-only and skips itself
+# while a previous tick is still running. GitHub runs scheduled workflows from the default branch only.
+name: executor tick
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+concurrency:
+  group: executor-tick
+  cancel-in-progress: false
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Tick
+        env:
+          TOKEN: ${{ secrets.XORR_OPERATOR_TOKEN }}
+        run: |
+          curl -fsS --max-time 300 -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            https://api.xorr.finance/ops/tick
