@@ -46,7 +46,7 @@ export function Hero() {
           initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 1.08, filter: "blur(28px)" }}
           animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
           transition={{ duration: 1.8, ease: EASE }}
-          className="relative h-full w-full [mask-image:radial-gradient(78%_72%_at_50%_42%,#000_48%,transparent_100%)]"
+          className="relative h-full w-full [mask-image:linear-gradient(180deg,#000_0%,#000_52%,transparent_97%),radial-gradient(85%_80%_at_50%_40%,#000_55%,transparent_100%)] [mask-composite:intersect] [-webkit-mask-composite:source-in]"
         >
           <div className="absolute inset-0 animate-float-slow motion-reduce:animate-none">
             {/* The ChatGPT still, animated by Gemini. Its poster is the film's own first frame, so nothing jumps when it starts. */}
