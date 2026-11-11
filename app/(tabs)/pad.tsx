@@ -8,12 +8,12 @@ import { canAnswer, isReceipt, type Signal } from '@/pad/signals';
 
 export default function Pad() {
   const pad = usePad();
-  const [url, setUrl] = useState('');
+  const [urlDraft, setUrlDraft] = useState<string>();
+  const url = urlDraft ?? pad.url;
   const [token, setToken] = useState('');
   const [saving, setSaving] = useState(false);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const params = useLocalSearchParams<{ signal?: string }>();
-  useEffect(() => { if (pad.url) setUrl(pad.url); }, [pad.url]);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   const signals = Object.values(pad.queue.signals).sort((a, b) => a.id === params.signal ? -1 : b.id === params.signal ? 1 : b.expiresAt - a.expiresAt);
   return <Screen tabBar>
@@ -33,10 +33,10 @@ export default function Pad() {
       </View>
       <Text variant="cardTitle">Desk link</Text>
       <Text variant="secondary" color={colors.ink55}>{pad.desk === 'disconnected' && !pad.url ? 'Setup required: desk URL and pad token' : pad.desk}</Text>
-      <Field label="Desk URL" value={url} onChangeText={setUrl} placeholder="https://your-desk.your-tailnet.ts.net" />
+      <Field label="Desk URL" value={url} onChangeText={setUrlDraft} placeholder="https://your-desk.your-tailnet.ts.net" />
       <Field label="Pad token" value={token} onChangeText={setToken} placeholder={pad.url ? 'Stored securely · enter to replace' : 'Enter the desk pad token'} secure />
       <Button label="Save and connect desk" loading={saving} disabled={!url || !token} onPress={async () => { setSaving(true); try { await pad.save({ url, token }); setToken(''); } finally { setSaving(false); } }} />
-      {pad.url ? <Button label="Forget desk" variant="ghost" onPress={async () => { await pad.forget(); setUrl(''); setToken(''); }} /> : null}
+      {pad.url ? <Button label="Forget desk" variant="ghost" onPress={async () => { await pad.forget(); setUrlDraft(''); setToken(''); }} /> : null}
       {pad.error ? <Text variant="secondary" color={colors.down} accessibilityLiveRegion="polite">{pad.error}</Text> : null}
       <Text variant="cardTitle">Trade signals</Text>
       {!signals.length ? <Text variant="secondary" color={colors.ink55}>{pad.desk === 'connected' ? 'No trade signals from this desk.' : 'Connect your desk to read pending signals.'}</Text> : null}

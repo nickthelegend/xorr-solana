@@ -16,7 +16,7 @@
  * Both go through `deepRouteFor`, so a tap lands on the audit row or the asset where the push
  * carried enough to name one, and on the kind's own screen where it did not.
  */
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { deepRouteFor, type PushPayload } from './routes';
@@ -42,19 +42,19 @@ export function useNotificationRoute(): void {
   const handled = useRef<string | undefined>(undefined);
   const cold = Notifications.useLastNotificationResponse();
 
-  function open(response: Notifications.NotificationResponse) {
+  const open = useCallback((response: Notifications.NotificationResponse) => {
     const payload = payloadOf(response);
     const pad = padNotificationAction(payload, response.actionIdentifier);
     router.push((pad?.route ?? deepRouteFor(payload)) as never);
     if (pad?.action) void padRuntime.answerNotification(pad.id, pad.action);
-  }
+  }, [router]);
 
   useEffect(() => {
     const id = cold?.notification?.request?.identifier;
     if (!cold || !id || handled.current === id) return;
     handled.current = id;
     open(cold);
-  }, [cold, router]);
+  }, [cold, open]);
 
   useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
@@ -66,5 +66,5 @@ export function useNotificationRoute(): void {
       open(response);
     });
     return () => sub.remove();
-  }, [router]);
+  }, [open]);
 }
