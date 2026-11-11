@@ -2,6 +2,7 @@
  * Root layout. animations.md: "Screen transitions — use the platform default push/present.
  * Don't author custom ones."
  */
+import { PadSession } from '@/pad/usePad';
 import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { Stack, router, usePathname } from 'expo-router';
@@ -176,6 +177,7 @@ export default function RootLayout() {
         <WalletHydration />
         <DeviceRegistration />
         <AgentTradeAlerts />
+        <PadSession />
         {/* The app is true-black by design; the OS theme never gets to change it. */}
         <StatusBar style="light" />
         {/*
