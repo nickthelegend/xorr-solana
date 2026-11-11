@@ -18,7 +18,7 @@ export class PadDesk {
       if (this.socket !== ws || typeof data !== 'string' || data.length > 1048576) return;
       try { this.event(JSON.parse(data)); } catch { this.state('Setup required: compatible desk events'); }
     };
-    ws.onerror = () => { this.state('Setup required: reachable desk URL and valid pad token'); ws.close(); };
+    ws.onerror = () => { if (this.socket !== ws) return; this.state('Setup required: reachable desk URL and valid pad token'); ws.close(); };
     ws.onclose = () => {
       if (this.socket !== ws || this.stopped) return;
       this.state('Setup required: reconnecting to desk; check URL and token');
