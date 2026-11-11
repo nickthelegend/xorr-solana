@@ -28,6 +28,15 @@ export class PadDesk {
   openSocket(path: string): WebSocket {
     return new WebSocket(this.settings.url.replace(/^http/, 'ws') + path, ['xorrpad', `pad-token.${this.settings.token}`]);
   }
+  async snapshot(): Promise<unknown> {
+    try {
+      const response = await fetch(this.settings.url + '/signals', { headers: { 'x-pad-token': this.settings.token }, signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (!Array.isArray(body.signals)) throw new Error();
+      return { type: 'snapshot', signals: body.signals };
+    } catch { throw new Error('Setup required: reachable desk URL and valid pad token'); }
+  }
   async post(path: string, body: unknown = {}): Promise<Record<string, unknown>> {
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
     try {

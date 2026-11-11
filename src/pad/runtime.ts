@@ -4,6 +4,8 @@ import { signPadRequest } from '../wallet/padRequest';
 import { PadBle, type BleState } from './ble';
 import { clearSettings, readSettings, saveSettings, validateSettings, type PadSettings } from './settings';
 import { canAnswer, emptySignals, isSignal, reduceSignals, type SignalState, type WalletRequest } from './signals';
+import { noticeFor } from './notificationModel';
+import { postPadNotice, preparePadNotifications } from './notifications';
 
 type State = { link: BleState; desk: string; url: string; queue: SignalState; busy?: string; error?: string };
 export const usePadState = create<State>(() => ({ link: { state: 'disconnected' }, desk: 'disconnected', url: '', queue: emptySignals() }));
@@ -12,8 +14,18 @@ class PadRuntime {
   private desk?: PadDesk;
   private generation = 0;
   private running = false;
+  private noticed = new Set<string>();
   private ble = new PadBle({ state: link => usePadState.setState({ link }), record: () => {} });
-  private event = (event: unknown) => { usePadState.setState(s => ({ queue: reduceSignals(s.queue, event) })); };
+  private event = (event: unknown) => {
+    usePadState.setState(s => ({ queue: reduceSignals(s.queue, event) }));
+    for (const signal of Object.values(usePadState.getState().queue.signals)) {
+      const notice = noticeFor(signal);
+      if (!notice || this.noticed.has(notice.key)) continue;
+      this.noticed.add(notice.key);
+      if (this.noticed.size > 1024) this.noticed.delete(this.noticed.values().next().value!);
+      void postPadNotice(notice).catch(() => this.error(new Error('Setup required: allow local notifications in phone settings')));
+    }
+  };
   async start() {
     if (this.running) return;
     this.running = true;
@@ -27,6 +39,7 @@ class PadRuntime {
       await saveSettings(checked);
       this.generation++;
       this.connect(checked);
+      await preparePadNotifications(true);
     } catch (error) { this.error(error); }
   }
   private connect(settings: PadSettings) {
@@ -35,6 +48,18 @@ class PadRuntime {
     this.desk = new PadDesk(settings, this.event, desk => usePadState.setState({ desk }));
     this.desk.connect();
   }
+  async answerNotification(id: string, action: 'accept' | 'refuse') {
+    try {
+      const settings = await readSettings();
+      if (!settings) throw new Error('Setup required: save the desk URL and pad token');
+      if (!this.desk) this.connect(settings);
+      const desk = this.desk!;
+      const event = await desk.snapshot();
+      if (desk !== this.desk) return;
+      this.event(event);
+      await this.answer(id, action, true);
+    } catch (error) { this.error(error); }
+  }
   async forget() {
     this.generation++; this.desk?.close(); this.desk = undefined;
     usePadState.setState({ url: '', queue: emptySignals(), error: undefined });
@@ -42,10 +67,10 @@ class PadRuntime {
   }
   pair = () => this.ble.pair();
   disconnect = () => this.ble.stop();
-  async answer(id: string, action: 'accept' | 'refuse') {
+  async answer(id: string, action: 'accept' | 'refuse', refreshed = false) {
     const current = usePadState.getState();
     const signal = current.queue.signals[id];
-    if (current.busy || !signal || !canAnswer(signal) || current.desk !== 'connected' || !this.desk) return;
+    if (current.busy || !signal || !canAnswer(signal) || (!refreshed && current.desk !== 'connected') || !this.desk) return;
     const desk = this.desk;
     usePadState.setState({ busy: id, error: undefined });
     try {

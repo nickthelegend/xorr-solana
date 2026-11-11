@@ -20,6 +20,8 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { deepRouteFor, type PushPayload } from './routes';
+import { padNotificationAction } from '../pad/notificationModel';
+import { padRuntime } from '../pad/runtime';
 
 /** The payload the executor attached, as expo-notifications hands it back. */
 function payloadOf(response: Notifications.NotificationResponse | null | undefined): PushPayload | undefined {
@@ -40,11 +42,18 @@ export function useNotificationRoute(): void {
   const handled = useRef<string | undefined>(undefined);
   const cold = Notifications.useLastNotificationResponse();
 
+  function open(response: Notifications.NotificationResponse) {
+    const payload = payloadOf(response);
+    const pad = padNotificationAction(payload, response.actionIdentifier);
+    router.push((pad?.route ?? deepRouteFor(payload)) as never);
+    if (pad?.action) void padRuntime.answerNotification(pad.id, pad.action);
+  }
+
   useEffect(() => {
     const id = cold?.notification?.request?.identifier;
     if (!cold || !id || handled.current === id) return;
     handled.current = id;
-    router.push(deepRouteFor(payloadOf(cold)) as never);
+    open(cold);
   }, [cold, router]);
 
   useEffect(() => {
@@ -54,7 +63,7 @@ export function useNotificationRoute(): void {
       // navigation per notification, whichever noticed it first.
       if (handled.current === id) return;
       handled.current = id;
-      router.push(deepRouteFor(payloadOf(response)) as never);
+      open(response);
     });
     return () => sub.remove();
   }, [router]);
