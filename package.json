@@ -18,7 +18,8 @@
     "build:base": "node scripts/build-base.mjs",
     "deploy:web": "node scripts/build-web.mjs && cd dist-web && vercel link --yes --project xorr-eth && vercel deploy --prod --yes",
     "deploy:web:solana": "node scripts/build-web.mjs && cd dist-web && vercel link --yes --project xorr-solana && vercel deploy --prod --yes",
-    "deploy:executor": "node scripts/deploy-executor.mjs"
+    "deploy:executor": "node scripts/deploy-executor.mjs",
+    "test:pad": "vitest run --config vitest.pad.config.mts --disableConsoleIntercept"
   },
   "dependencies": {
     "@ethersproject/shims": "^5.8.0",
