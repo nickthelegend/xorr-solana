@@ -69,3 +69,5 @@ dist-base/
 dist/
 dist-web/
 /dist-mobile
+# Loom's local state (event log, attachments, machine config)
+.loom/
