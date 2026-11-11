@@ -13,7 +13,7 @@ export type SignalState = { signals: Record<string, Signal>; requests: Record<st
 export const emptySignals = (): SignalState => ({ signals: {}, requests: {} });
 const states = new Set(['proposed','awaiting','auto_accepted','accepted','signed','executed','refused','expired','failed']);
 const terminal = new Set(['executed','refused','expired','failed']);
-export const validSignalId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id);
+export const validSignalId = (id: unknown): id is string => typeof id === 'string' && !['__proto__','prototype','constructor'].includes(id) && /^[A-Za-z0-9_-]{1,128}$/.test(id);
 export function isSignal(value: unknown): value is Signal {
   if (!value || typeof value !== 'object') return false;
   const s = value as Signal;

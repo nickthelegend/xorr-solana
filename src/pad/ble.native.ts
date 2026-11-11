@@ -9,6 +9,8 @@ export class PadBle {
   private device?: Device;
   private monitor?: Subscription;
   private disconnect?: Subscription;
+  private radio?: Subscription;
+  private cancelRadio?: () => void;
   private timer?: ReturnType<typeof setTimeout>;
   private idle?: ReturnType<typeof setTimeout>;
   private framer = new PadFramer();
@@ -30,18 +32,29 @@ export class PadBle {
       const { BleManager: Manager } = await import('react-native-ble-plx');
       if (generation !== this.generation) return;
       const manager = this.manager = new Manager();
-      if (await manager.state() !== 'PoweredOn') throw new Error('Bluetooth');
+      await new Promise<void>((resolve, reject) => {
+        this.cancelRadio = () => reject(new Error('Cancelled'));
+        this.timer = setTimeout(() => reject(new Error('Bluetooth')), 10000);
+        this.radio = manager.onStateChange(state => {
+          if (state === 'PoweredOn') { clearTimeout(this.timer); resolve(); }
+          if (state === 'Unauthorized' || state === 'Unsupported') { clearTimeout(this.timer); reject(new Error('Bluetooth')); }
+        }, true);
+      });
+      this.radio?.remove(); this.radio = undefined; this.cancelRadio = undefined;
+      if (generation !== this.generation) return;
       this.callbacks.state({ state: 'scanning' });
       this.timer = setTimeout(() => { void this.fail('Setup required: a nearby USB-powered xorrpad advertising Bluetooth'); }, 15000);
-      manager.startDeviceScan([SERVICE], null, (error, found) => {
-        if (generation !== this.generation) return;
+      let selected = false;
+      await manager.startDeviceScan([SERVICE], null, (error, found) => {
+        if (generation !== this.generation || selected) return;
         if (error) { void this.fail('Setup required: Bluetooth permission and a powered-on radio'); return; }
         if (!found) return;
-        manager.stopDeviceScan(); clearTimeout(this.timer);
+        selected = true;
+        void manager.stopDeviceScan().catch(() => undefined); clearTimeout(this.timer);
         this.callbacks.state({ state: 'connecting' });
-        void this.connect(found, generation).catch(() => this.fail('Setup required: reconnect the USB-powered pad'));
+        void this.connect(found, generation).catch(() => { if (generation === this.generation) return this.fail('Setup required: reconnect the USB-powered pad'); });
       });
-    } catch { await this.fail('Setup required: Bluetooth permission, Bluetooth enabled, and a development build'); }
+    } catch { if (generation === this.generation) await this.fail('Setup required: Bluetooth permission, Bluetooth enabled, and a development build'); }
   }
   private async connect(found: Device, generation: number) {
     let device = await found.connect({ requestMTU: 247, timeout: 10000 });
@@ -79,20 +92,24 @@ export class PadBle {
         if (generation !== this.generation) throw new Error('Pad disconnected; input was not replayed');
         await device.writeCharacteristicWithResponseForService(SERVICE, RX, Buffer.from(chunk).toString('base64'));
       }
+    }).catch(async error => {
+      if (generation === this.generation) await this.fail('Setup required: reconnect after a Bluetooth write failure');
+      throw error;
     }).finally(() => { this.queued -= bytes.length; });
     this.tail = operation.catch(() => undefined);
     return operation;
   }
-  private async fail(error: string) { await this.stop(); this.callbacks.state({ state: 'disconnected', error }); }
+  private async fail(error: string) { const generation = this.generation + 1; await this.stop(); if (generation === this.generation) this.callbacks.state({ state: 'disconnected', error }); }
   async stop(): Promise<void> {
     this.generation++; clearTimeout(this.timer); clearTimeout(this.idle);
-    this.framer.reset(); this.monitor?.remove(); this.disconnect?.remove();
-    this.monitor = undefined; this.disconnect = undefined;
+    this.cancelRadio?.(); this.cancelRadio = undefined;
+    this.framer.reset(); this.monitor?.remove(); this.disconnect?.remove(); this.radio?.remove();
+    this.monitor = undefined; this.disconnect = undefined; this.radio = undefined;
     const device = this.device, manager = this.manager;
     this.device = undefined; this.manager = undefined;
-    manager?.stopDeviceScan();
+    await manager?.stopDeviceScan().catch(() => undefined);
     await device?.cancelConnection().catch(() => undefined);
-    await manager?.destroy();
+    await manager?.destroy().catch(() => undefined);
     this.callbacks.state({ state: 'disconnected' });
   }
 }

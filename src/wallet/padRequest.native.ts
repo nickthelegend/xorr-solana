@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { Buffer } from 'buffer';
-import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Connection, PublicKey, VersionedTransaction, clusterApiUrl } from '@solana/web3.js';
 import { transactionRequestUrl, type WalletRequest } from '../pad/signals';
 
 /** Open the desk's Solana Pay request through MWA. The desk validates and submits the signed bytes. */
@@ -22,8 +22,11 @@ export async function signPadRequest(request: WalletRequest, network?: string): 
       if (typeof body.transaction !== 'string' || body.transaction.length > 4096) throw new Error('Invalid desk transaction');
       const tx = VersionedTransaction.deserialize(Buffer.from(body.transaction, 'base64'));
       if (!tx.message.staticAccountKeys[0]?.equals(owner)) throw new Error('Desk transaction owner differs');
+      const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
+      if (!(await connection.isBlockhashValid(tx.message.recentBlockhash)).value) throw new Error('Setup required: a fresh transaction on Solana devnet');
+      const asked = Buffer.from(tx.message.serialize());
       const [signed] = await wallet.signTransactions({ transactions: [tx] });
-      if (!signed || !Buffer.from(signed.message.serialize()).equals(Buffer.from(tx.message.serialize()))) throw new Error('Wallet returned another transaction');
+      if (!signed || !Buffer.from(signed.message.serialize()).equals(asked)) throw new Error('Wallet returned another transaction');
       return Buffer.from(signed.serialize()).toString('base64');
     });
   } catch (error) {

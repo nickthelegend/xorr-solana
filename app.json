@@ -58,7 +58,8 @@
         "react-native-ble-plx",
         {
           "isBackgroundEnabled": false,
-          "bluetoothAlwaysPermission": "Allow xorr to pair with your xorrpad and relay pad events to your desk."
+          "bluetoothAlwaysPermission": "Allow xorr to pair with your xorrpad and relay pad events to your desk.",
+          "neverForLocation": true
         }
       ],
       "expo-dev-client"
