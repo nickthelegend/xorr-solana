@@ -1,5 +1,7 @@
 # xorr-solana — 100 ranked features, and what actually got built
 
+- **Pad v1 integration:** BLE pairing, SecureStore desk link, gated signal approvals, local notifications, Android devnet MWA signing and phone relay; [setup and verification](docs/pad/README.md) (hardware checks pending).
+
 **Purpose.** The prioritised feature list for the Stocklana hackathon (tokenized stocks on Solana),
 with an honest build status against every item. Ranked by **impact × feasibility × fit** — impact =
 would a judge notice, feasibility = buildable for real in the time, fit = strengthens the pitch
