@@ -6,16 +6,21 @@ import { clearSettings, readSettings, saveSettings, validateSettings, type PadSe
 import { canAnswer, emptySignals, isSignal, reduceSignals, type SignalState, type WalletRequest } from './signals';
 import { noticeFor } from './notificationModel';
 import { postPadNotice, preparePadNotifications } from './notifications';
+import { PadRelay } from './relay';
 
-type State = { link: BleState; desk: string; url: string; queue: SignalState; busy?: string; error?: string };
-export const usePadState = create<State>(() => ({ link: { state: 'disconnected' }, desk: 'disconnected', url: '', queue: emptySignals() }));
+type State = { link: BleState; desk: string; relay: string; url: string; queue: SignalState; busy?: string; error?: string };
+export const usePadState = create<State>(() => ({ link: { state: 'disconnected' }, desk: 'disconnected', relay: 'disconnected', url: '', queue: emptySignals() }));
 
 class PadRuntime {
   private desk?: PadDesk;
   private generation = 0;
   private running = false;
   private noticed = new Set<string>();
-  private ble = new PadBle({ state: link => usePadState.setState({ link }), record: () => {} });
+  private relay = new PadRelay(bytes => this.ble.write(bytes), relay => usePadState.setState({ relay }));
+  private ble = new PadBle({ state: link => {
+    usePadState.setState({ link });
+    if (link.state !== 'connected') this.relay.close();
+  }, record: (record, bytes) => this.relay.fromPad(this.desk, record, bytes) });
   private event = (event: unknown) => {
     usePadState.setState(s => ({ queue: reduceSignals(s.queue, event) }));
     for (const signal of Object.values(usePadState.getState().queue.signals)) {
@@ -43,6 +48,7 @@ class PadRuntime {
     } catch (error) { this.error(error); }
   }
   private connect(settings: PadSettings) {
+    this.relay.close();
     this.desk?.close();
     usePadState.setState({ url: settings.url, queue: emptySignals(), error: undefined });
     this.desk = new PadDesk(settings, this.event, desk => usePadState.setState({ desk }));
@@ -61,6 +67,7 @@ class PadRuntime {
     } catch (error) { this.error(error); }
   }
   async forget() {
+    this.relay.close();
     this.generation++; this.desk?.close(); this.desk = undefined;
     usePadState.setState({ url: '', queue: emptySignals(), error: undefined });
     try { await clearSettings(); } catch { this.error(new Error('Setup required: unlock SecureStore to forget the desk')); }
@@ -102,6 +109,6 @@ class PadRuntime {
     if (value.receipt) this.event({ type: 'receipt', receipt: value.receipt });
   }
   private error(error: unknown) { usePadState.setState({ error: error instanceof Error ? error.message : 'Setup required: reconnect the desk' }); }
-  stop() { this.running = false; this.generation++; this.desk?.close(); this.desk = undefined; void this.ble.stop(); }
+  stop() { this.running = false; this.generation++; this.relay.close(); this.desk?.close(); this.desk = undefined; void this.ble.stop(); }
 }
 export const padRuntime = new PadRuntime();

@@ -24,6 +24,7 @@ export default function Pad() {
         <Text variant="secondary" color={colors.ink55}>Link · {pad.link.state}</Text>
         <Text variant="secondary" color={colors.ink55}>Firmware · {pad.link.firmware ?? 'Connect to read'}</Text>
         <Text variant="secondary" color={colors.ink55}>USB powered</Text>
+        <Text variant="secondary" color={colors.ink55}>Relay · {pad.relay}</Text>
         <Text variant="secondarySm" color={colors.ink55} style={{ marginTop: space.s8 }}>Pair only with your trusted nearby pad.</Text>
       </SheetCard>
       {pad.link.error ? <Text variant="secondary" color={colors.down}>{pad.link.error}</Text> : null}
