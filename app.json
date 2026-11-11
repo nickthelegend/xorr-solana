@@ -53,7 +53,15 @@
       "expo-web-browser",
       "expo-image",
       "expo-font",
-      "./plugins/with-spaces-in-project-path"
+      "./plugins/with-spaces-in-project-path",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "bluetoothAlwaysPermission": "Allow xorr to pair with your xorrpad and relay pad events to your desk."
+        }
+      ],
+      "expo-dev-client"
     ],
     "experiments": {
       "typedRoutes": true

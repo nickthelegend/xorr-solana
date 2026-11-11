@@ -44,9 +44,9 @@ import { Text } from './Text';
 import { colors, space } from './tokens';
 
 /** The places on the bar. One: Swap and Messages are actions, and are never selected. */
-export type TabKey = 'home';
+export type TabKey = 'home' | 'pad';
 
-export const TAB_ORDER: readonly TabKey[] = ['home'];
+export const TAB_ORDER: readonly TabKey[] = ['home', 'pad'];
 
 const BAR_H = 60;
 const ITEM_H = 50;
@@ -109,6 +109,7 @@ export interface TabBarProps {
   /** The open place, or null when the screen is not Home. The layout decides; the bar draws it. */
   active: TabKey | null;
   onHome: () => void;
+  onPad?: () => void;
   /** Raises the swap sheet. */
   onSwap: () => void;
   /** Raises the Messages drawer. */
@@ -121,7 +122,7 @@ export interface TabBarProps {
   testID?: string;
 }
 
-export function TabBar({ active, onHome, onSwap, onMessages, unread = 0, hidden = false, style, testID }: TabBarProps) {
+export function TabBar({ active, onHome, onPad, onSwap, onMessages, unread = 0, hidden = false, style, testID }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
   const home = active === 'home';
@@ -171,6 +172,11 @@ export function TabBar({ active, onHome, onSwap, onMessages, unread = 0, hidden 
         <Item label={isSolana ? "Trade" : "Swap"} onPress={onSwap}>
           <SwapGlyph color={colors.ink55} />
         </Item>
+        {onPad ? <Item label="Pad" place selected={active === 'pad'} onPress={onPad} reduced={reduced}>
+          <Svg width={GLYPH} height={GLYPH} viewBox="0 0 24 24">
+            <Path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm2 4h2m6 0h2M7 12h2m6 0h2M7 17h2m6 0h2" {...stroked(active === 'pad' ? colors.ink : colors.ink55)} />
+          </Svg>
+        </Item> : null}
         <Item label="Messages" onPress={onMessages} badge={unread > 0 ? (unread > 9 ? '9+' : String(unread)) : undefined}>
           <ChatGlyph color={colors.ink55} />
         </Item>

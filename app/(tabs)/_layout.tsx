@@ -57,8 +57,9 @@ export default function TabsLayout() {
       <Tabs
         tabBar={() => desktop ? null : (
           <TabBar
-            active={pathname === '/' ? 'home' : null}
+            active={pathname === '/' ? 'home' : pathname === '/pad' ? 'pad' : null}
             onHome={() => router.navigate('/')}
+            onPad={() => router.navigate('/pad' as never)}
             onSwap={() => router.push(isSolana ? '/xstocks' : '/swap')}
             onMessages={() => show()}
             unread={unread}
@@ -72,6 +73,7 @@ export default function TabsLayout() {
         <Tabs.Screen name="markets" />
         <Tabs.Screen name="holdings" />
         <Tabs.Screen name="bot" />
+        <Tabs.Screen name="pad" />
       </Tabs>
     </View>
   );
