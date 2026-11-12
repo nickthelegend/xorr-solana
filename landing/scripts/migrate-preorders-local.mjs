@@ -11,6 +11,8 @@ if (!['postgres:', 'postgresql:'].includes(url.protocol) || !['127.0.0.1', 'loca
 const client = new pg.Client({ connectionString: raw });
 try {
   await client.connect();
-  await client.query(await readFile(new URL('../migrations/001_preorders.sql', import.meta.url), 'utf8'));
+  for (const file of ['001_preorders.sql', '002_email.sql']) {
+    await client.query(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
+  }
   console.log('Local preorders migration applied.');
 } finally { await client.end(); }

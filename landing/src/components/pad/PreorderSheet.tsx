@@ -146,7 +146,10 @@ function Checkout({ sku, build, config }: Props) {
       <p className="font-display text-[24px] text-lime">{order.status === 'refunded' ? 'Deposit refunded' : 'Deposit confirmed'}</p>
       <p className="text-[15px] text-ink/80">{PAD_MODELS[order.sku].name} · {PAD_BUILDS[order.build].name} · {Number(order.amount)} {order.cluster === 'devnet' ? 'mUSDC (test tokens)' : 'USDC'}</p>
       <a href={`https://explorer.solana.com/tx/${order.signature}?cluster=${order.cluster === 'devnet' ? 'devnet' : 'mainnet-beta'}`} target="_blank" rel="noreferrer" className="block text-[14px] text-lime underline underline-offset-4">View verified transfer</a>
-      <p className="text-[14px] text-ink/70">{order.email === 'sent' ? 'Your receipt was sent by email.' : 'Your payment is saved. Email delivery is pending.'}</p>
+      <p className="text-[14px] text-ink/70">{order.email === 'sent' ? 'Your receipt was sent by email.'
+        : order.email === 'unsubscribed' ? 'Your payment is saved. You are unsubscribed from all emails, including receipts.'
+        : order.email?.startsWith('Setup required:') ? 'Your payment is saved. Receipt email is waiting for email setup.'
+        : 'Your payment is saved. Email delivery is pending.'}</p>
     </div> : <div className="mt-6 space-y-4">
       <p className="text-[15px] text-ink/80">{Number(order.amount)} {order.cluster === 'devnet' ? 'mUSDC' : 'USDC'} · {PAD_MODELS[order.sku].name} · {PAD_BUILDS[order.build].name}</p>
       <p className="text-[14px] text-ink/70">Connect a wallet, or scan with a Solana Pay wallet on {order.cluster}. Pay once; this sheet checks for final confirmation automatically.</p>

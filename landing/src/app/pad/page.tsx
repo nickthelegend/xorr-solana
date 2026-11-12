@@ -204,7 +204,7 @@ export default function Pad() {
               <p className="mt-4 text-[15px] text-ink/60">xorrpad is coming. Join the xorr waitlist.</p>
             </Reveal>
             <Reveal delay={0.35} className="mt-9 flex w-full justify-center">
-              <Waitlist />
+              <Waitlist source="pad" />
             </Reveal>
           </div>
           <Footer />

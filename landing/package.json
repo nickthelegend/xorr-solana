@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/preorder.test.ts",
+    "test": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "migrate:preorders:local": "node scripts/migrate-preorders-local.mjs",
     "build:local": "node scripts/next-local.mjs build",
     "dev:local": "node scripts/next-local.mjs dev",

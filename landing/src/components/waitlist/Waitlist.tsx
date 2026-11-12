@@ -65,7 +65,7 @@ function useWaitlist() {
   return useSyncExternalStore(subscribe, () => state, () => SERVER_STATE);
 }
 
-export function Waitlist({ className = "" }: { className?: string }) {
+export function Waitlist({ className = "", source = "landing" }: { className?: string; source?: "pad" | "landing" }) {
   const { total, place, fresh } = useWaitlist();
   return (
     <div className={`flex w-full max-w-[520px] flex-col items-center ${className}`}>
@@ -90,7 +90,7 @@ export function Waitlist({ className = "" }: { className?: string }) {
             transition={{ duration: 0.5, ease: EASE }}
             className="flex w-full flex-col items-center"
           >
-            <JoinForm />
+            <JoinForm source={source} />
             <LiveCount total={total} />
           </motion.div>
         )}
@@ -99,7 +99,7 @@ export function Waitlist({ className = "" }: { className?: string }) {
   );
 }
 
-function JoinForm() {
+function JoinForm({ source }: { source: "pad" | "landing" }) {
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
   const [busy, setBusy] = useState(false);
@@ -113,7 +113,7 @@ function JoinForm() {
     setBusy(true);
     setError(null);
     try {
-      const place = await joinWaitlist(email, ref, website);
+      const place = await joinWaitlist(email, ref, website, source);
       set({ place, fresh: !place.already, total: Math.max(place.total, state.total ?? 0) });
     } catch (err) {
       setError(err instanceof WaitlistError ? err.message : "Could not reach the line. Check your connection and try again.");
@@ -278,6 +278,13 @@ function PlaceCard({ place, total, celebrate }: { place: Place; total: number; c
         </div>
       </div>
 
+      {place.email && place.email !== 'sent' && (
+        <p role="status" className="relative mt-4 text-[13px] leading-relaxed text-ink/70">
+          {place.email.startsWith('Setup required:') ? "Your place is saved. Welcome email is waiting for email setup."
+            : place.email === 'unsubscribed' ? "Your place is saved. You remain unsubscribed from all emails."
+            : "Your place is saved. Welcome email could not be sent yet."}
+        </p>
+      )}
       <p className="relative mt-4 text-[13.5px] leading-relaxed text-ink/65">
         Every friend who joins with your link moves you <span className="text-ink">{BOOST_PER_REFERRAL} places</span> up.
       </p>

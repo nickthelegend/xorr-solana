@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import { neon } from "@neondatabase/serverless";
+import { preorderDb } from "./preorder-db";
+import { sendWelcome } from "./email-server";
 import { BOOST_PER_REFERRAL, type Place } from "@/lib/waitlist";
 
 /*
@@ -16,9 +17,7 @@ const JOIN_LIMIT = 8;
 const JOIN_WINDOW_MINUTES = 10;
 
 function db() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL is not set");
-  return neon(url);
+  return { query: async (text: string, values?: unknown[]) => (await preorderDb().query(text, values)).rows };
 }
 
 /** One person, one row: trimmed and lowercased. Undefined when it is not an email address. */
@@ -43,7 +42,7 @@ export function isRefCode(raw: unknown): raw is string {
 /** The caller's address, hashed with a per-deployment salt so the table never holds an IP. */
 export function ipHash(request: Request): string {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
-  const salt = process.env.WAITLIST_IP_SALT ?? process.env.DATABASE_URL ?? "";
+  const salt = process.env.WAITLIST_IP_SALT ?? process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
   return createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 32);
 }
 
@@ -73,10 +72,10 @@ export async function placeOf(code: string): Promise<Place | undefined> {
 }
 
 export type JoinResult =
-  | { ok: true; place: Place; created: boolean }
+  | { ok: true; place: Place; created: boolean; email: string }
   | { ok: false; status: number; error: string; detail: string };
 
-export async function join(input: { email: unknown; ref: unknown; website: unknown }, ip: string): Promise<JoinResult> {
+export async function join(input: { email: unknown; ref: unknown; website: unknown; source?: unknown }, ip: string): Promise<JoinResult> {
   // A field no person sees. A form that fills it is a bot.
   if (typeof input.website === "string" && input.website.length > 0) {
     return { ok: false, status: 400, error: "bad_request", detail: "That did not look like a person." };
@@ -84,10 +83,18 @@ export async function join(input: { email: unknown; ref: unknown; website: unkno
   const email = normalizeEmail(input.email);
   if (!email) return { ok: false, status: 400, error: "invalid_email", detail: "That does not look like an email address." };
 
+  const source = input.source === 'pad' ? 'pad' : 'landing';
+  async function saved(code: string, created: boolean): Promise<JoinResult> {
+    const place = (await placeOf(code))!;
+    // Retrying a join retries a failed/setup-skipped welcome, but never resubscribes an address.
+    let delivery: string;
+    try { delivery = await sendWelcome(email!, place); } catch { delivery = 'failed'; }
+    return { ok: true, place, created, email: delivery };
+  }
   const sql = db();
   // Already in line: the same place, not a second one.
   const existing = (await sql.query("SELECT ref_code FROM waitlist WHERE email = $1", [email])) as { ref_code: string }[];
-  if (existing[0]) return { ok: true, place: (await placeOf(existing[0].ref_code))!, created: false };
+  if (existing[0]) return saved(existing[0].ref_code, false);
 
   const recent = (await sql.query(
     `SELECT count(*)::int AS n FROM waitlist WHERE ip_hash = $1 AND created_at > now() - interval '${JOIN_WINDOW_MINUTES} minutes'`,
@@ -108,15 +115,15 @@ export async function join(input: { email: unknown; ref: unknown; website: unkno
   for (let attempt = 0; attempt < 3; attempt++) {
     const inserted = (await sql.query(
       `INSERT INTO waitlist (email, ref_code, referred_by, ip_hash, source)
-       VALUES ($1, $2, $3, $4, 'landing')
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT DO NOTHING
        RETURNING ref_code`,
-      [email, newRefCode(), referrer, ip],
+      [email, newRefCode(), referrer, ip, source],
     )) as { ref_code: string }[];
-    if (inserted[0]) return { ok: true, place: (await placeOf(inserted[0].ref_code))!, created: true };
+    if (inserted[0]) return saved(inserted[0].ref_code, true);
     // Lost a race with the same email arriving twice at once: answer with that row.
     const raced = (await sql.query("SELECT ref_code FROM waitlist WHERE email = $1", [email])) as { ref_code: string }[];
-    if (raced[0]) return { ok: true, place: (await placeOf(raced[0].ref_code))!, created: false };
+    if (raced[0]) return saved(raced[0].ref_code, false);
   }
   return { ok: false, status: 503, error: "unavailable", detail: "Could not save your place. Try again." };
 }

@@ -1,10 +1,10 @@
-# xorrpad pre-orders — S3 (local only)
+# xorrpad pre-orders — S3 / S4 (local only)
 
 SPDX-License-Identifier: MIT · Copyright (c) 2026 Nivesh Gajengi
 
 S2 adds the deposit migration, `/api/pad/preorder`, and a sheet inside the existing model chooser.
 The branch is `xorrpad-preorder`, following S1 on `xorrpad-v3-attest`. Never push or deploy this work.
-S3 adds `/pad/backers` and the `/pad` backers strip. S4 (waitlist welcome emails and signed unsubscribe) remains separate.
+S3 adds `/pad/backers` and the `/pad` backers strip. S4 adds Resend welcome/receipt delivery, durable mail events and signed unsubscribe.
 
 ## Configuration
 
@@ -18,8 +18,10 @@ Variable names only; no production secrets were read or copied:
 | `PREORDER_TREASURY` | Treasury wallet public key; its USDC associated token account must exist and be initialized. |
 | `PREORDER_ALLOW_MAINNET` | Mainnet requires the exact acknowledgement from the brief, together with an explicit mainnet cluster and treasury. |
 | `PREORDER_REFUND_EMAIL` | Required real refund inbox for the admin-free “Request refund” email link. |
-| `RESEND_API_KEY` | Receipt delivery through Resend; missing configuration is recorded as `skipped_setup`. |
-| `EMAIL_FROM` | Verified sender for receipt delivery. Missing sender also records `skipped_setup`. |
+| `RESEND_API_KEY` | Welcome and receipt delivery through Resend; missing configuration is recorded as `skipped_setup`. |
+| `EMAIL_FROM` | Verified Resend sender for welcome and receipt delivery. Missing sender records `skipped_setup`. |
+| `EMAIL_UNSUBSCRIBE_SECRET` | Stable private signing secret of at least 32 characters; missing/short values record `skipped_setup`. Keep it stable so existing links keep working. |
+| `WAITLIST_IP_SALT` | Existing private salt for waitlist rate-limit IP hashing. |
 
 RPC endpoints are fixed by cluster. Devnet mint: `3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ` (six decimals).
 The Solana Pay URL contains the treasury **wallet**, mint, exact amount and unique reference; wallets derive the treasury ATA.
@@ -48,17 +50,16 @@ This session stopped its local preview servers and Postgres after verification; 
 
 `build:local` and `dev:local` copy only source, public assets and named build configuration into
 `landing/.next-local/app/`, then execute Next there. They exclude every environment file and remove any
-inherited `DATABASE_URL`; a validated local test URL replaces it for the existing waitlist route.
+inherited `DATABASE_URL`; the validated local test URL serves preorders, mail and the waitlist through the same guarded Postgres pool.
 The normal `npm run build` script remains available for deployment. Do not run it directly in the original
 landing directory while `.env.local` is present: Next automatically reads that file.
 The isolated build uses webpack for the pinned legacy web3 wallet adapter and Solana Pay APIs.
-The existing Neon HTTP waitlist adapter cannot serve local Postgres; its failure remains honest (no invented count).
-Waitlist production logic was left for S4.
+S4 replaces the waitlist-only Neon HTTP adapter with the shared Postgres adapter, preserving ranking and referrals. All local reads/writes use `TEST_DATABASE_URL`.
 
 Production migration for **Nick to review and run himself**: `landing/migrations/001_preorders.sql`.
 It creates `preorders`, a unique signature constraint, unique references and checkout idempotency keys,
 plus the receipt-only `email_events` outbox. It is transactional and safe to apply again.
-S4 must extend the receipt-only outbox for waitlist events and unsubscribe handling.
+`landing/migrations/002_email.sql` extends that outbox for waitlist welcomes, source, provider ID, immutable retry payload and attempt timestamp, and creates the unsubscribe table. It safely reuses an existing waitlist table or creates it locally. Apply 001 then 002; both are transactional and repeatable.
 There is no automatic migration at application startup or build time.
 
 ## Payment behavior
@@ -121,11 +122,11 @@ event is `skipped_setup` and the response reports the missing setup. Do not coun
 
 1. Complete the funded devnet wallet/QR flow and paid replay/receipt tests above.
 2. Approve DIY/founder pricing, refund terms and refund inbox; confirm deposit balance is accounted for toward the final price.
-3. Complete S3 and S4, including reverified backers, signed unsubscribe and mail event tests.
+3. Review S3/S4 locally; verify a populated backers wall and receipt once a real devnet deposit is available. Configure mail and verify an actual welcome/receipt plus unsubscribe using an inbox you control.
 4. Review dependency advisories before any public payment launch. The current landing dependency audit reports
    advisories in the existing Next/sharp stack and the legacy Solana Pay/web3/SPL stack. No unrelated dependency
    migration or automatic audit fix was applied in S2.
-5. Review/apply the SQL migration yourself to the intended production database; configure the verified Resend sender.
+5. Review/apply both SQL migrations yourself to the intended production database; configure the verified Resend sender.
 6. Choose and initialize the intended treasury ATA; verify mint/network and a small real test yourself.
 7. Mainnet stays closed until all three brief gates are set deliberately. This S2 session made **no mainnet RPC calls**.
 8. Review locally. This task authorizes no push, Vercel change or deployment.
@@ -144,3 +145,50 @@ empty totals and mainnet gating. Positive populated-wall integration remains blo
 above; no paid rows or backers were invented for testing.
 
 S3 production build, TypeScript and changed-file ESLint pass. Screenshots were inspected at 1440px and 375px with no horizontal overflow: `docs/pad/screenshots/preorder-s3-{strip,wall}-{1440,375}.png`.
+
+## S4 — Resend and unsubscribe
+
+Joins from `/pad` pass `source: "pad"`; other joins default to `landing`. The original source is retained on
+repeat joins. A welcome includes the saved place and referral link. A paid receipt includes model, build,
+amount, network-labelled signature link and the refundable-before-shipping note with the refund email link.
+Pending payments cannot send receipts. No historical transfer was converted into a paid order for mail testing.
+
+All mail uses one `email_events` row per logical send (unique waitlist welcome or preorder receipt).
+States are `pending`, `sending`, `sent`, `failed`, `skipped_setup`, and `unsubscribed`. A `sent` result means
+Resend accepted the request with a provider ID; it does not claim inbox delivery. Missing `RESEND_API_KEY`
+makes no provider request, records `skipped_setup`, and returns exactly `email: "Setup required: RESEND_API_KEY"`
+on a join or paid confirmation. Missing sender/signing secret is also reported honestly. The UI preserves the
+saved place/payment and explains mail setup, failure or unsubscribe rather than claiming delivery.
+
+The sender uses [Resend's send API](https://resend.com/docs/api-reference/emails/send-email), a stored payload,
+a stable idempotency key and database transaction locks. Its delivery claim and first-attempt timestamp are
+committed before the provider call; active claims have a five-minute lease. Retries keep the same payload.
+[Resend retains idempotency keys for 24 hours](https://resend.com/docs/dashboard/emails/idempotency-keys), so
+ambiguous attempts older than 23 hours stay `failed` for Nick to reconcile with Resend manually, avoiding an
+automatic duplicate after that window. Retrying a join or paid confirmation retries setup-skipped/failed mail
+within that window; there is no background queue or bulk send to the existing list.
+
+Each message contains `https://xorr.finance/api/email/unsubscribe?token=…` with a versioned, email-scoped HMAC-SHA256
+signature and timing-safe verification. GET supports the requested direct unsubscribe link; POST supports
+one-click mail headers. Invalid/tampered tokens return 400; DB/setup errors return 503. Responses disable caching
+and referrer propagation. Tokens intentionally do not expire; rotating the signing secret invalidates old links.
+Keep the secret stable, including during key rotation at Resend. Unsubscribe persists an address-level suppression
+and stops **all** future mail, including receipts and updates, across future orders and repeat joins. It never
+resubscribes on another signup. It does not cancel a pre-order or remove its public backer entry.
+The sender and unsubscribe serialize with the same transaction lock; a message already accepted by Resend
+cannot be recalled, but no new send starts after unsubscribe completes.
+
+S4 verification uses only loopback Postgres and live devnet for chain tests. The transport-failure test deliberately
+throws before any email is accepted and never marks a send successful. Actual Resend welcome/receipt delivery is
+**BLOCKED** until Nick supplies `RESEND_API_KEY`, a verified `EMAIL_FROM`, stable `EMAIL_UNSUBSCRIBE_SECRET`,
+and an inbox he controls. The live paid receipt and populated-wall check also need the funded devnet accounts
+listed above. No `.env.local` was read, no production migration/write occurred, and no mainnet RPC was called.
+
+Final S3/S4 evidence (2026-11-12): 18 tests pass, including live historical devnet validation and local Postgres
+order/wall/mail integration; the isolated production build (same `next build` with webpack), TypeScript and
+changed-file ESLint pass. At 1440px and 375px the browser submitted the real `/pad` form: HTTP 201,
+`email: "Setup required: RESEND_API_KEY"`, database `source = pad`, event `skipped_setup`, no provider ID,
+no browser exceptions or horizontal overflow. Screenshots inspected:
+`docs/pad/screenshots/preorder-s4-{models,sheet,email}-{1440,375}.png`, plus the S3 strip/wall evidence above.
+The pictured waitlist places are local test signups; their rows/events were deleted after capture. No deposit
+was made and there are still zero paid backers. Preview servers and local Postgres were stopped after QA.

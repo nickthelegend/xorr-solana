@@ -8,8 +8,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cod
   try {
     const place = await placeOf(code);
     return place ? Response.json(place, { headers: { "cache-control": "no-store" } }) : missing;
-  } catch (e) {
-    console.error("[waitlist] place failed", e);
+  } catch {
+    console.error("[waitlist] place failed");
     return Response.json({ error: "unavailable", detail: "The line is not answering right now." }, { status: 503 });
   }
 }

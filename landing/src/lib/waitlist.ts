@@ -1,6 +1,6 @@
 
 /** Your place in line, as the executor answers it. */
-export type Place = { refCode: string; referrals: number; position: number; total: number; already?: boolean };
+export type Place = { refCode: string; referrals: number; position: number; total: number; already?: boolean; email?: string };
 
 /** Places one referral moves you up. The server ranks with this same constant (src/lib/waitlist-server.ts). */
 export const BOOST_PER_REFERRAL = 10;
@@ -20,11 +20,11 @@ export async function waitlistTotal(): Promise<number> {
   return total;
 }
 
-export async function joinWaitlist(email: string, ref: string | null, website: string): Promise<Place> {
+export async function joinWaitlist(email: string, ref: string | null, website: string, source: "pad" | "landing" = "landing"): Promise<Place> {
   const res = await fetch("/api/waitlist", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email, ref: ref ?? undefined, website }),
+    body: JSON.stringify({ email, ref: ref ?? undefined, website, source }),
   });
   const place = await read<Place>(res);
   remember(place.refCode);
