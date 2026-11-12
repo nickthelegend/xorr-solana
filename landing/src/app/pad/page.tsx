@@ -9,11 +9,13 @@ import { BlurWords } from "@/components/motion/BlurWords";
 import { LoopVideo } from "@/components/motion/LoopVideo";
 import { Reveal } from "@/components/motion/Reveal";
 import { PadModels } from "@/components/pad/PadModels";
+import { PadBackers } from "@/components/pad/PadBackers";
 import { Footer } from "@/components/sections/Footer";
 import { Arc, Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { Waitlist } from "@/components/waitlist/Waitlist";
 
+export const dynamic = 'force-dynamic';
 export const metadata: Metadata = {
   title: "xorrpad — Every market. One desk. Fourteen keys.",
   description: "The physical side of xorr. Fourteen keys, a voice agent and your rules, connected through XOR Desktop. Coming soon.",
@@ -144,6 +146,7 @@ export default function Pad() {
         </section>
 
         <PadModels />
+        <PadBackers strip />
 
         <section aria-label="Venues" className="relative mx-auto max-w-6xl px-6 pb-20 text-center sm:px-8 md:pb-28">
           <Reveal>

@@ -1,10 +1,10 @@
-# xorrpad pre-orders — S2 (local only)
+# xorrpad pre-orders — S3 (local only)
 
 SPDX-License-Identifier: MIT · Copyright (c) 2026 Nivesh Gajengi
 
 S2 adds the deposit migration, `/api/pad/preorder`, and a sheet inside the existing model chooser.
 The branch is `xorrpad-preorder`, following S1 on `xorrpad-v3-attest`. Never push or deploy this work.
-S3 (verified backers wall) and S4 (waitlist welcome emails and signed unsubscribe) remain separate sections.
+S3 adds `/pad/backers` and the `/pad` backers strip. S4 (waitlist welcome emails and signed unsubscribe) remains separate.
 
 ## Configuration
 
@@ -129,3 +129,18 @@ event is `skipped_setup` and the response reports the missing setup. Do not coun
 6. Choose and initialize the intended treasury ATA; verify mint/network and a small real test yourself.
 7. Mainnet stays closed until all three brief gates are set deliberately. This S2 session made **no mainnet RPC calls**.
 8. Review locally. This task authorizes no push, Vercel change or deployment.
+
+## S3 — chain-verified backers
+
+Both views use one server query: only `paid` orders on the selected cluster, newest first. Each signature
+is fetched and revalidated with Solana Pay plus the exact-transfer guard, including reference, recipient, mint,
+amount and payer wallet. Invalid payments are omitted; totals use only the verified rows. Public names require
+opt-in; other backers show shortened wallets. Emails and private names never leave the server.
+No result is cached. A DB/RPC failure shows verification unavailable rather than a false zero. A successful
+empty query shows “Be the first backer” and zero devnet test-token deposits. Mainnet reads honor the existing gates.
+
+S3 verification: ten tests pass with local Postgres and live devnet RPC, including exclusion of pending orders,
+empty totals and mainnet gating. Positive populated-wall integration remains blocked on the real funded checkout
+above; no paid rows or backers were invented for testing.
+
+S3 production build, TypeScript and changed-file ESLint pass. Screenshots were inspected at 1440px and 375px with no horizontal overflow: `docs/pad/screenshots/preorder-s3-{strip,wall}-{1440,375}.png`.

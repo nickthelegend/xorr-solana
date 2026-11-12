@@ -13,6 +13,7 @@ import { closePreorderDb, preorderDb } from '../src/lib/preorder-db';
 import { createPreorder, readPreorder, confirmPreorder } from '../src/lib/preorder-server';
 import { assertExactTransfer, preorderConnection } from '../src/lib/preorder-chain';
 import { GET, POST } from '../src/app/api/pad/preorder/route';
+import { verifiedBackers, signatureLink } from '../src/lib/pad-backers';
 
 const ids: string[] = [];
 const env = { ...process.env };
@@ -130,6 +131,18 @@ test('real devnet lookup leaves an unpaid order pending on repeated confirmation
   }
   const events = await preorderDb().query('SELECT * FROM email_events WHERE preorder_id = $1', [order.id]);
   assert.equal(events.rowCount, 0); // No receipt before a real verified payment.
+});
+
+test('backers query excludes local pending orders and reports honest zero totals', async () => {
+  const order = await createPreorder(input()); ids.push(order.id);
+  const wall = await verifiedBackers();
+  assert.equal(wall.count, 0); assert.equal(wall.deposits, '0.00'); assert.deepEqual(wall.backers, []);
+  assert.equal(wall.cluster, 'devnet');
+  assert.match(signatureLink(fixture.signature, 'devnet'), /cluster=devnet$/);
+  assert.match(signatureLink(fixture.signature, 'mainnet'), /cluster=mainnet-beta$/);
+  process.env.PREORDER_CLUSTER = 'mainnet';
+  try { await assert.rejects(verifiedBackers(), /Setup required/); }
+  finally { process.env.PREORDER_CLUSTER = 'devnet'; }
 });
 
 test('real historical mUSDC transfer validates; exactness and reference mismatch reject it as a preorder', { timeout: 120000 }, async () => {
