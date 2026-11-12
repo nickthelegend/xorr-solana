@@ -6,6 +6,7 @@ import { XorrMark } from "@/components/XorrMark";
 import { KeysStack } from "@/components/bento/KeysStack";
 import { RuleTracks } from "@/components/bento/RuleTracks";
 import { BlurWords } from "@/components/motion/BlurWords";
+import { LoopVideo } from "@/components/motion/LoopVideo";
 import { Reveal } from "@/components/motion/Reveal";
 import { Footer } from "@/components/sections/Footer";
 import { Arc, Card } from "@/components/ui/Card";
@@ -24,6 +25,7 @@ export const metadata: Metadata = {
 };
 
 const VENUES = ["Jupiter", "Meteora", "Phoenix", "Jupiter Perps", "pm-AMM"];
+const PARTS = ["tray", "plate", "14 caps", "display pod", "knob"];
 
 /** An extension of the home page's visual world; no global styles or shared motion change. */
 export default function Pad() {
@@ -46,7 +48,7 @@ export default function Pad() {
             </a>
           </header>
 
-          <div className="relative z-10 mx-auto flex max-w-6xl flex-col items-center pt-20 text-center md:pt-24">
+          <div className="relative z-10 mx-auto flex max-w-6xl flex-col items-center pt-20 text-center mix-blend-lighten md:pt-24">
             <Reveal immediate delay={0.15}>
               <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 py-1 pl-1 pr-3.5 text-[12.5px] text-ink/90 backdrop-blur-md">
                 <span className="rounded-full bg-lime px-2 py-0.5 text-[11px] font-semibold text-[#0c1003]">New</span>
@@ -61,18 +63,17 @@ export default function Pad() {
                 The physical side of xorr. A pad, your desktop and your phone wallet, built to work together.
               </p>
             </Reveal>
-            <Reveal immediate delay={1} className="relative mt-12 w-[min(100%,288px)]">
+            <Reveal immediate delay={1} className="relative mt-12 w-[calc(100%+48px)] max-w-[1080px] mix-blend-lighten">
               <div aria-hidden className="pointer-events-none absolute -inset-16 -z-10 rounded-full bg-[radial-gradient(circle,rgba(47,91,255,0.5),rgba(183,166,255,0.12)_45%,transparent_70%)] blur-2xl" />
-              <div className="animate-float-slow motion-reduce:animate-none">
-                <Image
-                  src="/media/pad.webp"
-                  alt="The real xorrpad prototype with fourteen keys and a display, in its blue enclosure on a workbench"
-                  width={288}
-                  height={340}
-                  sizes="(max-width: 375px) calc(100vw - 66px), 288px"
-                  loading="eager"
-                  unoptimized
-                  className="h-auto w-full rounded-[28px] border border-white/10"
+              <div role="img" aria-label="Turntable of the real xorrpad CAD model, with fourteen keys, display pod and knob" className="aspect-[38/27] animate-float-slow mix-blend-lighten motion-reduce:animate-none">
+                <LoopVideo
+                  poster="/media/pad/turntable-poster.webp"
+                  preload="auto"
+                  className="h-full w-full object-contain"
+                  sources={[
+                    { src: "/media/pad/turntable.webm", type: "video/webm" },
+                    { src: "/media/pad/turntable.mp4", type: "video/mp4" },
+                  ]}
                 />
               </div>
             </Reveal>
@@ -117,6 +118,30 @@ export default function Pad() {
           </div>
         </section>
 
+        <section aria-labelledby="pad-parts" className="relative mx-auto max-w-6xl px-6 pb-20 text-center sm:px-8 md:pb-28">
+          <h2 id="pad-parts" className="text-balance font-display text-[clamp(2.25rem,4.4vw,3.75rem)] font-medium leading-[1.04] tracking-[-0.04em]">
+            <BlurWords text="Made of parts" />
+          </h2>
+          <Reveal className="mx-auto mt-8 max-w-4xl">
+            <figure>
+              <Image
+                src="/media/pad/exploded.webp"
+                alt="Exploded view of the xorrpad CAD assembly: blue tray beneath the switch plate, fourteen keycaps above, with the display pod and knob behind"
+                width={1600}
+                height={1200}
+                sizes="(min-width: 1024px) 896px, calc(100vw - 66px)"
+                unoptimized
+                className="h-auto w-full"
+              />
+              <figcaption>
+                <ul className="mt-6 flex flex-wrap items-center justify-center gap-x-7 gap-y-3 font-mono text-[12px] text-ink/60 sm:gap-x-10 sm:text-[13px]">
+                  {PARTS.map((part) => <li key={part}>{part}</li>)}
+                </ul>
+              </figcaption>
+            </figure>
+          </Reveal>
+        </section>
+
         <section aria-label="Venues" className="relative mx-auto max-w-6xl px-6 pb-20 text-center sm:px-8 md:pb-28">
           <Reveal>
             <p className="text-[13px] text-ink/45">Across Solana</p>
@@ -142,6 +167,24 @@ export default function Pad() {
                 Download XOR Desktop
               </button>
               <p id="desktop-coming-soon" className="text-[13px] text-ink/55">Coming with the first pads</p>
+            </div>
+          </Card>
+        </section>
+
+        <section aria-labelledby="pad-workbench" className="relative mx-auto mt-12 max-w-6xl px-3 sm:px-8">
+          <Card className="flex flex-col items-start gap-6 p-7 sm:flex-row sm:items-center md:p-9">
+            <Image
+              src="/media/pad.webp"
+              alt="The real xorrpad prototype with fourteen keys and a display, in its blue enclosure on a workbench"
+              width={288}
+              height={340}
+              sizes="144px"
+              unoptimized
+              className="h-auto w-36 shrink-0 rounded-2xl border border-white/10"
+            />
+            <div>
+              <h2 id="pad-workbench" className="font-display text-[clamp(1.4rem,2.2vw,1.75rem)] font-medium tracking-[-0.025em]">Built on the workbench</h2>
+              <p className="mt-2 text-[15px] leading-relaxed text-ink/55">The real pad, on the workbench.</p>
             </div>
           </Card>
         </section>
