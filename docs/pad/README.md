@@ -140,3 +140,43 @@ temporary entry, and stops its own Metro process by PID. Screenshots:
   resolution failure before Metro was rebuilt. The rebuilt full app still needs
   Privy configuration, so the component captures above verify the UI extension;
   they do not claim a signed-in full-app or hardware test.
+
+## Firmware v3 device attestation
+
+The existing Pad card now shows **Genuine xorrpad #serial** only after the phone
+itself verifies both signatures: a factory-signed device certificate and that
+device's signature over a fresh phone challenge. All other states show red
+**Unverified device**, including legacy firmware, missing certificates, failed
+proofs, timeouts and disconnects. The card uses the existing app typography,
+spacing and color tokens; the Pad screen has not been restyled.
+
+The phone generates 32-byte challenges through Expo Crypto. The BLE-only
+`attest_request` contains `clientKey`, `challenge` and the current pad hello's
+`nonce`. The pad binds its actual serial/X25519 public key and that nonce into
+the same six-field attestation transcript used by the desk. The phone consumes
+one proof within 10 seconds, and resets its state at every BLE connection change.
+Neither challenge requests nor responses cross the desk relay; a desk-provided
+“verified” boolean is never accepted. The relay now also forwards bounded v2
+pairing/encrypted envelopes while preserving v1 compatibility and original bytes.
+
+`src/pad/attestationRoots.ts` contains reviewed **public** release trust anchors.
+It intentionally ships empty, matching the firmware/desk trust stores: no test
+key or user-supplied key makes a device genuine. Manufacturing must pin the same
+factory public root in all three releases and provision the signed certificate
+on the device. No production root or private key was generated, opened or
+installed for this implementation. No changes enable secure boot or flash
+fuses. Identity attestation proves possession of a certified key; it does not
+measure firmware or defeat copied software-held keys.
+
+Ed25519 runs locally with pinned `@noble/curves` 1.9.1 in strict RFC8032 mode,
+including Hermes where Ed25519 WebCrypto may be unavailable. Test signing keys
+are generated only in process RAM. `EXPO_NO_DOTENV=1 npm run test:pad -- --exclude
+'**/*.live.test.ts'` verifies the new proof/replay/schema/framing paths and all
+existing Pad tests without opening `.env`. Cross-repository tests also compare
+against `xorrpad-fw2/firmware/build/attestation-driver` when built; otherwise those
+four checks are explicitly skipped. Run the firmware native suite first.
+
+Physical BLE, OS passkey prompts, factory NVS persistence and a genuinely
+provisioned phone/device connection still require hardware. The firmware remains
+**compiled, not yet flashed**. No new transaction is signed or broadcast by the
+phone attestation tests.

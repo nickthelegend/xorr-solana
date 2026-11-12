@@ -4,7 +4,7 @@ export const SERVICE = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
 export const RX = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E';
 export const TX = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E';
 export const MAX_LINE = 4096;
-export type PadRecord = { v: 1; type: string; [field: string]: unknown };
+export type PadRecord = { v: 1 | 2; type: string; [field: string]: unknown };
 const text = (v: unknown) => typeof v === 'string' && v.length > 0;
 const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 const integer = (v: unknown) => finite(v) && Number.isInteger(v) && Number(v) >= 0;
@@ -14,6 +14,20 @@ const bool = (v: unknown) => typeof v === 'boolean';
 export function validateRecord(value: unknown): PadRecord {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid pad record');
   const m = value as PadRecord;
+  const h = (s: unknown, n = 32) => typeof s === 'string' && new RegExp(`^[0-9a-f]{${n*2}}$`).test(s);
+  if(m.v === 2) {
+    let valid = false;
+    switch(m.type) {
+      case 'hello': valid = typeof m.device === 'string' && /^[\w-]{1,64}$/.test(m.device) && typeof m.fw === 'string' && /^[23]\.\d+\.\d+$/.test(m.fw) && h(m.pk) && h(m.xpk) && h(m.nonce); break;
+      case 'pair': valid = h(m.deskpk) && h(m.challenge) && h(m.nonce); break;
+      case 'pair_proof': valid = h(m.signature,64); break;
+      case 'attest_request': valid = h(m.clientKey) && h(m.challenge) && h(m.nonce); break;
+      case 'attest_response': valid = m.certificate === undefined || (!!m.certificate && typeof m.certificate === 'object'); break;
+      case 'encrypted': valid = integer(m.seq) && Number(m.seq)>0 && Number(m.seq)<=0xffffffff && integer(m.ack) && Number(m.ack)<=0xffffffff && typeof m.body === 'string' && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(m.body) && h(m.tag,16); break;
+    }
+    if (!valid) throw new Error('Unsupported or malformed pad v2 record');
+    return m;
+  }
   const valid = m.v === 1 && (() => {
     switch (m.type) {
       case 'hello': return text(m.device) && m.fw === '1.0.0' && Array.isArray(m.caps) && m.caps.every(text);

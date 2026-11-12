@@ -12,6 +12,7 @@ export class PadRelay {
   private heartbeat?: ReturnType<typeof setInterval>;
   constructor(private writeBle: (bytes: Uint8Array) => Promise<void>, private state: (state: string) => void) {}
   fromPad(desk: RelayDesk | undefined, record: PadRecord, bytes: Uint8Array) {
+    if(record.type==='attest_request'||record.type==='attest_response')return;
     if (!desk) { this.close(); this.state('Setup required: connect the desk to relay'); return; }
     if (this.desk !== desk || (record.type === 'hello' && this.device !== record.device)) this.close();
     if (!this.socket) {
@@ -30,11 +31,12 @@ export class PadRelay {
         try {
           if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > 65536) throw new Error();
           for (const line of this.framer.feed(Buffer.from(data, 'utf8'))) {
+            if(line.record.type==='attest_request'||line.record.type==='attest_response')throw new Error('Phone attestation is BLE-only');
             this.lastResponse = Date.now();
             this.state('connected');
             void this.writeBle(line.bytes).catch(() => this.fail('Setup required: reconnect the pad to relay'));
           }
-        } catch { this.fail('Setup required: compatible v1 desk relay'); }
+        } catch { this.fail('Setup required: compatible desk relay'); }
       };
       ws.onerror = () => { if (this.socket === ws) this.fail('Setup required: reachable desk /padlink WebSocket'); };
       ws.onclose = () => { if (this.socket === ws) this.fail('Setup required: relay disconnected; waiting for pad hello'); };

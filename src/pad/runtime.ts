@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import { getRandomBytes } from 'expo-crypto';
+import { PhoneAttestation, unverified, type AttestationHello, type AttestationState } from './attestation';
+import { encodeRecord } from './protocol';
 import { PadDesk } from '../data/padDesk';
 import { signPadRequest } from '../wallet/padRequest';
 import { PadBle, type BleState } from './ble';
@@ -8,19 +11,32 @@ import { noticeFor } from './notificationModel';
 import { postPadNotice, preparePadNotifications } from './notifications';
 import { PadRelay } from './relay';
 
-type State = { link: BleState; desk: string; relay: string; url: string; queue: SignalState; busy?: string; error?: string };
-export const usePadState = create<State>(() => ({ link: { state: 'disconnected' }, desk: 'disconnected', relay: 'disconnected', url: '', queue: emptySignals() }));
+type State = { attestation: AttestationState; link: BleState; desk: string; relay: string; url: string; queue: SignalState; busy?: string; error?: string };
+export const usePadState = create<State>(() => ({ attestation: unverified(), link: { state: 'disconnected' }, desk: 'disconnected', relay: 'disconnected', url: '', queue: emptySignals() }));
 
 class PadRuntime {
   private desk?: PadDesk;
+  private attestor = new PhoneAttestation(() => getRandomBytes(32));
+  private attestTimer?: ReturnType<typeof setTimeout>;
   private generation = 0;
   private running = false;
   private noticed = new Set<string>();
   private relay = new PadRelay(bytes => this.ble.write(bytes), relay => usePadState.setState({ relay }));
   private ble = new PadBle({ state: link => {
+    const previous = usePadState.getState().link;
+    if(link.state !== 'connected' || previous.state !== 'connected'){clearTimeout(this.attestTimer);usePadState.setState({attestation:this.attestor.reset()});}
     usePadState.setState({ link });
     if (link.state !== 'connected') this.relay.close();
-  }, record: (record, bytes) => this.relay.fromPad(this.desk, record, bytes) });
+  }, record: (record, bytes) => {
+    if(record.v===2 && record.type==='attest_response'){clearTimeout(this.attestTimer);usePadState.setState({attestation:this.attestor.finish(record)});return;}
+    if(record.type==='hello'){
+      if(record.v===2){
+        const request=this.attestor.begin(record as unknown as AttestationHello);usePadState.setState({attestation:this.attestor.state});
+        if(request){this.attestTimer=setTimeout(()=>usePadState.setState({attestation:this.attestor.expire()}),10010);void this.ble.write(encodeRecord(request)).catch(()=>usePadState.setState({attestation:this.attestor.reset('Setup required: reconnect the pad to verify')}));}
+      }else usePadState.setState({attestation:this.attestor.reset('Legacy firmware has no factory attestation')});
+    }
+    this.relay.fromPad(this.desk, record, bytes);
+  } });
   private event = (event: unknown) => {
     usePadState.setState(s => ({ queue: reduceSignals(s.queue, event) }));
     for (const signal of Object.values(usePadState.getState().queue.signals)) {
@@ -73,7 +89,7 @@ class PadRuntime {
     try { await clearSettings(); } catch { this.error(new Error('Setup required: unlock SecureStore to forget the desk')); }
   }
   pair = () => this.ble.pair();
-  disconnect = () => this.ble.stop();
+  disconnect = () => {clearTimeout(this.attestTimer);usePadState.setState({attestation:this.attestor.reset()});return this.ble.stop();};
   async answer(id: string, action: 'accept' | 'refuse', refreshed = false) {
     const current = usePadState.getState();
     const signal = current.queue.signals[id];
@@ -109,6 +125,6 @@ class PadRuntime {
     if (value.receipt) this.event({ type: 'receipt', receipt: value.receipt });
   }
   private error(error: unknown) { usePadState.setState({ error: error instanceof Error ? error.message : 'Setup required: reconnect the desk' }); }
-  stop() { this.running = false; this.generation++; this.relay.close(); this.desk?.close(); this.desk = undefined; void this.ble.stop(); }
+  stop() { clearTimeout(this.attestTimer);usePadState.setState({attestation:this.attestor.reset()});this.running = false; this.generation++; this.relay.close(); this.desk?.close(); this.desk = undefined; void this.ble.stop(); }
 }
 export const padRuntime = new PadRuntime();

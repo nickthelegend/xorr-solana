@@ -21,6 +21,8 @@ export default function Pad() {
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: space.s16, paddingTop: space.s16, paddingBottom: space.s30 }}>
       <SheetCard bordered borderRadius={radius.panel} padding={space.s14}>
         <Text variant="rowPrimary">xorrpad</Text>
+        <Text variant="secondary" color={pad.attestation.verified ? colors.up : colors.down} accessibilityLiveRegion="polite">{pad.attestation.label}</Text>
+        <Text variant="secondarySm" color={colors.ink55}>{pad.attestation.reason}</Text>
         <Text variant="secondary" color={colors.ink55}>Link · {pad.link.state}</Text>
         <Text variant="secondary" color={colors.ink55}>Firmware · {pad.link.firmware ?? 'Connect to read'}</Text>
         <Text variant="secondary" color={colors.ink55}>USB powered</Text>
