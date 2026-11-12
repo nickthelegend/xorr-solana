@@ -180,3 +180,11 @@ Physical BLE, OS passkey prompts, factory NVS persistence and a genuinely
 provisioned phone/device connection still require hardware. The firmware remains
 **compiled, not yet flashed**. No new transaction is signed or broadcast by the
 phone attestation tests.
+
+Validation on 2026-11-12: **53/53 Pad tests passed**, including all four native
+cross-checks; `npm run typecheck` passed. `EXPO_NO_DOTENV=1
+EXPO_PUBLIC_XORR_CHAIN=solana-devnet node node_modules/expo/bin/cli export
+--platform android --output-dir /tmp/xorr-pad-v3-attest-android` produced the
+Hermes Android bundle. The existing component-render script captured the real
+unverified and BLE setup screens, with no invented devices, quotes or receipts.
+These are software checks, not a physical BLE or factory provisioning claim.
