@@ -1,15 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { motion, useReducedMotion, useScroll, useTransform } from "motion/react";
 import { useRef } from "react";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { Reveal } from "@/components/motion/Reveal";
 import { Waitlist } from "@/components/waitlist/Waitlist";
-import { Icon } from "@/components/ui/Icon";
 import { XorrMark } from "@/components/XorrMark";
-import { APP_URL, GITHUB_URL } from "@/lib/links";
+import { Footer } from "@/components/sections/Footer";
 
 const SPHERES = [
   { className: "left-[15%] top-[62%] size-4", tone: "bg-[radial-gradient(circle_at_35%_30%,#b9c8ff,#2f5bff_60%,#172a8a)]", delay: "0s" },
@@ -88,24 +86,7 @@ export function Cta() {
         </Reveal>
       </div>
 
-      <footer className="relative z-10 mx-auto mt-36 flex max-w-6xl flex-col items-center gap-5 border-t border-white/[0.08] pt-7 text-[13px] text-ink/45 md:flex-row md:justify-between">
-        <span>© 2026 xorr. All rights reserved.</span>
-        <a
-          href={GITHUB_URL}
-          aria-label="xorr on GitHub"
-          className="grid size-9 place-items-center rounded-full border border-white/10 bg-white/[0.04] text-ink/70 transition-colors duration-200 hover:text-ink"
-        >
-          <Icon name="github" className="size-4" />
-        </a>
-        <nav className="flex items-center gap-6">
-          <Link href="/hiring" className="transition-colors duration-200 hover:text-ink">
-            We&apos;re hiring
-          </Link>
-          <a href={APP_URL} className="transition-colors duration-200 hover:text-ink">
-            Open the app
-          </a>
-        </nav>
-      </footer>
+      <Footer />
     </section>
   );
 }
