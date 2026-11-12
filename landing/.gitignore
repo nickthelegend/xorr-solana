@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local-only preorder development database and isolated Next build
+/.pgdata/
+/.next-local/

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { Reveal } from "@/components/motion/Reveal";
 import { Card } from "@/components/ui/Card";
+import { PreorderCheckout } from "./PreorderCheckout";
 import {
   PAD_BUILDS,
   PAD_BUILD_IDS,
@@ -78,15 +79,10 @@ export function PadModels() {
             <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-ink/70">In the kit: {PAD_BUILDS.diy.contents}</p>
           )}
           <p className="mt-4 text-[14px] tabular-nums text-ink/70">
-            {formatPadUsd(model.deposit)} deposit when pre-orders open.
+            {formatPadUsd(model.deposit)} refundable deposit.
           </p>
         </div>
-        <div className="mt-6 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[14px] text-ink/70">Pre-orders open soon</p>
-          <a href="#waitlist" className="inline-flex h-[52px] items-center justify-center rounded-full bg-lime px-6 text-[14px] font-medium text-[#0c1003] transition-colors duration-200 hover:bg-[#d5fa69] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-lime">
-            Join the waitlist
-          </a>
-        </div>
+        <PreorderCheckout sku={selection.sku} build={selection.build} deposit={model.deposit} />
         <p className="mt-5 max-w-2xl text-[13px] leading-relaxed text-ink/60">{PAD_PRICE_NOTE}</p>
       </Card>
 

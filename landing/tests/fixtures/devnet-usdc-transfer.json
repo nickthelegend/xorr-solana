@@ -1,0 +1,12 @@
+{
+  "description": "Historical devnet transfer; never a xorrpad payment or a backer. Tests fetch the original transaction live from RPC.",
+  "capturedAt": "2026-11-12",
+  "blockTime": 1794387174,
+  "signature": "56NPRk7UtNDmccSuNJGjhRoCB7waPLjQXbw1JsmBnPVTCdJYac9XdeF5Xbe5Duqoe3jT9mEBV2DPPPdyz57EB1nz",
+  "mint": "3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ",
+  "amount": "1000",
+  "recipient": "DR1x5pMWxFC8DtbG2ciTdNkx15pVhVpqfpMpAXsZsgyE",
+  "payer": "6YXxFLc8axoKyoC81rBBAYsCEAiKWaPU6hjgSZ5NXjC9",
+  "recipientAta": "29WL5KeetuHHphYQeZgWzWSBJnnvJxWkQzJqXzzc7MWH",
+  "reference": null
+}

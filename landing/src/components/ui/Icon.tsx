@@ -15,6 +15,7 @@ export type IconName =
   | "play"
   | "copy"
   | "check"
+  | "close"
   | "users"
   | "github";
 
@@ -77,6 +78,7 @@ export const ICON_PATHS: Record<Exclude<IconName, "github">, ReactNode> = {
     </>
   ),
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  close: <path d="m6 6 12 12M18 6 6 18" />,
   users: (
     <>
       <circle cx="9" cy="8" r="3.5" />
