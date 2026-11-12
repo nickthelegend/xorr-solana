@@ -1,0 +1,39 @@
+{
+  "checkedAt": "2026-11-12T11:57:31.139Z",
+  "cluster": "devnet",
+  "commitment": "finalized",
+  "slot": 521455255,
+  "mint": "3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ",
+  "status": "BLOCKED",
+  "reason": "No treasury or buyer supplied; all four documented devnet test accounts remain uninitialized and unfunded.",
+  "accounts": [
+    {
+      "role": "treasury wallet",
+      "address": "AZHQ6w3EcSh8b77KXghr9Ciq4gkFH5Zv1DffAb4TLvXr",
+      "exists": false,
+      "lamports": 0,
+      "needed": "Devnet SOL for ATA initialization"
+    },
+    {
+      "role": "treasury mUSDC ATA",
+      "address": "8bubWB6e5VjfUTD2WUnR1Wy5JW9ZD9fiTdCPvT7ETVuG",
+      "exists": false,
+      "lamports": 0,
+      "needed": "Initialize for the exact devnet mint"
+    },
+    {
+      "role": "buyer wallet",
+      "address": "tnLhTPA4Dxq4XX6srgEeRfby97kLZNyGS42Degy33SP",
+      "exists": false,
+      "lamports": 0,
+      "needed": "Devnet SOL for fees"
+    },
+    {
+      "role": "buyer mUSDC ATA",
+      "address": "8kdf26dFK9DeVYFNHM6uwC7VDQY8eFQ7AxaHpLGZDfjm",
+      "exists": false,
+      "lamports": 0,
+      "needed": "Initialize and fund with at least 30 mUSDC"
+    }
+  ]
+}

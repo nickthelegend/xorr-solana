@@ -120,16 +120,16 @@ event is `skipped_setup` and the response reports the missing setup. Do not coun
 
 ## Nick's go-live checklist
 
-1. Complete the funded devnet wallet/QR flow and paid replay/receipt tests above.
-2. Approve DIY/founder pricing, refund terms and refund inbox; confirm deposit balance is accounted for toward the final price.
-3. Review S3/S4 locally; verify a populated backers wall and receipt once a real devnet deposit is available. Configure mail and verify an actual welcome/receipt plus unsubscribe using an inbox you control.
-4. Review dependency advisories before any public payment launch. The current landing dependency audit reports
+- [ ] Complete the funded devnet wallet/QR flow and paid replay/receipt tests above; save the real signature and confirm one paid order, one receipt event and one verified backer.
+- [ ] Approve DIY/founder pricing, refund terms and refund inbox; confirm deposit balance is accounted for toward the final price.
+- [ ] Review S3/S4 locally; verify a populated backers wall and receipt once a real devnet deposit is available. Configure mail and verify an actual welcome/receipt plus unsubscribe using an inbox you control.
+- [ ] Review dependency advisories before any public payment launch. The S2 landing dependency audit reported
    advisories in the existing Next/sharp stack and the legacy Solana Pay/web3/SPL stack. No unrelated dependency
    migration or automatic audit fix was applied in S2.
-5. Review/apply both SQL migrations yourself to the intended production database; configure the verified Resend sender.
-6. Choose and initialize the intended treasury ATA; verify mint/network and a small real test yourself.
-7. Mainnet stays closed until all three brief gates are set deliberately. This S2 session made **no mainnet RPC calls**.
-8. Review locally. This task authorizes no push, Vercel change or deployment.
+- [ ] Review/apply both SQL migrations yourself to the intended production database; configure the verified Resend sender.
+- [ ] Choose and initialize the intended treasury ATA; verify mint/network and a small real test yourself.
+- [ ] Keep mainnet closed until all three brief gates are set deliberately. All preorder verification in this task uses **devnet only**.
+- [ ] Review locally before separately authorizing release. This task authorizes no push, Vercel change or deployment.
 
 ## S3 — chain-verified backers
 
@@ -192,3 +192,42 @@ no browser exceptions or horizontal overflow. Screenshots inspected:
 `docs/pad/screenshots/preorder-s4-{models,sheet,email}-{1440,375}.png`, plus the S3 strip/wall evidence above.
 The pictured waitlist places are local test signups; their rows/events were deleted after capture. No deposit
 was made and there are still zero paid backers. Preview servers and local Postgres were stopped after QA.
+
+## S4 done-means acceptance rerun — 2026-11-12
+
+Verified the existing S1–S4 implementation at `566a7af` on local `xorrpad-preorder`, descended from
+`xorrpad-v3-attest`. This acceptance pass changes only QA tooling and evidence; site components and styling are unchanged.
+
+- **PASS:** complete `npm test` run: 18 passed, zero failed/skipped, using local Postgres 16.15 via
+  `TEST_DATABASE_URL`. This includes the live historical devnet `validateTransfer` fixture, unpaid-reference
+  lookup, order creation/idempotency, verified-backers query, email `skipped_setup`, signed unsubscribe and mainnet gates.
+- **PASS:** `npm run build:local`, followed by the literal `npm run build -- --webpack` in its allowlisted
+  `landing/.next-local/app/` copy with inherited `DATABASE_URL` removed and only the loopback test URL supplied.
+  Both production builds pass, including TypeScript. No environment files were copied or loaded.
+- **PASS:** real local production-preview screenshots at viewport widths **1440** and **375**:
+  `screenshots/preorder-s4-final-{models,sheet,sheet-bottom,strip,wall}-{1440,375}.png`.
+  Every image was opened and visually inspected. Document width equals viewport width; the sheet has no horizontal
+  overflow and its bottom content remains reachable by vertical scrolling. No browser exceptions occurred.
+  All four model/build choices and Escape dismissal were exercised. Measurements are in
+  [the browser QA report](screenshots/preorder-s4-final-qa.json).
+- **BLOCKED — live devnet paid preorder:** no configured treasury/funded buyer is available. A fresh finalized
+  devnet query at **2026-11-12 11:57:31 UTC**, slot **521455255**, returned `null` for all four exact accounts
+  in the funding table above. ATAs were independently re-derived from the treasury/buyer and devnet mint.
+  [Account evidence](preorder-devnet-accounts.json) records their addresses, existence and funding needs.
+  Fund/initialize those accounts before the live payment, paid replay, receipt and populated-wall checks.
+- **BLOCKED — actual mail delivery:** the permitted environment has no Resend key, verified sender or unsubscribe
+  secret. The setup-skipped and failure paths pass; an accepted welcome/paid receipt still needs the configuration
+  and controlled inbox described above. No successful email delivery is claimed.
+
+To repeat the screenshots, start the isolated preview with the local database, `PREORDER_CLUSTER=devnet`,
+the documented **test treasury** and a local test refund address, then run from the repository root:
+
+```sh
+node tools/pad-preorder-qa.mjs http://127.0.0.1:4319
+```
+
+The QA tool refuses non-loopback previews and non-devnet checkout configuration. It does not submit checkout forms,
+sign payments, send emails or create backers. No new orders or waitlist rows were created by this capture pass.
+The historical transfer remains a validation fixture only. No `.env.local` was read, no production database was
+accessed, and no mainnet RPC, push, deployment or Vercel action occurred. Local preview and Postgres were stopped
+after the rerun. The unchecked go-live items above remain Nick's release gates.

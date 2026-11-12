@@ -1,0 +1,87 @@
+{
+  "checkedAt": "2026-11-12T12:01:04.349Z",
+  "origin": "http://127.0.0.1:4319",
+  "captures": [
+    {
+      "file": "preorder-s4-final-models-1440.png",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "clientWidth": 1440,
+      "dialogWidth": null,
+      "dialogScrollWidth": null
+    },
+    {
+      "file": "preorder-s4-final-sheet-1440.png",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "clientWidth": 1440,
+      "dialogWidth": 538,
+      "dialogScrollWidth": 538
+    },
+    {
+      "file": "preorder-s4-final-sheet-bottom-1440.png",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "clientWidth": 1440,
+      "dialogWidth": 538,
+      "dialogScrollWidth": 538
+    },
+    {
+      "file": "preorder-s4-final-strip-1440.png",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "clientWidth": 1440,
+      "dialogWidth": null,
+      "dialogScrollWidth": null
+    },
+    {
+      "file": "preorder-s4-final-wall-1440.png",
+      "viewport": 1440,
+      "documentWidth": 1440,
+      "clientWidth": 1440,
+      "dialogWidth": null,
+      "dialogScrollWidth": null
+    },
+    {
+      "file": "preorder-s4-final-models-375.png",
+      "viewport": 375,
+      "documentWidth": 375,
+      "clientWidth": 375,
+      "dialogWidth": null,
+      "dialogScrollWidth": null
+    },
+    {
+      "file": "preorder-s4-final-sheet-375.png",
+      "viewport": 375,
+      "documentWidth": 375,
+      "clientWidth": 375,
+      "dialogWidth": 349,
+      "dialogScrollWidth": 349
+    },
+    {
+      "file": "preorder-s4-final-sheet-bottom-375.png",
+      "viewport": 375,
+      "documentWidth": 375,
+      "clientWidth": 375,
+      "dialogWidth": 349,
+      "dialogScrollWidth": 349
+    },
+    {
+      "file": "preorder-s4-final-strip-375.png",
+      "viewport": 375,
+      "documentWidth": 375,
+      "clientWidth": 375,
+      "dialogWidth": null,
+      "dialogScrollWidth": null
+    },
+    {
+      "file": "preorder-s4-final-wall-375.png",
+      "viewport": 375,
+      "documentWidth": 375,
+      "clientWidth": 375,
+      "dialogWidth": null,
+      "dialogScrollWidth": null
+    }
+  ],
+  "pageErrors": []
+}
