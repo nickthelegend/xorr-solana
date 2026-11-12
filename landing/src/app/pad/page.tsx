@@ -8,6 +8,7 @@ import { RuleTracks } from "@/components/bento/RuleTracks";
 import { BlurWords } from "@/components/motion/BlurWords";
 import { LoopVideo } from "@/components/motion/LoopVideo";
 import { Reveal } from "@/components/motion/Reveal";
+import { PadModels } from "@/components/pad/PadModels";
 import { Footer } from "@/components/sections/Footer";
 import { Arc, Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
@@ -141,6 +142,8 @@ export default function Pad() {
             </figure>
           </Reveal>
         </section>
+
+        <PadModels />
 
         <section aria-label="Venues" className="relative mx-auto max-w-6xl px-6 pb-20 text-center sm:px-8 md:pb-28">
           <Reveal>
